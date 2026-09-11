@@ -17,7 +17,7 @@ class Category(models.Model):
     class Meta:
         verbose_name = 'Категорія'
         verbose_name_plural = 'Категорії'
-        ordering = ['display_order', 'name']
+        ordering = ('display_order', 'name')
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         if not self.slug and self.name:
@@ -62,7 +62,7 @@ class Dish(models.Model):
     class Meta:
         verbose_name = 'Страва'
         verbose_name_plural = 'Страви'
-        ordering = ['title']
+        ordering = ('title',)
 
     def clean(self) -> None:
         super().clean()
@@ -100,7 +100,7 @@ class DishOption(models.Model):
     class Meta:
         verbose_name = 'Опція страви'
         verbose_name_plural = 'Опції страв'
-        ordering = ['dish', 'price_delta', 'name']
+        ordering = ('dish', 'price_delta', 'name')
 
     def clean(self) -> None:
         super().clean()
