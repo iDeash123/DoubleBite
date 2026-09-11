@@ -3,7 +3,7 @@
     <div class="bg-fv-offwhite aspect-square p-4 flex items-center justify-center overflow-hidden relative mb-4">
       {% if dish.image %}
         <img
-          src="{{ dish.image }}"
+          src="{% if dish.image.url %}{{ dish.image.url }}{% else %}{{ dish.image }}{% endif %}"
           alt="{{ dish.title }}"
           loading="lazy"
           class="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-500"
@@ -76,7 +76,7 @@
           weight: '{{ dish.weight_grams }}',
           calories: '{{ dish.calories }}',
           allergens: '{{ dish.allergens|escapejs }}',
-          image: '{{ dish.image|escapejs }}',
+          image: '{% if dish.image.url %}{{ dish.image.url|escapejs }}{% else %}{{ dish.image|escapejs }}{% endif %}',
           category: '{{ dish.category.name|escapejs }}',
           detailUrl: '{% url 'menu:dish_detail' dish.slug %}'
         })"

@@ -35,7 +35,7 @@
               <div class="flex items-center gap-4 flex-1">
                 <div class="w-20 h-20 bg-fv-offwhite border border-fv-noir/10 flex-shrink-0 flex items-center justify-center overflow-hidden">
                   {% if item.dish.image %}
-                    <img src="{{ item.dish.image }}" alt="{{ item.dish.title }}" class="w-full h-full object-contain mix-blend-multiply">
+                    <img src="{% if item.dish.image.url %}{{ item.dish.image.url }}{% else %}{{ item.dish.image }}{% endif %}" alt="{{ item.dish.title }}" class="w-full h-full object-contain mix-blend-multiply">
                   {% else %}
                     <span class="text-[9px] font-mono text-fv-slate uppercase">Double Bite</span>
                   {% endif %}

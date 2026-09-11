@@ -1,8 +1,8 @@
+from accounts.views import HomeView
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
-
-from accounts.views import HomeView
-
 from orders import views as orders_views
 
 urlpatterns = [
@@ -18,3 +18,7 @@ urlpatterns = [
     path('cart/remove/<int:item_id>/', orders_views.cart_remove_view, name='cart_remove_direct'),
     path('cart/clear/', orders_views.cart_clear_view, name='cart_clear_direct'),
 ]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+

@@ -48,7 +48,7 @@
       <div class="bg-fv-offwhite aspect-square p-8 sm:p-12 border border-fv-noir/15 flex items-center justify-center relative overflow-hidden group">
         {% if dish.image %}
           <img
-            src="{{ dish.image }}"
+            src="{% if dish.image.url %}{{ dish.image.url }}{% else %}{{ dish.image }}{% endif %}"
             alt="{{ dish.title }}"
             class="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-700"
           >

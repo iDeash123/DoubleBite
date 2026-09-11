@@ -66,7 +66,7 @@
             <div class="pt-3 first:pt-0 flex gap-3 {% if not item.is_available %}opacity-50{% endif %}">
               <div class="w-16 h-16 bg-fv-offwhite p-1.5 border border-fv-noir/10 flex items-center justify-center shrink-0">
                 {% if item.dish.image %}
-                  <img src="{{ item.dish.image }}" alt="{{ item.dish.title }}" class="w-full h-full object-contain mix-blend-multiply">
+                  <img src="{% if item.dish.image.url %}{{ item.dish.image.url }}{% else %}{{ item.dish.image }}{% endif %}" alt="{{ item.dish.title }}" class="w-full h-full object-contain mix-blend-multiply">
                 {% else %}
                   <span class="text-[8px] font-mono text-fv-slate">DB</span>
                 {% endif %}

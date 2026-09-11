@@ -124,7 +124,7 @@
             <div class="flex items-center gap-3">
               <div class="w-12 h-12 bg-fv-offwhite border border-fv-noir/10 flex-shrink-0 flex items-center justify-center overflow-hidden">
                 {% if item.dish.image %}
-                  <img src="{{ item.dish.image }}" alt="{{ item.dish.title }}" class="w-full h-full object-contain mix-blend-multiply">
+                  <img src="{% if item.dish.image.url %}{{ item.dish.image.url }}{% else %}{{ item.dish.image }}{% endif %}" alt="{{ item.dish.title }}" class="w-full h-full object-contain mix-blend-multiply">
                 {% else %}
                   <span class="text-[8px] font-mono text-fv-slate">DB</span>
                 {% endif %}

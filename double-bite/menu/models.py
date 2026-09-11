@@ -1,10 +1,38 @@
 from decimal import Decimal
 from typing import Any
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import SuspiciousFileOperation, ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models.fields.files import ImageFieldFile
 from django.utils.text import slugify
+
+
+class DishImageFieldFile(ImageFieldFile):
+    @property
+    def url(self) -> str:
+        if not self.name:
+            return ''
+        if self.name.startswith(('http://', 'https://', '//', '/', 'data:')):
+            return self.name
+        return super().url
+
+    @property
+    def path(self) -> str:
+        if not self.name or self.name.startswith(('http://', 'https://', '//', '/', 'data:')):
+            return ''
+        try:
+            return super().path
+        except (ValueError, OSError, SuspiciousFileOperation):
+            return ''
+
+
+class DishImageField(models.ImageField):
+    attr_class = DishImageFieldFile
+
+    def deconstruct(self) -> tuple[Any, ...]:
+        name, _path, args, kwargs = super().deconstruct()
+        return name, 'django.db.models.ImageField', args, kwargs
 
 
 class Category(models.Model):
@@ -46,7 +74,13 @@ class Dish(models.Model):
         decimal_places=2,
         validators=[MinValueValidator(Decimal('0.01'))],
     )
-    image = models.URLField('URL зображення', max_length=500, blank=True)
+    image = DishImageField(
+        'Зображення',
+        upload_to='dishes/',
+        max_length=500,
+        blank=True,
+        null=True,
+    )
     weight_grams = models.PositiveIntegerField(
         'Вага (г)',
         validators=[MinValueValidator(1)],
@@ -77,6 +111,15 @@ class Dish(models.Model):
             self.slug = generated or self.title.lower()
         self.clean()
         super().save(*args, **kwargs)
+
+    @property
+    def image_url(self) -> str:
+        if not self.image:
+            return ''
+        try:
+            return self.image.url
+        except (AttributeError, ValueError):
+            return str(self.image)
 
     def __str__(self) -> str:
         return f"{self.title} ({self.price} грн)"
