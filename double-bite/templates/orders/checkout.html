@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+
+{% block title %}Оформлення замовлення — Double Bite™{% endblock %}
+{% block meta_description %}Оформлення доставки ресторанних страв від Double Bite.{% endblock %}
+
+{% block content %}
+<div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-8 sm:py-12">
+  <nav class="flex items-center text-xs font-mono uppercase tracking-wider text-fv-slate mb-6" aria-label="Хлібні крихти">
+    <a href="/" class="hover:text-fv-noir transition-colors">Головна</a>
+    <span class="mx-2 text-fv-slate/40">/</span>
+    <a href="{% url 'orders:cart' %}" class="hover:text-fv-noir transition-colors">Кошик</a>
+    <span class="mx-2 text-fv-slate/40">/</span>
+    <span class="text-fv-noir font-semibold">Оформлення замовлення</span>
+  </nav>
+
+  <div class="border-b border-fv-noir/15 pb-6 mb-8">
+    <span class="font-serif italic text-sm text-fv-slate uppercase tracking-widest block mb-1">
+      Фіналізація замовлення
+    </span>
+    <h1 class="font-sans font-black text-3xl sm:text-4xl text-fv-noir tracking-tight uppercase">
+      Оформлення доставки
+    </h1>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
+    <div class="lg:col-span-7 bg-white p-6 sm:p-8 border border-fv-noir/15">
+      <form method="post" action="{% url 'orders:checkout' %}" class="space-y-6">
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+          <div class="p-4 bg-red-50 border border-red-200 text-red-700 text-xs font-mono">
+            {% for error in form.non_field_errors %}
+              <p>{{ error }}</p>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        <div class="space-y-4">
+          <h2 class="font-mono text-xs uppercase tracking-wider text-fv-slate border-b border-fv-noir/10 pb-2">
+            1. Контактні дані
+          </h2>
+
+          <div>
+            <label for="{{ form.customer_name.id_for_label }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1.5 font-medium">
+              {{ form.customer_name.label }} <span class="text-red-500">*</span>
+            </label>
+            {{ form.customer_name }}
+            {% if form.customer_name.errors %}
+              <p class="text-xs font-mono text-red-600 mt-1">{{ form.customer_name.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div>
+            <label for="{{ form.customer_phone.id_for_label }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1.5 font-medium">
+              {{ form.customer_phone.label }} <span class="text-red-500">*</span>
+            </label>
+            {{ form.customer_phone }}
+            {% if form.customer_phone.errors %}
+              <p class="text-xs font-mono text-red-600 mt-1">{{ form.customer_phone.errors.0 }}</p>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="space-y-4 pt-4 border-t border-fv-noir/10">
+          <h2 class="font-mono text-xs uppercase tracking-wider text-fv-slate border-b border-fv-noir/10 pb-2">
+            2. Адреса доставки (Київ)
+          </h2>
+
+          <div>
+            <label for="{{ form.delivery_address.id_for_label }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1.5 font-medium">
+              {{ form.delivery_address.label }} <span class="text-red-500">*</span>
+            </label>
+            {{ form.delivery_address }}
+            {% if form.delivery_address.errors %}
+              <p class="text-xs font-mono text-red-600 mt-1">{{ form.delivery_address.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div>
+            <label for="{{ form.notes.id_for_label }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1.5 font-medium">
+              {{ form.notes.label }}
+            </label>
+            {{ form.notes }}
+          </div>
+        </div>
+
+        <div class="space-y-4 pt-4 border-t border-fv-noir/10">
+          <h2 class="font-mono text-xs uppercase tracking-wider text-fv-slate border-b border-fv-noir/10 pb-2">
+            3. Спосіб розрахунку
+          </h2>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-xs">
+            {% for radio in form.payment_method %}
+              <label class="flex items-center gap-3 p-4 border border-fv-noir/20 bg-fv-offwhite hover:bg-white cursor-pointer transition-colors">
+                {{ radio.tag }}
+                <span class="font-medium text-fv-noir uppercase tracking-wider">{{ radio.choice_label }}</span>
+              </label>
+            {% endfor %}
+          </div>
+          {% if form.payment_method.errors %}
+            <p class="text-xs font-mono text-red-600 mt-1">{{ form.payment_method.errors.0 }}</p>
+          {% endif %}
+        </div>
+
+        <div class="pt-6 border-t border-fv-noir/15">
+          <button
+            type="submit"
+            class="w-full py-4 px-6 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors font-semibold text-center select-none"
+          >
+            Підтвердити замовлення · {{ total_amount }} грн
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div class="lg:col-span-5 bg-white p-6 sm:p-8 border border-fv-noir/15 space-y-6">
+      <h2 class="font-sans font-bold text-lg text-fv-noir uppercase tracking-tight border-b border-fv-noir/10 pb-3">
+        Склад замовлення ({{ total_quantity }} од.)
+      </h2>
+
+      <div class="divide-y divide-fv-noir/10 max-h-[380px] overflow-y-auto pr-2 space-y-3">
+        {% for item in items %}
+          <div class="pt-3 first:pt-0 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <div class="w-12 h-12 bg-fv-offwhite border border-fv-noir/10 flex-shrink-0 flex items-center justify-center overflow-hidden">
+                {% if item.dish.image %}
+                  <img src="{{ item.dish.image }}" alt="{{ item.dish.title }}" class="w-full h-full object-contain mix-blend-multiply">
+                {% else %}
+                  <span class="text-[8px] font-mono text-fv-slate">DB</span>
+                {% endif %}
+              </div>
+              <div>
+                <div class="font-sans font-bold text-xs text-fv-noir">{{ item.dish.title }}</div>
+                <div class="text-[10px] font-mono text-fv-slate">{{ item.quantity }} × {{ item.unit_price }} грн</div>
+              </div>
+            </div>
+            <div class="font-mono font-bold text-xs text-fv-noir">
+              {{ item.total_price }} грн
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+
+      <div class="border-t border-fv-noir/10 pt-4 space-y-2 text-xs font-mono">
+        <div class="flex justify-between text-fv-slate">
+          <span>Вартість страв:</span>
+          <span class="text-fv-noir font-medium">{{ total_amount }} грн</span>
+        </div>
+        <div class="flex justify-between text-fv-slate">
+          <span>Доставка кур'єром:</span>
+          <span class="text-emerald-700 font-medium uppercase">Безкоштовно</span>
+        </div>
+        <div class="flex justify-between text-fv-slate">
+          <span>Орієнтовний час доставки:</span>
+          <span class="text-fv-noir font-medium">30-45 хв</span>
+        </div>
+        <div class="pt-3 border-t border-fv-noir/10 flex justify-between items-baseline">
+          <span class="text-sm font-bold text-fv-noir uppercase tracking-wider">До сплати:</span>
+          <span class="font-mono font-black text-2xl text-fv-noir">{{ total_amount }} грн</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

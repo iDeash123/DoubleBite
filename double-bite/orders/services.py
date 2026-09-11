@@ -8,7 +8,15 @@ from django.shortcuts import get_object_or_404
 
 from menu.models import Dish, DishOption
 from .exceptions import DishUnavailableError
-from .models import Cart, CartItem
+from .models import (
+    Cart,
+    CartItem,
+    Order,
+    OrderItem,
+    OrderStatus,
+    PaymentMethod,
+    PaymentStatus,
+)
 
 User = get_user_model()
 
@@ -163,3 +171,91 @@ class CartService:
                     guest_item.save(update_fields=['cart', 'updated_at'])
 
             guest_cart.delete()
+
+
+class OrderService:
+    @classmethod
+    def create_order_from_cart(
+        cls,
+        request: HttpRequest,
+        customer_name: str,
+        customer_phone: str,
+        delivery_address: str,
+        payment_method: str = PaymentMethod.CARD,
+        notes: str = '',
+    ) -> Order:
+        import os
+        from django.core.exceptions import ValidationError
+        from .exceptions import CartEmptyError, OrderMinimumAmountError
+        from .models import Order, OrderItem, OrderStatus, PaymentStatus
+
+        cart = CartService.get_cart(request)
+        if not cart or not cart.items.exists():
+            raise CartEmptyError('Кошик порожній. Додайте страви для оформлення замовлення.')
+
+        available_items = [
+            item
+            for item in cart.items.select_related('dish', 'dish__category').all()
+            if item.is_available
+        ]
+
+        if not available_items:
+            raise CartEmptyError('У вашому кошику немає доступних для замовлення страв.')
+
+        total_amount = sum((item.total_price for item in available_items), Decimal('0.00'))
+
+        min_order_amount = Decimal(os.getenv('MIN_ORDER_AMOUNT', '200'))
+        if total_amount < min_order_amount:
+            raise OrderMinimumAmountError(
+                f'Мінімальна сума замовлення становить {min_order_amount} грн. Поточна сума: {total_amount} грн.'
+            )
+
+        name = customer_name.strip()
+        phone = customer_phone.strip()
+        address = delivery_address.strip()
+
+        if not name:
+            raise ValidationError({'customer_name': "Вкажіть ваше ім'я."})
+        if not phone:
+            raise ValidationError({'customer_phone': 'Вкажіть контактний номер телефону.'})
+        if not address:
+            raise ValidationError({'delivery_address': 'Вкажіть повну адресу доставки.'})
+
+        session_key = getattr(request.session, 'session_key', '') or ''
+        user = request.user if request.user.is_authenticated else None
+
+        with transaction.atomic():
+            order = Order.objects.create(
+                user=user,
+                session_key=session_key,
+                customer_name=name,
+                customer_phone=phone,
+                delivery_address=address,
+                payment_method=payment_method,
+                status=OrderStatus.PENDING,
+                payment_status=PaymentStatus.PENDING,
+                total_amount=total_amount,
+                notes=notes.strip(),
+                eta_minutes=30,
+            )
+
+            for item in available_items:
+                OrderItem.objects.create(
+                    order=order,
+                    dish=item.dish,
+                    dish_title=item.dish.title,
+                    price=item.unit_price,
+                    quantity=item.quantity,
+                    selected_options=item.selected_options,
+                )
+
+            # Clear cart items upon successful order placement
+            cart.items.all().delete()
+
+        return order
+
+    @classmethod
+    def cancel_order(cls, order: Order) -> None:
+        from .models import OrderStatus
+
+        order.transition_to(OrderStatus.CANCELLED)
