@@ -1,0 +1,16 @@
+[project]
+name = "double-bite"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "django>=6.0",
+    "mistralai>=1.5.0",
+    "psycopg[binary]>=3.2",
+    "pytest>=8.0",
+    "pytest-django>=4.9",
+    "python-dotenv>=1.0.1",
+    "ruff>=0.16.7",
+    "uvicorn>=0.30.0",
+]
