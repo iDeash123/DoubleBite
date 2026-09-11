@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="uk" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Double Bite™ — Авторська доставка їжі та ресторанний сервіс{% endblock %}</title>
+  <meta name="description" content="{% block meta_description %}Преміальна доставка авторських ресторанних страв Double Bite: архітектурний мінімалізм, натуральні добірні інгредієнти та інтелектуальний AI-консьєрж 24/7.{% endblock %}">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,400;1,500;1,600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'fv-noir': '#262626',
+            'fv-slate': '#8C8C8C',
+            'fv-lightgray': '#E5E5E5',
+            'fv-offwhite': '#F6F6F6',
+            'fv-white': '#FFFFFF',
+            'fv-boucle': '#F4F1EB',
+            'fv-linen': '#E8E3DA',
+            'fv-oak': '#D5C2AB',
+            'fv-stone': '#DDD7CF',
+          },
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+            serif: ['"Cormorant Garamond"', 'Georgia', 'serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
+
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f1f1; }
+    ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 0; }
+    ::-webkit-scrollbar-thumb:hover { background: #8c8c8c; }
+
+    @media print {
+      header, nav, #grid-overlay, #ai-chat-widget, .no-print {
+        display: none !important;
+      }
+      body { background: white !important; color: black !important; }
+    }
+  </style>
+  {% block extra_head %}{% endblock %}
+</head>
+<body class="bg-fv-offwhite text-fv-noir font-sans antialiased selection:bg-fv-noir selection:text-white relative min-h-screen flex flex-col" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+
+  <div id="grid-overlay" class="fixed inset-0 pointer-events-none z-50 overflow-hidden hidden">
+    <div class="max-w-[1440px] mx-auto h-full px-4 sm:px-8 relative border-x border-red-500/20">
+      <div class="grid grid-cols-12 gap-6 h-full">
+        <div class="h-full bg-red-500/[0.04] border-x border-red-500/20 flex flex-col justify-between py-2 items-center text-[10px] font-mono text-red-600 font-semibold select-none"><span>1</span><span class="opacity-40">col</span><span>1</span></div>
+        <div class="h-full bg-red-500/[0.04] border-x border-red-500/20 flex flex-col justify-between py-2 items-center text-[10px] font-mono text-red-600 font-semibold select-none"><span>2</span><span class="opacity-40">col</span><span>2</span></div>
+        <div class="h-full bg-red-500/[0.04] border-x border-red-500/20 flex flex-col justify-between py-2 items-center text-[10px] font-mono text-red-600 font-semibold select-none"><span>3</span><span class="opacity-40">col</span><span>3</span></div>
+        <div class="h-full bg-red-500/[0.04] border-x border-red-500/20 flex flex-col justify-between py-2 items-center text-[10px] font-mono text-red-600 font-semibold select-none"><span>4</span><span class="opacity-40">col</span><span>4</span></div>
+        <div class="h-full bg-red-500/[0.04] border-x border-red-500/20 flex flex-col justify-between py-2 items-center text-[10px] font-mono text-red-600 font-semibold select-none"><span>5</span><span class="opacity-40">col</span><span>5</span></div>
+        <div class="h-full bg-red-500/[0.04] border-x border-red-500/20 flex flex-col justify-between py-2 items-center text-[10px] font-mono text-red-600 font-semibold select-none"><span>6</span><span class="opacity-40">col</span><span>6</span></div>
+        <div class="h-full bg-red-500/[0.04] border-x border-red-500/20 flex flex-col justify-between py-2 items-center text-[10px] font-mono text-red-600 font-semibold select-none"><span>7</span><span class="opacity-40">col</span><span>7</span></div>
+        <div class="h-full bg-red-500/[0.04] border-x border-red-500/20 flex flex-col justify-between py-2 items-center text-[10px] font-mono text-red-600 font-semibold select-none"><span>8</span><span class="opacity-40">col</span><span>8</span></div>
+        <div class="h-full bg-red-500/[0.04] border-x border-red-500/20 flex flex-col justify-between py-2 items-center text-[10px] font-mono text-red-600 font-semibold select-none"><span>9</span><span class="opacity-40">col</span><span>9</span></div>
+        <div class="h-full bg-red-500/[0.04] border-x border-red-500/20 flex flex-col justify-between py-2 items-center text-[10px] font-mono text-red-600 font-semibold select-none"><span>10</span><span class="opacity-40">col</span><span>10</span></div>
+        <div class="h-full bg-red-500/[0.04] border-x border-red-500/20 flex flex-col justify-between py-2 items-center text-[10px] font-mono text-red-600 font-semibold select-none"><span>11</span><span class="opacity-40">col</span><span>11</span></div>
+        <div class="h-full bg-red-500/[0.04] border-x border-red-500/20 flex flex-col justify-between py-2 items-center text-[10px] font-mono text-red-600 font-semibold select-none"><span>12</span><span class="opacity-40">col</span><span>12</span></div>
+      </div>
+      <div class="absolute top-2 right-12 bg-red-600 text-white text-[11px] font-mono px-2 py-0.5 shadow-sm">
+        1440px · 12 COLS · 24px GUTTER
+      </div>
+    </div>
+  </div>
+
+  <header class="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-fv-noir/15 select-none">
+    <div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-3">
+
+      <nav class="hidden md:grid grid-cols-12 border border-fv-noir/20 bg-white text-xs font-mono tracking-wider">
+        <a href="/menu/" class="col-span-2 border-r border-fv-noir/20 py-3.5 px-4 flex items-center justify-center font-medium text-fv-noir hover:bg-fv-offwhite transition-colors">
+          МЕНЮ СТРАВ
+        </a>
+
+        <a href="/#collections" class="col-span-2 border-r border-fv-noir/20 py-3.5 px-4 flex items-center justify-center font-medium text-fv-noir hover:bg-fv-offwhite transition-colors">
+          КОЛЕКЦІЇ
+        </a>
+
+        <a href="/" class="col-span-4 border-r border-fv-noir/20 py-2.5 px-4 flex items-center justify-center hover:bg-fv-offwhite/50 transition-colors">
+          <div class="text-center">
+            <span class="font-bold text-lg font-sans tracking-tight text-fv-noir">double bite<span class="text-[10px] font-mono align-top ml-0.5">™</span></span>
+            <span class="block text-[9px] font-mono uppercase tracking-widest text-fv-slate -mt-0.5">Haute Cuisine · Kyiv</span>
+          </div>
+        </a>
+
+        <a href="/#about" class="col-span-1 border-r border-fv-noir/20 py-3.5 px-2 flex items-center justify-center font-medium text-fv-noir hover:bg-fv-offwhite transition-colors">
+          ПРО НАС
+        </a>
+
+        <a href="/#delivery" class="col-span-1 border-r border-fv-noir/20 py-3.5 px-2 flex items-center justify-center font-medium text-fv-noir hover:bg-fv-offwhite transition-colors">
+          ДОСТАВКА
+        </a>
+
+        <div class="col-span-2 grid grid-cols-3">
+          <button
+            onclick="toggleGrid()"
+            class="border-r border-fv-noir/20 flex items-center justify-center hover:bg-fv-offwhite transition-colors text-fv-noir"
+            title="12-колонкова сітка"
+          >
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          </button>
+
+          {% if user.is_authenticated %}
+            <a
+              href="{% url 'accounts:profile' %}"
+              class="border-r border-fv-noir/20 flex items-center justify-center hover:bg-fv-offwhite transition-colors text-fv-noir relative"
+              title="Особистий кабінет"
+            >
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+              </svg>
+              <span class="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+            </a>
+          {% else %}
+            <a
+              href="{% url 'accounts:login' %}"
+              class="border-r border-fv-noir/20 flex items-center justify-center hover:bg-fv-offwhite transition-colors text-fv-noir"
+              title="Увійти"
+            >
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                <polyline points="10 17 15 12 10 7"></polyline>
+                <line x1="15" y1="12" x2="3" y2="12"></line>
+              </svg>
+            </a>
+          {% endif %}
+
+          <a
+            href="/orders/cart/"
+            class="flex items-center justify-center hover:bg-fv-offwhite transition-colors text-fv-noir relative gap-1"
+            title="Кошик"
+          >
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <path d="M16 10a4 4 0 0 1-8 0"></path>
+            </svg>
+            {% include "partials/cart_badge.html" %}
+          </a>
+        </div>
+      </nav>
+
+      <div class="flex md:hidden items-center justify-between border border-fv-noir/20 bg-white px-4 py-3" x-data="{ mobileOpen: false }">
+        <a href="/" class="flex items-center gap-1.5">
+          <span class="font-bold text-base font-sans tracking-tight text-fv-noir">double bite<span class="text-[10px] font-mono align-top ml-0.5">™</span></span>
+        </a>
+
+        <div class="flex items-center gap-2 text-xs font-mono">
+          <button onclick="toggleGrid()" class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite" title="Сітка">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+
+          {% if user.is_authenticated %}
+            <a href="{% url 'accounts:profile' %}" class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite" title="Профіль">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </a>
+          {% else %}
+            <a href="{% url 'accounts:login' %}" class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite" title="Увійти">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+            </a>
+          {% endif %}
+
+          <a href="/orders/cart/" class="flex items-center gap-1 px-2 py-1 border border-fv-noir/20 text-fv-noir">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/></svg>
+            {% include "partials/cart_badge.html" %}
+          </a>
+
+          <button @click="mobileOpen = !mobileOpen" class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+        </div>
+
+        <div x-show="mobileOpen" @click.away="mobileOpen = false" class="absolute top-full left-4 right-4 mt-2 bg-white border border-fv-noir/20 shadow-2xl divide-y divide-fv-noir/10 z-50 text-xs font-mono">
+          <a href="/menu/" class="block py-3 px-4 hover:bg-fv-offwhite text-fv-noir font-bold">МЕНЮ СТРАВ</a>
+          <a href="/#collections" class="block py-3 px-4 hover:bg-fv-offwhite text-fv-noir">КОЛЕКЦІЇ</a>
+          <a href="/#about" class="block py-3 px-4 hover:bg-fv-offwhite text-fv-noir">ПРО НАС</a>
+          <a href="/#delivery" class="block py-3 px-4 hover:bg-fv-offwhite text-fv-noir">ДОСТАВКА</a>
+          {% if user.is_authenticated %}
+            <a href="{% url 'accounts:profile' %}" class="block py-3 px-4 hover:bg-fv-offwhite text-fv-noir font-bold">ОСОБИСТИЙ КАБІНЕТ ({{ user.email }})</a>
+            <form action="{% url 'accounts:logout' %}" method="post" class="p-4">
+              {% csrf_token %}
+              <button type="submit" class="w-full py-2 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider">Вийти</button>
+            </form>
+          {% else %}
+            <a href="{% url 'accounts:login' %}" class="block py-3 px-4 hover:bg-fv-offwhite text-fv-noir">УВІЙТИ</a>
+            <a href="{% url 'accounts:register' %}" class="block py-3 px-4 bg-fv-noir text-white">ЗАРЕЄСТРУВАТИСЯ</a>
+          {% endif %}
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  {% if messages %}
+    <div class="max-w-[1440px] w-full mx-auto px-4 sm:px-8 pt-4">
+      <div class="space-y-2">
+        {% for message in messages %}
+          <div class="p-4 text-xs font-mono border flex items-center justify-between {% if message.tags == 'error' %}border-red-500 bg-red-50 text-red-700{% else %}border-fv-noir/20 bg-white text-fv-noir shadow-xs{% endif %}">
+            <span>{{ message }}</span>
+            <span class="text-[10px] uppercase font-bold tracking-widest text-fv-slate">DOUBLE BITE</span>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  <main class="flex-1 w-full">
+    {% block content %}
+      <section class="relative bg-white pt-10 pb-16 overflow-hidden border-b border-fv-noir/10">
+        <div class="max-w-[1440px] mx-auto px-4 sm:px-8">
+
+          <div class="text-center mb-6">
+            <span class="font-serif italic text-sm sm:text-base tracking-widest text-fv-noir uppercase">
+              АВТОРСЬКА ГАСТРОНОМІЯ ТА АРХІТЕКТУРНА ТОЧНІСТЬ СМАКУ
+            </span>
+          </div>
+
+          <div class="relative min-h-[460px] sm:min-h-[580px] lg:min-h-[640px] flex items-center justify-center my-2">
+            
+            <div class="absolute inset-0 flex items-center justify-center select-none pointer-events-none z-0">
+              <h1 class="text-[13vw] sm:text-[14.5vw] font-black tracking-tighter text-fv-noir/[0.04] uppercase whitespace-nowrap leading-none w-full text-center">
+                DOUBLE BITE
+              </h1>
+            </div>
+
+            <div class="relative z-10 max-w-xs sm:max-w-md lg:max-w-lg mx-auto transform transition-transform duration-700 hover:scale-105 cursor-pointer">
+              <img
+                src="https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=1000&q=85"
+                alt="Signature Truffle Wagyu Burger"
+                class="w-full h-auto object-contain drop-shadow-2xl mx-auto mix-blend-multiply"
+              >
+            </div>
+
+            <div class="hidden lg:block absolute left-0 bottom-12 max-w-sm z-20">
+              <p class="text-xs sm:text-sm text-fv-noir leading-relaxed mb-6 font-normal">
+                <strong>DOUBLE BITE™</strong> представляє колекцію сучасної ресторанної гастрономії. Кожна страва втілює архітектурний підхід до форми, поєднуючи натуральні добірні інгредієнти, чисті смакові текстури та вивірені пропорції.
+              </p>
+              <div class="flex flex-col items-start gap-3">
+                <a
+                  href="/menu/"
+                  class="px-8 py-3.5 bg-fv-noir text-white text-xs font-mono tracking-wider hover:bg-black transition-colors rounded-none shadow-xs uppercase font-medium"
+                >
+                  Переглянути меню
+                </a>
+                <button
+                  onclick="document.getElementById('ai-chat-widget').querySelector('button').click()"
+                  class="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-fv-noir hover:underline underline-offset-4 transition-all"
+                >
+                  <span>Запитати AI-консьєржа</span>
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="hidden lg:block absolute right-0 bottom-12 max-w-xs text-left z-20">
+              <div class="mb-4">
+                <span class="text-[10px] font-mono uppercase tracking-widest text-fv-slate block mb-1">ФЛАГМАНСЬКА СТРАВА</span>
+                <h3 class="text-sm font-bold tracking-wider uppercase text-fv-noir">TRUFFLE WAGYU BURGER</h3>
+                <p class="text-xs text-fv-slate mt-0.5">Бріош · Мармурова яловичина · Трюфельний айолі</p>
+              </div>
+              <div class="w-full h-px bg-fv-noir/20 mb-4"></div>
+              <div class="flex items-center justify-between text-xs font-mono">
+                <div>
+                  <span class="text-fv-slate block text-[10px] uppercase">Ціна</span>
+                  <strong class="text-fv-noir font-bold text-base">485 ₴</strong>
+                </div>
+                <div class="text-right">
+                  <span class="text-fv-slate block text-[10px] uppercase">Вага / Енергія</span>
+                  <span class="text-fv-noir font-medium">380 г · 680 ккал</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="text-center pt-8 sm:pt-12 text-[11px] font-mono tracking-widest text-fv-slate uppercase border-t border-fv-noir/10">
+            МАРМУРОВА ЯЛОВИЧИНА · ВЛАСНА ВИПІЧКА БРІОШ · ЧОРНИЙ ТРЮФЕЛЬ · ЧАС ДОСТАВКИ 30 ХВИЛИН ПО КИЄВУ
+          </div>
+
+        </div>
+      </section>
+
+      <section id="about" class="py-16 bg-white border-b border-fv-noir/10">
+        <div class="max-w-[1440px] mx-auto px-4 sm:px-8">
+          <div class="flex items-center gap-3 text-xs font-mono text-fv-slate mb-4">
+            <span class="font-bold text-fv-noir">01</span>
+            <span>/</span>
+            <span class="uppercase tracking-widest">Основа бренду та гастрономічна філософія</span>
+          </div>
+
+          <div class="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
+            <div>
+              <h2 class="text-3xl sm:text-4xl font-bold tracking-tight text-fv-noir uppercase leading-none">
+                ТРИ ФУНДАМЕНТАЛЬНИХ<br>СТОЛПИ СМАКУ
+              </h2>
+            </div>
+            <p class="text-xs sm:text-sm text-fv-slate max-w-md leading-relaxed">
+              Ключові архітектурні принципи, що визначають кожну створену страву та кожен цифровий контакт з платформою Double Bite.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="bg-fv-offwhite p-6 sm:p-8 border border-fv-noir/10 flex flex-col justify-between rounded-none">
+              <div>
+                <div class="w-10 h-10 bg-white flex items-center justify-center mb-6 text-fv-noir font-mono text-sm font-bold border border-fv-noir/10">
+                  01
+                </div>
+                <h3 class="text-lg font-bold text-fv-noir mb-2 font-sans">Спокійні форми</h3>
+                <p class="text-xs sm:text-sm text-fv-slate leading-relaxed">
+                  Лаконічна естетика ресторанної подачі, вивірені чисті лінії та відсутність штучного візуального нагромодження.
+                </p>
+              </div>
+              <div class="mt-6 pt-4 border-t border-fv-noir/10 text-[11px] font-mono text-fv-slate uppercase tracking-wider">
+                Visual Harmony · Pure Plating
+              </div>
+            </div>
+
+            <div class="bg-fv-offwhite p-6 sm:p-8 border border-fv-noir/10 flex flex-col justify-between rounded-none">
+              <div>
+                <div class="w-10 h-10 bg-white flex items-center justify-center mb-6 text-fv-noir font-mono text-sm font-bold border border-fv-noir/10">
+                  02
+                </div>
+                <h3 class="text-lg font-bold text-fv-noir mb-2 font-sans">Натуральні інгредієнти</h3>
+                <p class="text-xs sm:text-sm text-fv-slate leading-relaxed">
+                  Органічні локальні фермерські продукти, витримані сири, свіжий дикий лосось, мармурова яловичина та ароматний трюфель.
+                </p>
+              </div>
+              <div class="mt-6 pt-4 border-t border-fv-noir/10 text-[11px] font-mono text-fv-slate uppercase tracking-wider">
+                Locally Sourced · Organic Quality
+              </div>
+            </div>
+
+            <div class="bg-fv-offwhite p-6 sm:p-8 border border-fv-noir/10 flex flex-col justify-between rounded-none">
+              <div>
+                <div class="w-10 h-10 bg-white flex items-center justify-center mb-6 text-fv-noir font-mono text-sm font-bold border border-fv-noir/10">
+                  03
+                </div>
+                <h3 class="text-lg font-bold text-fv-noir mb-2 font-sans">Продумані пропорції</h3>
+                <p class="text-xs sm:text-sm text-fv-slate leading-relaxed">
+                  Математична гармонія нутрієнтів, точна вага компонентів та бездоганний баланс насичених і свіжих смакових текстур.
+                </p>
+              </div>
+              <div class="mt-6 pt-4 border-t border-fv-noir/10 text-[11px] font-mono text-fv-slate uppercase tracking-wider">
+                Nutrient Balance · Precision Taste
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="collections" class="py-16 bg-white border-b border-fv-noir/10">
+        <div class="max-w-[1440px] mx-auto px-4 sm:px-8">
+          <div class="flex items-center gap-6 text-xs font-mono text-fv-noir mb-8 pb-4 border-b border-fv-noir/10">
+            <span class="font-bold">02:</span>
+            <span class="uppercase tracking-widest text-fv-slate">Гастрономічні колекції страв</span>
+          </div>
+
+          <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-12">
+            <div>
+              <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-fv-noir uppercase leading-none">
+                ГАСТРОНОМІЧНІ<br>КОЛЕКЦІЇ
+              </h2>
+            </div>
+            <div class="max-w-md">
+              <p class="text-xs sm:text-sm text-fv-slate leading-relaxed">
+                Серія авторських страв від бренд-шефа Double Bite, кожна з яких досліджує досконалий баланс форми, натуральних продуктів та смакових акцентів.
+              </p>
+            </div>
+            <div>
+              <a href="/menu/" class="px-6 py-3.5 bg-fv-noir text-white text-xs font-mono tracking-wider uppercase hover:bg-black transition-colors rounded-none shadow-xs inline-block">
+                Переглянути всі колекції
+              </a>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-10">
+            <div class="group cursor-pointer flex flex-col justify-between">
+              <div class="relative aspect-4/3 sm:aspect-16/10 bg-fv-offwhite overflow-hidden mb-4">
+                <img
+                  src="https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=900&q=80"
+                  alt="Колекція авторських бургерів"
+                  class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                >
+                <div class="absolute top-3 left-3 bg-white text-fv-noir text-[10px] font-mono px-2 py-0.5 uppercase tracking-wider">
+                  01 · HAUTE BURGERS
+                </div>
+              </div>
+              <div class="flex items-center justify-between pt-2 border-t border-fv-noir/10">
+                <div>
+                  <span class="text-base font-bold text-fv-noir tracking-tight">Авторські Бургери</span>
+                  <p class="text-xs text-fv-slate mt-0.5">Булочки бріош власної випічки · Мармурова яловичина</p>
+                </div>
+                <a href="/menu/" class="px-5 py-2 border border-fv-noir/20 bg-white text-fv-noir text-xs font-mono uppercase group-hover:border-fv-noir group-hover:bg-fv-noir group-hover:text-white transition-all rounded-none">
+                  Обрати
+                </a>
+              </div>
+            </div>
+
+            <div class="group cursor-pointer flex flex-col justify-between">
+              <div class="relative aspect-4/3 sm:aspect-16/10 bg-fv-offwhite overflow-hidden mb-4">
+                <img
+                  src="https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=900&q=80"
+                  alt="Неаполітанська піца"
+                  class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                >
+                <div class="absolute top-3 left-3 bg-white text-fv-noir text-[10px] font-mono px-2 py-0.5 uppercase tracking-wider">
+                  02 · NEAPOLITAN PIZZA
+                </div>
+              </div>
+              <div class="flex items-center justify-between pt-2 border-t border-fv-noir/10">
+                <div>
+                  <span class="text-base font-bold text-fv-noir tracking-tight">Неаполітанська Піца</span>
+                  <p class="text-xs text-fv-slate mt-0.5">48-годинна ферментація тіста · Томати San Marzano</p>
+                </div>
+                <a href="/menu/" class="px-5 py-2 border border-fv-noir/20 bg-white text-fv-noir text-xs font-mono uppercase group-hover:border-fv-noir group-hover:bg-fv-noir group-hover:text-white transition-all rounded-none">
+                  Обрати
+                </a>
+              </div>
+            </div>
+
+            <div class="group cursor-pointer flex flex-col justify-between">
+              <div class="relative aspect-4/3 sm:aspect-16/10 bg-fv-offwhite overflow-hidden mb-4">
+                <img
+                  src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=900&q=80"
+                  alt="Боули та свіжі салати"
+                  class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                >
+                <div class="absolute top-3 left-3 bg-white text-fv-noir text-[10px] font-mono px-2 py-0.5 uppercase tracking-wider">
+                  03 · FRESH BOWLS
+                </div>
+              </div>
+              <div class="flex items-center justify-between pt-2 border-t border-fv-noir/10">
+                <div>
+                  <span class="text-base font-bold text-fv-noir tracking-tight">Свіжі Боули &amp; Салати</span>
+                  <p class="text-xs text-fv-slate mt-0.5">Фермерський лосось · Стигле авокадо Hass · Кіноа</p>
+                </div>
+                <a href="/menu/" class="px-5 py-2 border border-fv-noir/20 bg-white text-fv-noir text-xs font-mono uppercase group-hover:border-fv-noir group-hover:bg-fv-noir group-hover:text-white transition-all rounded-none">
+                  Обрати
+                </a>
+              </div>
+            </div>
+
+            <div class="group cursor-pointer flex flex-col justify-between">
+              <div class="relative aspect-4/3 sm:aspect-16/10 bg-fv-offwhite overflow-hidden mb-4">
+                <img
+                  src="https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=900&q=80"
+                  alt="Авторські десерти"
+                  class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                >
+                <div class="absolute top-3 left-3 bg-white text-fv-noir text-[10px] font-mono px-2 py-0.5 uppercase tracking-wider">
+                  04 · PASTRY &amp; MATCHA
+                </div>
+              </div>
+              <div class="flex items-center justify-between pt-2 border-t border-fv-noir/10">
+                <div>
+                  <span class="text-base font-bold text-fv-noir tracking-tight">Десерти &amp; Special Drinks</span>
+                  <p class="text-xs text-fv-slate mt-0.5">Баскський чізкейк · Церемоніальна матча Uji</p>
+                </div>
+                <a href="/menu/" class="px-5 py-2 border border-fv-noir/20 bg-white text-fv-noir text-xs font-mono uppercase group-hover:border-fv-noir group-hover:bg-fv-noir group-hover:text-white transition-all rounded-none">
+                  Обрати
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="py-16 bg-white border-b border-fv-noir/10">
+        <div class="max-w-[1440px] mx-auto px-4 sm:px-8">
+          <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-8 pb-6 border-b border-fv-noir/10">
+            <div>
+              <span class="text-xs font-mono uppercase tracking-widest text-fv-slate block mb-1">03 / Фірмовий асортимент</span>
+              <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-fv-noir uppercase leading-none">
+                ОБРАНІ<br>ПОЗИЦІЇ
+              </h2>
+            </div>
+            <div class="max-w-md">
+              <p class="text-xs sm:text-sm text-fv-slate leading-relaxed">
+                Шість фірмових позицій, що відображають архітектурну точність рецептури Double Bite. Замовляйте з доставкою або консультацією AI-помічника.
+              </p>
+            </div>
+            <div class="flex items-center gap-2 border border-fv-noir/20 px-4 py-2 text-xs font-mono text-fv-noir">
+              <span>Статус кухні:</span>
+              <span class="inline-flex items-center gap-1.5 font-bold text-emerald-700">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                ПРИЙМАЄМО ЗАМОВЛЕННЯ
+              </span>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap gap-2 mb-10">
+            <span class="cat-pill px-4 py-2 text-xs font-medium transition-all bg-fv-noir text-white shadow-xs rounded-none cursor-pointer">
+              Всі позиції
+            </span>
+            <span class="cat-pill px-4 py-2 text-xs font-medium transition-all bg-fv-offwhite text-fv-noir hover:bg-[#EAEAEA] rounded-none cursor-pointer">
+              Бургери
+            </span>
+            <span class="cat-pill px-4 py-2 text-xs font-medium transition-all bg-fv-offwhite text-fv-noir hover:bg-[#EAEAEA] rounded-none cursor-pointer">
+              Піца
+            </span>
+            <span class="cat-pill px-4 py-2 text-xs font-medium transition-all bg-fv-offwhite text-fv-noir hover:bg-[#EAEAEA] rounded-none cursor-pointer">
+              Боули &amp; Салати
+            </span>
+            <span class="cat-pill px-4 py-2 text-xs font-medium transition-all bg-fv-offwhite text-fv-noir hover:bg-[#EAEAEA] rounded-none cursor-pointer">
+              Десерти
+            </span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+            <div class="bg-white p-6 rounded-none border border-fv-noir/10 flex flex-col justify-between hover:border-fv-noir/30 transition-all">
+              <div>
+                <div class="bg-fv-offwhite aspect-square p-4 flex items-center justify-center overflow-hidden mix-blend-multiply mb-4">
+                  <img src="https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=600&q=80" alt="Truffle Wagyu Burger" class="w-full h-full object-contain mix-blend-multiply hover:scale-105 transition-transform duration-500">
+                </div>
+                <div class="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-fv-slate mb-1">
+                  <span>Бургери · Haute Series</span>
+                  <span>380 г · 680 ккал</span>
+                </div>
+                <h3 class="text-lg font-bold text-fv-noir tracking-tight mb-2">Truffle Wagyu Burger</h3>
+                <p class="text-xs text-fv-slate leading-relaxed mb-4">
+                  Котлета з мармурової яловичини, трюфельний крем-сир, карамелізована цибуля у вершковому бріоші.
+                </p>
+              </div>
+              <div class="pt-4 border-t border-fv-noir/10">
+                <div class="flex items-center justify-between mb-3 font-mono">
+                  <span class="text-xs text-fv-slate uppercase">Вартість</span>
+                  <span class="text-2xl font-medium text-fv-noir">485 ₴</span>
+                </div>
+                <a href="/menu/" class="w-full py-3 bg-fv-noir text-white text-xs font-medium tracking-wide hover:bg-black transition-colors rounded-none uppercase text-center block">
+                  Замовити страву
+                </a>
+              </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-none border border-fv-noir/10 flex flex-col justify-between hover:border-fv-noir/30 transition-all">
+              <div>
+                <div class="bg-fv-offwhite aspect-square p-4 flex items-center justify-center overflow-hidden mix-blend-multiply mb-4">
+                  <img src="https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=600&q=80" alt="Pizza Quattro Formaggi" class="w-full h-full object-contain mix-blend-multiply hover:scale-105 transition-transform duration-500">
+                </div>
+                <div class="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-fv-slate mb-1">
+                  <span>Піца · 48h Ferment</span>
+                  <span>460 г · 820 ккал</span>
+                </div>
+                <h3 class="text-lg font-bold text-fv-noir tracking-tight mb-2">Quattro Formaggi al Tartufo</h3>
+                <p class="text-xs text-fv-slate leading-relaxed mb-4">
+                  Горгонзола, моцарела fior di latte, фонтіна, пармезан 24 міс., білий трюфельний мед та свіжий чебрець.
+                </p>
+              </div>
+              <div class="pt-4 border-t border-fv-noir/10">
+                <div class="flex items-center justify-between mb-3 font-mono">
+                  <span class="text-xs text-fv-slate uppercase">Вартість</span>
+                  <span class="text-2xl font-medium text-fv-noir">420 ₴</span>
+                </div>
+                <a href="/menu/" class="w-full py-3 bg-fv-noir text-white text-xs font-medium tracking-wide hover:bg-black transition-colors rounded-none uppercase text-center block">
+                  Замовити страву
+                </a>
+              </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-none border border-fv-noir/10 flex flex-col justify-between hover:border-fv-noir/30 transition-all">
+              <div>
+                <div class="bg-fv-offwhite aspect-square p-4 flex items-center justify-center overflow-hidden mix-blend-multiply mb-4">
+                  <img src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80" alt="Wild Salmon Green Bowl" class="w-full h-full object-contain mix-blend-multiply hover:scale-105 transition-transform duration-500">
+                </div>
+                <div class="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-fv-slate mb-1">
+                  <span>Боули · Healthy Flow</span>
+                  <span>340 г · 420 ккал</span>
+                </div>
+                <h3 class="text-lg font-bold text-fv-noir tracking-tight mb-2">Wild Salmon &amp; Avocado Bowl</h3>
+                <p class="text-xs text-fv-slate leading-relaxed mb-4">
+                  Слабкосолоний норвезький лосось, авокадо Hass, кіноа, боби едамаме, огірок, кунжутний дрессінг.
+                </p>
+              </div>
+              <div class="pt-4 border-t border-fv-noir/10">
+                <div class="flex items-center justify-between mb-3 font-mono">
+                  <span class="text-xs text-fv-slate uppercase">Вартість</span>
+                  <span class="text-2xl font-medium text-fv-noir">390 ₴</span>
+                </div>
+                <a href="/menu/" class="w-full py-3 bg-fv-noir text-white text-xs font-medium tracking-wide hover:bg-black transition-colors rounded-none uppercase text-center block">
+                  Замовити страву
+                </a>
+              </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-none border border-fv-noir/10 flex flex-col justify-between hover:border-fv-noir/30 transition-all">
+              <div>
+                <div class="bg-fv-offwhite aspect-square p-4 flex items-center justify-center overflow-hidden mix-blend-multiply mb-4">
+                  <img src="https://images.unsplash.com/photo-1592417817098-8f3d69109853?auto=format&fit=crop&w=600&q=80" alt="Burrata Con Pomodorini" class="w-full h-full object-contain mix-blend-multiply hover:scale-105 transition-transform duration-500">
+                </div>
+                <div class="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-fv-slate mb-1">
+                  <span>Антипасті · Organic</span>
+                  <span>310 г · 380 ккал</span>
+                </div>
+                <h3 class="text-lg font-bold text-fv-noir tracking-tight mb-2">Burrata Con Pomodorini</h3>
+                <p class="text-xs text-fv-slate leading-relaxed mb-4">
+                  Вершкова фермерська бурата, печені томати чері, соус песто з генуезького базиліку, хрустка фокача.
+                </p>
+              </div>
+              <div class="pt-4 border-t border-fv-noir/10">
+                <div class="flex items-center justify-between mb-3 font-mono">
+                  <span class="text-xs text-fv-slate uppercase">Вартість</span>
+                  <span class="text-2xl font-medium text-fv-noir">360 ₴</span>
+                </div>
+                <a href="/menu/" class="w-full py-3 bg-fv-noir text-white text-xs font-medium tracking-wide hover:bg-black transition-colors rounded-none uppercase text-center block">
+                  Замовити страву
+                </a>
+              </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-none border border-fv-noir/10 flex flex-col justify-between hover:border-fv-noir/30 transition-all">
+              <div>
+                <div class="bg-fv-offwhite aspect-square p-4 flex items-center justify-center overflow-hidden mix-blend-multiply mb-4">
+                  <img src="https://images.unsplash.com/photo-1533134242443-d4fd215305ad?auto=format&fit=crop&w=600&q=80" alt="Basque Burnt Cheesecake" class="w-full h-full object-contain mix-blend-multiply hover:scale-105 transition-transform duration-500">
+                </div>
+                <div class="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-fv-slate mb-1">
+                  <span>Десерти · Craft Pastry</span>
+                  <span>190 г · 340 ккал</span>
+                </div>
+                <h3 class="text-lg font-bold text-fv-noir tracking-tight mb-2">Basque Burnt Cheesecake</h3>
+                <p class="text-xs text-fv-slate leading-relaxed mb-4">
+                  Класичний баскський карамелізований чізкейк з ніжною танучою серцевиною та ваніллю Bourbon.
+                </p>
+              </div>
+              <div class="pt-4 border-t border-fv-noir/10">
+                <div class="flex items-center justify-between mb-3 font-mono">
+                  <span class="text-xs text-fv-slate uppercase">Вартість</span>
+                  <span class="text-2xl font-medium text-fv-noir">220 ₴</span>
+                </div>
+                <a href="/menu/" class="w-full py-3 bg-fv-noir text-white text-xs font-medium tracking-wide hover:bg-black transition-colors rounded-none uppercase text-center block">
+                  Замовити страву
+                </a>
+              </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-none border border-fv-noir/10 flex flex-col justify-between hover:border-fv-noir/30 transition-all">
+              <div>
+                <div class="bg-fv-offwhite aspect-square p-4 flex items-center justify-center overflow-hidden mix-blend-multiply mb-4">
+                  <img src="https://images.unsplash.com/photo-1536256263959-770b48d82b0a?auto=format&fit=crop&w=600&q=80" alt="Ceremonial Matcha Latte" class="w-full h-full object-contain mix-blend-multiply hover:scale-105 transition-transform duration-500">
+                </div>
+                <div class="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-fv-slate mb-1">
+                  <span>Напої · Kyoto Select</span>
+                  <span>250 мл · 120 ккал</span>
+                </div>
+                <h3 class="text-lg font-bold text-fv-noir tracking-tight mb-2">Ceremonial Matcha Latte</h3>
+                <p class="text-xs text-fv-slate leading-relaxed mb-4">
+                  Церемоніальний японський зелений чай вищого ґатунку з префектури Кіото на вівсяному або кокосовому молоці.
+                </p>
+              </div>
+              <div class="pt-4 border-t border-fv-noir/10">
+                <div class="flex items-center justify-between mb-3 font-mono">
+                  <span class="text-xs text-fv-slate uppercase">Вартість</span>
+                  <span class="text-2xl font-medium text-fv-noir">160 ₴</span>
+                </div>
+                <a href="/menu/" class="w-full py-3 bg-fv-noir text-white text-xs font-medium tracking-wide hover:bg-black transition-colors rounded-none uppercase text-center block">
+                  Замовити страву
+                </a>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <section id="delivery" class="py-16 bg-white border-b border-fv-noir/10">
+        <div class="max-w-[1440px] mx-auto px-4 sm:px-8">
+          <div class="flex items-center gap-3 text-xs font-mono text-fv-slate mb-4">
+            <span class="font-bold text-fv-noir">04</span>
+            <span>/</span>
+            <span class="uppercase tracking-widest">Логістика та інтелектуальний сервіс</span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div class="bg-fv-offwhite p-8 sm:p-12 border border-fv-noir/15 rounded-none flex flex-col justify-between">
+              <div>
+                <span class="text-[10px] font-mono uppercase tracking-widest text-fv-slate block mb-2">СТАНДАРТ ТЕРМОДОСТАВКИ</span>
+                <h3 class="text-2xl font-bold tracking-tight text-fv-noir mb-3 font-sans">
+                  Швидка доставка по Києву за 30–40 хвилин
+                </h3>
+                <p class="text-xs sm:text-sm text-fv-slate leading-relaxed mb-6">
+                  Кожне замовлення пакується у спеціальні термоізольовані бокси із сенсорами температури. Хрустка скоринка піци залишається ідеальною, а морозиво чи десерти — охолодженими.
+                </p>
+              </div>
+              <div class="pt-4 border-t border-fv-noir/10 flex items-center justify-between text-xs font-mono">
+                <span class="text-fv-noir font-bold">Радіус: Правий та Лівий берег</span>
+                <span class="text-fv-slate">Від 500 ₴ — безкоштовно</span>
+              </div>
+            </div>
+
+            <div class="bg-fv-noir text-white p-8 sm:p-12 border border-fv-noir rounded-none flex flex-col justify-between">
+              <div>
+                <span class="text-[10px] font-mono uppercase tracking-widest text-white/50 block mb-2">MISTRAL AI CONCIERGE 24/7</span>
+                <h3 class="text-2xl font-bold tracking-tight text-white mb-3 font-sans">
+                  Інтелектуальний підбір страв під ваш смак
+                </h3>
+                <p class="text-xs sm:text-sm text-white/70 leading-relaxed mb-6">
+                  Наш AI-асистент на базі Mistral AI враховує ваші смакові уподобання, алергени та калорійність, миттєво підбираючи ідеальне поєднання страв для компанії або романтичної вечері.
+                </p>
+              </div>
+              <div class="pt-4 border-t border-white/10 flex items-center justify-between text-xs font-mono">
+                <span class="text-white/90">Адаптивна мова спілкування</span>
+                <button
+                  onclick="document.getElementById('ai-chat-widget').querySelector('button').click()"
+                  class="text-white underline underline-offset-4 hover:text-white/80"
+                >
+                  Почати чат →
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    {% endblock %}
+  </main>
+
+  <footer class="bg-fv-noir text-white pt-16 pb-0 overflow-hidden relative border-t border-fv-noir select-none mt-auto">
+    <div class="max-w-[1440px] mx-auto px-4 sm:px-8">
+
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-6 pb-12 border-b border-white/10 text-xs font-mono">
+        <div class="md:col-span-3 text-white/70">
+          Авторська ресторанна кухня з інтелектуальною доставкою по Києву.
+        </div>
+        <div class="md:col-span-6 font-bold text-white tracking-widest text-center md:text-left uppercase">
+          СПОКІЙНІ ФОРМИ, ДОБІРНІ ІНГРЕДІЄНТИ ТА БЕЗДОГАННИЙ СЕРВІС ДЛЯ СУЧАСНОГО МІСТА.
+        </div>
+        <div class="md:col-span-3 text-white/50 md:text-right">
+          © 2026 DOUBLE BITE™ Всі права захищено.
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-8 py-14 text-xs font-mono">
+        <div class="lg:col-span-3 space-y-3">
+          <h4 class="font-bold text-white tracking-wider uppercase mb-4">МЕНЮ СТРАВ</h4>
+          <ul class="space-y-2 text-white/60">
+            <li><a href="/menu/" class="hover:text-white transition-colors">Всі страви</a></li>
+            <li><a href="/#collections" class="hover:text-white transition-colors">Авторські бургери</a></li>
+            <li><a href="/#collections" class="hover:text-white transition-colors">Неаполітанська піца</a></li>
+            <li><a href="/#collections" class="hover:text-white transition-colors">Свіжі боули &amp; салати</a></li>
+            <li><a href="/#collections" class="hover:text-white transition-colors">Десерти &amp; напої</a></li>
+          </ul>
+        </div>
+
+        <div class="lg:col-span-3 space-y-3">
+          <h4 class="font-bold text-white tracking-wider uppercase mb-4">СЕРВІС ТА ДОСТАВКА</h4>
+          <ul class="space-y-2 text-white/60">
+            <li><a href="/#delivery" class="hover:text-white transition-colors">Умови та зони доставки</a></li>
+            <li><a href="/orders/cart/" class="hover:text-white transition-colors">Мій кошик замовлень</a></li>
+            <li><a href="{% url 'accounts:profile' %}" class="hover:text-white transition-colors">Особистий кабінет</a></li>
+            <li><a href="/#about" class="hover:text-white transition-colors">Про бренд та команду</a></li>
+          </ul>
+        </div>
+
+        <div class="lg:col-span-2 space-y-3">
+          <h4 class="font-bold text-white tracking-wider uppercase mb-4">КОНТАКТИ</h4>
+          <div class="space-y-2 text-white/60">
+            <p>Київ, вул. Хрещатик, 22</p>
+            <p>+380 44 123 45 67</p>
+            <p>Щоденно: 10:00 — 22:00</p>
+          </div>
+        </div>
+
+        <div class="lg:col-span-4 space-y-3">
+          <h4 class="font-bold text-white tracking-wider uppercase mb-4">ЕКСКЛЮЗИВНІ РЕЛІЗИ</h4>
+          <p class="text-white/60 text-xs leading-relaxed mb-4">
+            Підпишіться на сповіщення про нові сезонні позиції меню та спеціальні сети від шеф-кухаря.
+          </p>
+          <form onsubmit="event.preventDefault(); alert('Дякуємо за підписку на оновлення Double Bite.');" class="flex border border-white/20 bg-white/5 rounded-none">
+            <input
+              type="email"
+              placeholder="Введіть email адресу..."
+              required
+              class="w-full bg-transparent px-3.5 py-2.5 text-xs text-white placeholder:text-white/30 focus:outline-none font-mono"
+            >
+            <button
+              type="submit"
+              class="px-5 bg-white text-fv-noir text-xs font-mono uppercase tracking-wider font-bold hover:bg-fv-offwhite transition-colors whitespace-nowrap rounded-none"
+            >
+              Підписатися
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <div class="pt-8 overflow-hidden select-none pointer-events-none">
+        <h2 class="text-[17vw] font-black tracking-tighter text-white uppercase leading-[0.75] text-center w-full opacity-90">
+          DOUBLE BITE
+        </h2>
+      </div>
+
+    </div>
+  </footer>
+
+  {% include "support/chat_widget.html" %}
+
+  <script>
+    function toggleGrid() {
+      const overlay = document.getElementById('grid-overlay');
+      if (overlay) {
+        overlay.classList.toggle('hidden');
+      }
+    }
+  </script>
+</body>
+</html>

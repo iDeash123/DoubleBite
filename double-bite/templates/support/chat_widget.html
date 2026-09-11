@@ -1,0 +1,166 @@
+<div id="ai-chat-widget" x-data="{
+    open: false,
+    input: '',
+    loading: false,
+    messages: [
+      {
+        role: 'assistant',
+        content: 'Вітаю! Я інтелектуальний помічник Double Bite на базі Mistral AI. Допоможу обрати авторські ресторанні страви, врахувати індивідуальні вподобання чи алергени, або дізнатися деталі щодо доставки.'
+      }
+    ],
+    sendQuick(text) {
+      this.input = text;
+      this.sendMessage();
+    },
+    async sendMessage() {
+      const query = this.input.trim();
+      if (!query || this.loading) return;
+      this.messages.push({ role: 'user', content: query });
+      this.input = '';
+      this.loading = true;
+      this.$nextTick(() => {
+        const c = this.$refs.msgContainer;
+        if (c) c.scrollTop = c.scrollHeight;
+      });
+
+      try {
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+        const res = await fetch('/support/chat/stream/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+          },
+          body: JSON.stringify({ message: query })
+        });
+        if (res.ok && res.body) {
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let assistantMsg = { role: 'assistant', content: '' };
+          this.messages.push(assistantMsg);
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            assistantMsg.content += decoder.decode(value);
+            this.$nextTick(() => {
+              const c = this.$refs.msgContainer;
+              if (c) c.scrollTop = c.scrollHeight;
+            });
+          }
+          this.loading = false;
+        } else {
+          setTimeout(() => {
+            this.messages.push({
+              role: 'assistant',
+              content: 'Дякую за запит! Рекомендуємо скуштувати наш флагманський Truffle Wagyu Burger або неаполітанську піцу Quattro Formaggi з трюфельним медом. Середній час доставки по Києву складає 30–40 хвилин.'
+            });
+            this.loading = false;
+            this.$nextTick(() => {
+              const c = this.$refs.msgContainer;
+              if (c) c.scrollTop = c.scrollHeight;
+            });
+          }, 400);
+        }
+      } catch (e) {
+        setTimeout(() => {
+          this.messages.push({
+            role: 'assistant',
+            content: 'Дякую за звернення! Наша служба турботи завжди рада допомогти обрати ідеальний гастрономічний сет. Завітайте також до нашого каталогу страв у розділі Меню.'
+          });
+          this.loading = false;
+          this.$nextTick(() => {
+            const c = this.$refs.msgContainer;
+            if (c) c.scrollTop = c.scrollHeight;
+          });
+        }, 400);
+      }
+    }
+  }" class="relative z-50 select-none">
+
+  <button
+    @click="open = !open"
+    class="fixed bottom-6 right-6 z-40 bg-fv-noir text-white hover:bg-black font-mono text-xs uppercase px-4 py-3.5 border border-fv-noir shadow-2xl flex items-center gap-2.5 transition-all cursor-pointer rounded-none"
+    title="AI Консьєрж підтримки"
+  >
+    <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse"></span>
+    <span class="tracking-wider">AI Консьєрж</span>
+    <svg class="w-3.5 h-3.5 text-white/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+    </svg>
+  </button>
+
+  <div
+    x-show="open"
+    x-transition:enter="transition ease-out duration-200"
+    x-transition:enter-start="opacity-0 translate-y-4"
+    x-transition:enter-end="opacity-100 translate-y-0"
+    x-transition:leave="transition ease-in duration-150"
+    x-transition:leave-start="opacity-100 translate-y-0"
+    x-transition:leave-end="opacity-0 translate-y-4"
+    class="fixed bottom-22 right-4 sm:right-6 z-50 w-96 max-w-[calc(100vw-2rem)] bg-white border border-fv-noir/20 shadow-2xl rounded-none flex flex-col h-[520px] max-h-[calc(100vh-7rem)]"
+    style="display: none;"
+  >
+    <div class="p-4 border-b border-fv-noir/10 flex items-center justify-between bg-white">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="font-bold text-sm font-sans tracking-tight text-fv-noir">double bite<span class="text-[10px] font-mono align-top ml-0.5">™</span></span>
+          <span class="text-[9px] font-mono uppercase tracking-widest px-1.5 py-0.5 bg-fv-offwhite text-fv-slate border border-fv-noir/10">Mistral AI</span>
+        </div>
+        <div class="text-[10px] font-mono uppercase tracking-wider text-fv-slate mt-0.5">Персональний гастро-консьєрж</div>
+      </div>
+      <button @click="open = false" class="p-1 text-fv-slate hover:text-fv-noir transition-colors text-base font-mono">
+        ✕
+      </button>
+    </div>
+
+    <div class="px-4 py-2 bg-fv-offwhite border-b border-fv-noir/10 flex flex-wrap gap-1.5">
+      <button @click="sendQuick('Що порадиш на вечерю?')" class="text-[10px] font-mono uppercase px-2 py-0.5 bg-white border border-fv-noir/10 text-fv-noir hover:border-fv-noir transition-colors">
+        Вечеря
+      </button>
+      <button @click="sendQuick('Які є веганські страви?')" class="text-[10px] font-mono uppercase px-2 py-0.5 bg-white border border-fv-noir/10 text-fv-noir hover:border-fv-noir transition-colors">
+        Веган
+      </button>
+      <button @click="sendQuick('Який час та вартість доставки?')" class="text-[10px] font-mono uppercase px-2 py-0.5 bg-white border border-fv-noir/10 text-fv-noir hover:border-fv-noir transition-colors">
+        Доставка
+      </button>
+    </div>
+
+    <div x-ref="msgContainer" class="flex-1 p-4 overflow-y-auto space-y-3 bg-white">
+      <template x-for="(msg, index) in messages" :key="index">
+        <div :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+          <div
+            :class="msg.role === 'user'
+              ? 'bg-fv-noir text-white p-3 text-xs font-sans max-w-[85%] rounded-none'
+              : 'bg-fv-offwhite text-fv-noir border border-fv-noir/10 p-3 text-xs font-sans max-w-[85%] rounded-none leading-relaxed'"
+          >
+            <div
+              :class="msg.role === 'user' ? 'text-white/50 text-right' : 'text-fv-slate text-left'"
+              class="text-[9px] font-mono uppercase tracking-wider mb-1"
+              x-text="msg.role === 'user' ? 'Ви' : 'Double Bite Concierge'"
+            ></div>
+            <div x-text="msg.content"></div>
+          </div>
+        </div>
+      </template>
+      <div x-show="loading" class="text-xs font-mono text-fv-slate flex items-center gap-1.5 pt-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-fv-slate animate-ping"></span>
+        <span>Консьєрж формує відповідь...</span>
+      </div>
+    </div>
+
+    <form @submit.prevent="sendMessage()" class="p-3 border-t border-fv-noir/10 bg-fv-offwhite flex gap-2">
+      <input
+        type="text"
+        x-model="input"
+        placeholder="Запитайте про страви чи доставку..."
+        class="flex-1 px-3 py-2 text-xs font-mono bg-white border border-fv-noir/20 text-fv-noir placeholder:text-fv-slate focus:outline-none focus:border-fv-noir rounded-none"
+      >
+      <button
+        type="submit"
+        class="px-4 py-2 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors rounded-none whitespace-nowrap"
+      >
+        Надіслати
+      </button>
+    </form>
+  </div>
+</div>
