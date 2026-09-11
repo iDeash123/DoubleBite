@@ -85,7 +85,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
 db_engine = os.getenv('DB_ENGINE', 'django.db.backends.sqlite3')
-is_testing = 'pytest' in sys.modules or any('test' in arg for arg in sys.argv)
+is_testing = 'pytest' in sys.modules or 'test' in sys.argv
 
 if is_testing and not os.getenv('TEST_WITH_POSTGRES'):
     DATABASES = {
@@ -155,7 +155,7 @@ STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static'] if (BASE_DIR / 'static').exists() else []
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-MEDIA_URL = 'media/'
+MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -207,3 +207,10 @@ MAILERS = {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
     },
 }
+
+# Stripe Configuration
+STRIPE_PUBLIC_KEY = os.getenv('STRIPE_PUBLIC_KEY', '')
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', '')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', '')
+STRIPE_ORDER_SUCCESS_STATUS = os.getenv('STRIPE_ORDER_SUCCESS_STATUS', 'PAID')
+

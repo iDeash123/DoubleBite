@@ -1,15 +1,19 @@
+import logging
 import os
 from decimal import Decimal
 
+import stripe
+from accounts.models import Role
+from config.partials import render_partial_or_full
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
-from django.http import Http404, HttpRequest, HttpResponse, HttpResponseForbidden
+from django.http import HttpRequest, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from accounts.models import Role
-from config.partials import render_partial_or_full
 from .exceptions import (
     CartEmptyError,
     DishUnavailableError,
@@ -17,8 +21,11 @@ from .exceptions import (
     OrderMinimumAmountError,
 )
 from .forms import OrderCheckoutForm
-from .models import Order, OrderStatus, PaymentMethod
-from .services import CartService, OrderService
+from .models import Order, OrderStatus, PaymentMethod, PaymentStatus
+from .services import CartService, OrderService, StripeService
+
+logger = logging.getLogger('orders')
+
 
 
 def cart_view(request: HttpRequest) -> HttpResponse:
@@ -175,7 +182,17 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
                     delivery_address=form.cleaned_data['delivery_address'],
                     payment_method=form.cleaned_data['payment_method'],
                     notes=form.cleaned_data.get('notes', ''),
+                    create_stripe_session=False,
                 )
+                if order.payment_method in (PaymentMethod.ONLINE, PaymentMethod.STRIPE, 'ONLINE', 'STRIPE'):
+                    try:
+                        session = StripeService.create_checkout_session(order, request=request)
+                        if session and getattr(session, 'url', None):
+                            return redirect(session.url)
+                    except (stripe.StripeError, ValueError) as e:
+                        logger.error("Error creating Stripe checkout session: %s", e)
+                        messages.warning(request, 'Не вдалося перенаправити на оплату Stripe. Спробуйте пізніше.')
+
                 messages.success(request, f'Замовлення {order.order_number} успішно оформлено!')
                 return redirect('orders:tracking', order_number=order.order_number)
             except (CartEmptyError, OrderMinimumAmountError, ValidationError) as e:
@@ -304,3 +321,74 @@ def order_list_view(request: HttpRequest) -> HttpResponse:
         .order_by('-created_at')
     )
     return render(request, 'orders/order_list.html', {'orders': orders})
+
+
+@csrf_exempt
+@require_POST
+def stripe_webhook_view(request: HttpRequest) -> HttpResponse:
+    payload = request.body
+    sig_header = request.headers.get('Stripe-Signature') or request.META.get('HTTP_STRIPE_SIGNATURE', '')
+    webhook_secret = getattr(settings, 'STRIPE_WEBHOOK_SECRET', '') or os.getenv('STRIPE_WEBHOOK_SECRET', '')
+
+    if not sig_header:
+        logger.warning('Stripe webhook called without Stripe-Signature header.')
+        return HttpResponse('Missing signature header', status=400)
+
+    if not webhook_secret:
+        logger.error('STRIPE_WEBHOOK_SECRET is not configured.')
+        return HttpResponse('Webhook secret not configured', status=500)
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload=payload,
+            sig_header=sig_header,
+            secret=webhook_secret,
+        )
+    except ValueError as e:
+        logger.warning('Invalid Stripe webhook payload: %s', e)
+        return HttpResponse('Invalid payload', status=400)
+    except stripe.SignatureVerificationError as e:
+        logger.warning('Invalid Stripe webhook signature: %s', e)
+        return HttpResponse('Invalid signature', status=400)
+    except stripe.StripeError as e:
+        logger.error('Unexpected error in Stripe webhook verification: %s', e)
+        return HttpResponse('Webhook verification failed', status=400)
+
+    event_type = getattr(event, 'type', None) or (event.get('type') if isinstance(event, dict) else None)
+    data_object = None
+    if hasattr(event, 'data') and hasattr(event.data, 'object'):
+        data_object = event.data.object
+    elif isinstance(event, dict):
+        data_object = event.get('data', {}).get('object')
+
+    if event_type in ('checkout.session.completed', 'checkout.session.async_payment_succeeded') and data_object:
+        StripeService.handle_checkout_session_completed(data_object)
+    elif event_type in ('payment_intent.payment_failed', 'checkout.session.async_payment_failed') and data_object:
+        StripeService.handle_payment_failed(data_object)
+    elif event_type == 'charge.refunded' and data_object:
+        StripeService.handle_charge_refunded(data_object)
+
+    return HttpResponse(status=200)
+
+
+def stripe_checkout_view(request: HttpRequest, order_number: str) -> HttpResponse:
+    order = get_object_or_404(Order, order_number=order_number)
+    if order.user and request.user.is_authenticated and order.user != request.user and not request.user.is_superuser:
+        return HttpResponseForbidden('У вас немає доступу до цього замовлення.')
+    if order.session_key and not request.user.is_authenticated and order.session_key != request.session.session_key:
+        return HttpResponseForbidden('У вас немає доступу до цього замовлення.')
+
+    if order.payment_status in (PaymentStatus.PAID, PaymentStatus.COMPLETED):
+        messages.info(request, 'Це замовлення вже оплачено.')
+        return redirect('orders:tracking', order_number=order.order_number)
+
+    try:
+        session = StripeService.create_checkout_session(order, request=request)
+        if session and getattr(session, 'url', None):
+            return redirect(session.url)
+    except (stripe.StripeError, ValueError) as e:
+        logger.error('Error creating Stripe checkout session: %s', e)
+        messages.error(request, 'Помилка ініціалізації онлайн-оплати.')
+
+    return redirect('orders:tracking', order_number=order.order_number)
+

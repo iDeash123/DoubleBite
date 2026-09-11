@@ -2,10 +2,11 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-
 from menu.models import Dish
+
 from .exceptions import InvalidStatusTransitionError
 
 
@@ -19,13 +20,19 @@ class OrderStatus(models.TextChoices):
 
 
 class PaymentMethod(models.TextChoices):
+    ONLINE = 'ONLINE', 'Оплата онлайн (Stripe)'
+    STRIPE = 'STRIPE', 'Картка онлайн (Stripe)'
     CARD = 'CARD', 'Картка'
     CASH = 'CASH', 'Готівка'
 
 
 class PaymentStatus(models.TextChoices):
     PENDING = 'PENDING', 'Очікує оплати'
+    PAID = 'PAID', 'Оплачено'
     COMPLETED = 'COMPLETED', 'Оплачено'
+    FAILED = 'FAILED', 'Помилка оплати'
+    REFUNDED = 'REFUNDED', 'Повернено'
+
 
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
@@ -63,19 +70,23 @@ class Cart(models.Model):
 
     @property
     def total_quantity(self) -> int:
+        if not self.pk:
+            return 0
         return sum(
-            item.quantity
+            item.quantity or 0
             for item in self.items.all()
-            if item.dish.is_available and item.dish.category.is_active
+            if item.is_available
         )
 
     @property
     def total_amount(self) -> Decimal:
+        if not self.pk:
+            return Decimal('0.00')
         return sum(
             (
                 item.total_price
                 for item in self.items.all()
-                if item.dish.is_available and item.dish.category.is_active
+                if item.is_available
             ),
             Decimal('0.00'),
         )
@@ -118,7 +129,15 @@ class CartItem(models.Model):
 
     @property
     def unit_price(self) -> Decimal:
-        base = self.dish.price
+        try:
+            if not self.dish_id or not self.dish:
+                return Decimal('0.00')
+            base = getattr(self.dish, 'price', None)
+            if base is None:
+                return Decimal('0.00')
+        except ObjectDoesNotExist:
+            return Decimal('0.00')
+
         delta = Decimal('0.00')
         if isinstance(self.selected_options, list):
             for opt in self.selected_options:
@@ -128,18 +147,36 @@ class CartItem(models.Model):
                         delta += Decimal(str(val))
                     except (InvalidOperation, TypeError):
                         pass
-        return base + delta
+        return max(Decimal('0.00'), base + delta)
 
     @property
     def total_price(self) -> Decimal:
-        return self.unit_price * self.quantity
+        if self.quantity is None:
+            return Decimal('0.00')
+        unit = self.unit_price
+        if unit is None:
+            return Decimal('0.00')
+        return unit * self.quantity
 
     @property
     def is_available(self) -> bool:
-        return bool(self.dish.is_available and self.dish.category.is_active)
+        try:
+            if not self.dish_id or not self.dish:
+                return False
+            return bool(
+                self.dish.is_available
+                and self.dish.category
+                and self.dish.category.is_active
+            )
+        except ObjectDoesNotExist:
+            return False
 
     def __str__(self) -> str:
-        return f"{self.dish.title} x {self.quantity}"
+        try:
+            title = self.dish.title if self.dish_id and self.dish else 'Позиція кошика'
+        except ObjectDoesNotExist:
+            title = 'Позиція кошика'
+        return f"{title} x {self.quantity or 0}"
 
 
 class Order(models.Model):
@@ -176,7 +213,7 @@ class Order(models.Model):
     )
     payment_method = models.CharField(
         'Спосіб оплати',
-        max_length=10,
+        max_length=20,
         choices=PaymentMethod.choices,
         default=PaymentMethod.CARD,
     )
@@ -185,6 +222,17 @@ class Order(models.Model):
         max_length=20,
         choices=PaymentStatus.choices,
         default=PaymentStatus.PENDING,
+    )
+    stripe_session_id = models.CharField(
+        'ID сесії Stripe',
+        max_length=255,
+        blank=True,
+        db_index=True,
+    )
+    stripe_payment_intent_id = models.CharField(
+        'ID платежу Stripe (PaymentIntent)',
+        max_length=255,
+        blank=True,
     )
     total_amount = models.DecimalField(
         'Загальна сума (грн)',
@@ -214,7 +262,7 @@ class Order(models.Model):
                 f"Неприпустимий перехід статусу з {self.status} до {target_status}."
             )
         self.status = target_status
-        if target_status == OrderStatus.PAID:
+        if target_status == OrderStatus.PAID and self.payment_status != PaymentStatus.PAID:
             self.payment_status = PaymentStatus.COMPLETED
         self.save(update_fields=['status', 'payment_status', 'updated_at'])
 
@@ -262,8 +310,17 @@ class OrderItem(models.Model):
         verbose_name_plural = 'Позиції замовлення'
 
     @property
+    def unit_price(self) -> Decimal:
+        return self.price if self.price is not None else Decimal('0.00')
+
+    @property
     def total_price(self) -> Decimal:
+        if self.price is None or self.quantity is None:
+            return Decimal('0.00')
         return self.price * self.quantity
 
     def __str__(self) -> str:
-        return f"{self.dish_title} x {self.quantity} ({self.price} грн)"
+        dish_title = self.dish_title or 'Позиція'
+        qty = self.quantity or 0
+        price_str = f"{self.price} грн" if self.price is not None else '0.00 грн'
+        return f"{dish_title} x {qty} ({price_str})"

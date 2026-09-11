@@ -1,12 +1,12 @@
 from decimal import Decimal
 
+from accounts.models import Role
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
-
-from accounts.models import Role
 from menu.models import Category, Dish
-from orders.models import Cart, CartItem, Order
+
+from orders.models import Cart
 
 User = get_user_model()
 
@@ -68,7 +68,6 @@ class CartViewsTest(TestCase):
         self.assertIn('id="cart-badge"', content)
 
     def test_cart_update_and_remove_htmx_returns_cart_partial(self):
-        # Add item first
         self.client.post(
             reverse('orders:cart_add', kwargs={'dish_id': self.dish1.id}),
             {'quantity': '2'},
@@ -79,7 +78,6 @@ class CartViewsTest(TestCase):
         cart = Cart.objects.get(session_key=session_key)
         item = cart.items.first()
 
-        # Update quantity
         update_url = reverse('orders:cart_update', kwargs={'item_id': item.id})
         response = self.client.post(
             update_url,
@@ -92,7 +90,6 @@ class CartViewsTest(TestCase):
         self.assertIn('Маргарита', content)
         self.assertIn('3', content)
 
-        # Remove item
         remove_url = reverse('orders:cart_remove', kwargs={'item_id': item.id})
         response = self.client.post(
             remove_url,
@@ -130,13 +127,11 @@ class CartViewsTest(TestCase):
         direct_resp = self.client.get(reverse('cart_drawer_direct'))
         self.assertEqual(direct_resp.status_code, 200)
 
-        # Drawer view with HTMX returns partial container
         htmx_resp = self.client.get(reverse('orders:cart_drawer'), HTTP_HX_REQUEST='true')
         self.assertEqual(htmx_resp.status_code, 200)
         self.assertIn('id="cart-drawer-container"', htmx_resp.content.decode('utf-8'))
 
     def test_cart_update_and_remove_from_drawer(self):
-        # Add item
         self.client.post(
             reverse('orders:cart_add', kwargs={'dish_id': self.dish1.id}),
             {'quantity': '1'},
@@ -146,7 +141,6 @@ class CartViewsTest(TestCase):
         cart = Cart.objects.get(session_key=session_key)
         item = cart.items.first()
 
-        # Update from drawer
         update_url = reverse('orders:cart_update', kwargs={'item_id': item.id})
         response = self.client.post(
             update_url,
@@ -160,7 +154,6 @@ class CartViewsTest(TestCase):
         self.assertIn('4', content)
         self.assertIn('id="cart-badge"', content)
 
-        # Remove from drawer
         remove_url = reverse('orders:cart_remove', kwargs={'item_id': item.id})
         response = self.client.post(
             remove_url,
@@ -201,11 +194,9 @@ class CartViewsTest(TestCase):
     def test_order_list_view_permissions(self):
         url = reverse('orders:order_list')
 
-        # Anonymous user gets redirected to login
         response = self.client.get(url)
         self.assertEqual(response.status_code, 302)
 
-        # Customer gets 200
         customer = User.objects.create_user(
             email='customer@test.com',
             password='customerpassword123',
@@ -216,7 +207,6 @@ class CartViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'orders/order_list.html')
 
-        # Admin gets 403
         admin_user = User.objects.create_user(
             email='admin_staff@test.com',
             password='adminpassword123',
@@ -226,7 +216,6 @@ class CartViewsTest(TestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 403)
 
-        # Superuser gets 200
         superuser = User.objects.create_superuser(
             email='superuser@test.com',
             password='superpassword123',

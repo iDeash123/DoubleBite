@@ -1,4 +1,5 @@
 from django.contrib import admin
+
 from .models import Cart, CartItem, Order, OrderItem
 
 
@@ -22,9 +23,23 @@ class OrderAdmin(admin.ModelAdmin):
         'created_at',
     )
     list_filter = ('status', 'payment_method', 'payment_status', 'created_at')
-    search_fields = ('order_number', 'customer_name', 'customer_phone', 'delivery_address')
-    readonly_fields = ('order_number', 'total_amount', 'created_at', 'updated_at')
-    inlines = [OrderItemInline]
+    search_fields = (
+        'order_number',
+        'customer_name',
+        'customer_phone',
+        'delivery_address',
+        'stripe_session_id',
+        'stripe_payment_intent_id',
+    )
+    readonly_fields = (
+        'order_number',
+        'stripe_session_id',
+        'stripe_payment_intent_id',
+        'total_amount',
+        'created_at',
+        'updated_at',
+    )
+    inlines = (OrderItemInline,)
 
 
 class CartItemInline(admin.TabularInline):
@@ -38,4 +53,4 @@ class CartAdmin(admin.ModelAdmin):
     list_display = ('id', 'user', 'session_key', 'total_quantity', 'total_amount', 'updated_at')
     search_fields = ('user__email', 'session_key')
     readonly_fields = ('created_at', 'updated_at')
-    inlines = [CartItemInline]
+    inlines = (CartItemInline,)

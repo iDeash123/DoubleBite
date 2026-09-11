@@ -1,11 +1,11 @@
 from decimal import Decimal
 
+from accounts.models import DeliveryAddress, Role
 from django.contrib.auth import get_user_model
 from django.test import Client, RequestFactory, TestCase
 from django.urls import reverse
-
-from accounts.models import DeliveryAddress, Role
 from menu.models import Category, Dish, DishOption
+
 from orders.exceptions import CartEmptyError, OrderMinimumAmountError
 from orders.models import Cart, CartItem, Order, OrderStatus
 from orders.services import CartService, OrderService
@@ -104,7 +104,7 @@ class CheckoutAndTrackingTest(TestCase):
         self.assertTrue(order.order_number.startswith('DB-'))
         self.assertEqual(order.user, self.user)
         self.assertEqual(order.status, OrderStatus.PENDING)
-        self.assertEqual(order.total_amount, Decimal('290.00')) # 250 + 40
+        self.assertEqual(order.total_amount, Decimal('290.00'))
         self.assertEqual(order.items.count(), 1)
 
         item = order.items.first()
@@ -112,7 +112,6 @@ class CheckoutAndTrackingTest(TestCase):
         self.assertEqual(item.price, Decimal('290.00'))
         self.assertEqual(item.quantity, 1)
 
-        # Cart was cleared
         cart = CartService.get_cart(req)
         self.assertEqual(cart.items.count(), 0)
 
@@ -127,7 +126,6 @@ class CheckoutAndTrackingTest(TestCase):
             delivery_address='Київ',
         )
 
-        # Alter original dish price and title
         self.dish1.price = Decimal('999.00')
         self.dish1.title = 'Нова ціна страви'
         self.dish1.save()
@@ -149,7 +147,6 @@ class CheckoutAndTrackingTest(TestCase):
 
     def test_create_order_below_minimum_amount_raises_error(self):
         req = self._get_request(user=self.user)
-        # Create cheap dish below 200 грн
         cheap = Dish.objects.create(
             category=self.category,
             title='Соус',
@@ -170,7 +167,6 @@ class CheckoutAndTrackingTest(TestCase):
 
     def test_checkout_view_get_with_items_renders_form(self):
         self.client.force_login(self.user)
-        # Add item via client
         self.client.post(reverse('orders:cart_add', kwargs={'dish_id': self.dish1.id}))
 
         response = self.client.get(reverse('orders:checkout'))
@@ -234,13 +230,11 @@ class CheckoutAndTrackingTest(TestCase):
 
         cancel_url = reverse('orders:order_cancel', kwargs={'order_number': order.order_number})
 
-        # Anonymous attacker attempt is blocked
         attacker_resp = self.client.post(cancel_url)
         self.assertEqual(attacker_resp.status_code, 403)
         order.refresh_from_db()
         self.assertEqual(order.status, OrderStatus.PENDING)
 
-        # Authenticated owner can cancel
         self.client.force_login(self.user)
         response = self.client.post(cancel_url)
         self.assertRedirects(response, reverse('orders:tracking', kwargs={'order_number': order.order_number}))
@@ -248,10 +242,9 @@ class CheckoutAndTrackingTest(TestCase):
         order.refresh_from_db()
         self.assertEqual(order.status, OrderStatus.CANCELLED)
 
-        # Cannot cancel delivered order
         order.status = OrderStatus.DELIVERED
         order.save()
-        response2 = self.client.post(cancel_url)
+        self.client.post(cancel_url)
         order.refresh_from_db()
         self.assertEqual(order.status, OrderStatus.DELIVERED)
 
@@ -271,9 +264,7 @@ class CheckoutAndTrackingTest(TestCase):
             password='SuperPassword123!',
         )
         self.client.force_login(superuser)
-        # Add dish to cart so checkout does not redirect on empty cart
         self.client.post(reverse('orders:cart_add', kwargs={'dish_id': self.dish1.id}))
-        # Increase quantity to meet minimum
         cart = Cart.objects.get(user=superuser)
         item = cart.items.first()
         item.quantity = 5
@@ -283,7 +274,6 @@ class CheckoutAndTrackingTest(TestCase):
 
     def test_checkout_view_displays_unavailable_item_warning(self):
         self.client.force_login(self.user)
-        # Add available and unavailable dish
         self.client.post(reverse('orders:cart_add', kwargs={'dish_id': self.dish1.id}))
         cart = Cart.objects.get(user=self.user)
         CartItem.objects.create(cart=cart, dish=self.dish_unavailable, quantity=1)

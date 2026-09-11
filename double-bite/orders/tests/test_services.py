@@ -2,8 +2,8 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase
-
 from menu.models import Category, Dish, DishOption
+
 from orders.exceptions import DishUnavailableError
 from orders.models import Cart, CartItem
 from orders.services import CartService

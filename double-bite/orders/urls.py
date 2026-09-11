@@ -16,4 +16,7 @@ urlpatterns = [
     path('tracking/<str:order_number>/status/', views.tracking_status_view, name='tracking_status'),
     path('cancel/<str:order_number>/', views.order_cancel_view, name='order_cancel'),
     path('history/', views.order_list_view, name='order_list'),
+    path('webhook/stripe/', views.stripe_webhook_view, name='stripe_webhook'),
+    path('checkout/stripe/<str:order_number>/', views.stripe_checkout_view, name='stripe_checkout'),
 ]
+

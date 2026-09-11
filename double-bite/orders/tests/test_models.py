@@ -2,8 +2,8 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
-
 from menu.models import Category, Dish
+
 from orders.exceptions import InvalidStatusTransitionError
 from orders.models import (
     Cart,
@@ -222,3 +222,60 @@ class OrdersModelTest(TestCase):
         self.assertEqual(order_item.price, Decimal('299.00'))
         self.assertEqual(order_item.total_price, Decimal('598.00'))
         self.assertIn('299.00 грн', str(order_item))
+
+    def test_order_item_total_price_handles_none(self):
+        item_empty = OrderItem()
+        self.assertEqual(item_empty.total_price, Decimal('0.00'))
+
+        item_none_price = OrderItem(price=None, quantity=2)
+        self.assertEqual(item_none_price.total_price, Decimal('0.00'))
+
+        item_none_quantity = OrderItem(price=Decimal('100.00'), quantity=None)
+        self.assertEqual(item_none_quantity.total_price, Decimal('0.00'))
+
+        item_both_none = OrderItem(price=None, quantity=None)
+        self.assertEqual(item_both_none.total_price, Decimal('0.00'))
+
+        self.assertIn('0.00 грн', str(item_empty))
+
+    def test_cart_item_total_price_and_unit_price_handles_none(self):
+        item_empty = CartItem()
+        self.assertEqual(item_empty.unit_price, Decimal('0.00'))
+        self.assertEqual(item_empty.total_price, Decimal('0.00'))
+        self.assertFalse(item_empty.is_available)
+        self.assertIn('Позиція кошика', str(item_empty))
+
+        item_none_quantity = CartItem(dish=self.dish1, quantity=None)
+        self.assertEqual(item_none_quantity.total_price, Decimal('0.00'))
+
+    def test_unsaved_cart_properties_return_defaults(self):
+        cart = Cart()
+        self.assertEqual(cart.total_quantity, 0)
+        self.assertEqual(cart.total_amount, Decimal('0.00'))
+
+    def test_order_item_unit_price(self):
+        item_empty = OrderItem()
+        self.assertEqual(item_empty.unit_price, Decimal('0.00'))
+
+        item_with_price = OrderItem(price=Decimal('150.00'))
+        self.assertEqual(item_with_price.unit_price, Decimal('150.00'))
+
+    def test_cart_item_unit_price_malformed_and_negative_options(self):
+        item_malformed = CartItem(
+            dish=self.dish1,
+            selected_options=[
+                {'price_delta': 'invalid_delta'},
+                {'price_delta': None},
+                {'name': 'no_delta'},
+                'not_a_dict',
+            ],
+        )
+        self.assertEqual(item_malformed.unit_price, Decimal('250.00'))
+
+        item_negative_clamped = CartItem(
+            dish=self.dish1,
+            selected_options=[
+                {'price_delta': '-500.00'},
+            ],
+        )
+        self.assertEqual(item_negative_clamped.unit_price, Decimal('0.00'))
