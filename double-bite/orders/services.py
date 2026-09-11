@@ -6,7 +6,8 @@ from typing import Any
 import stripe
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import models, transaction
+from django.db.models import Sum
 from django.http import HttpRequest
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -38,38 +39,67 @@ def _get_val(obj: Any, key: str, default: Any = None) -> Any:
 
 class CartService:
     @staticmethod
+    def _invalidate_cart_cache(request: HttpRequest) -> None:
+        if hasattr(request, '_cached_cart'):
+            delattr(request, '_cached_cart')
+        if hasattr(request, '_cart_items_count_cached'):
+            delattr(request, '_cart_items_count_cached')
+
+    @staticmethod
     def get_or_create_cart(request: HttpRequest) -> Cart:
         if not request.session.session_key:
             request.session.create()
 
         if request.user.is_authenticated:
             cart, _ = Cart.objects.get_or_create(user=request.user)
+            request._cached_cart = cart
             return cart
 
         cart, _ = Cart.objects.get_or_create(session_key=request.session.session_key, user__isnull=True)
         request.session['guest_cart_id'] = cart.id
         request.session.modified = True
+        request._cached_cart = cart
         return cart
 
     @staticmethod
     def get_cart(request: HttpRequest) -> Cart | None:
+        if hasattr(request, '_cached_cart'):
+            return request._cached_cart
+
+        cart = None
         if request.user.is_authenticated:
-            return Cart.objects.filter(user=request.user).first()
-        cart_id = request.session.get('guest_cart_id')
-        if cart_id:
-            cart = Cart.objects.filter(id=cart_id, user__isnull=True).first()
-            if cart:
-                return cart
-        if request.session.session_key:
-            return Cart.objects.filter(session_key=request.session.session_key, user__isnull=True).first()
-        return None
+            cart = Cart.objects.filter(user=request.user).first()
+        else:
+            cart_id = request.session.get('guest_cart_id')
+            if cart_id:
+                cart = Cart.objects.filter(id=cart_id, user__isnull=True).first()
+            if not cart and request.session.session_key:
+                cart = Cart.objects.filter(session_key=request.session.session_key, user__isnull=True).first()
+
+        request._cached_cart = cart
+        return cart
 
     @classmethod
     def get_items_count(cls, request: HttpRequest) -> int:
+        if hasattr(request, '_cart_items_count_cached'):
+            return request._cart_items_count_cached
+
         cart = cls.get_cart(request)
         if not cart:
+            request._cart_items_count_cached = 0
             return 0
-        return cart.total_quantity
+
+        if hasattr(cart, '_prefetched_objects_cache') and 'items' in cart._prefetched_objects_cache:
+            count = cart.total_quantity
+        else:
+            total = cart.items.filter(
+                dish__is_available=True,
+                dish__category__is_active=True,
+            ).aggregate(total=Sum('quantity'))['total']
+            count = total or 0
+
+        request._cart_items_count_cached = count
+        return count
 
     @classmethod
     def add_dish(
@@ -108,14 +138,17 @@ class CartService:
                 if item.selected_options == options_list:
                     item.quantity = min(99, item.quantity + quantity)
                     item.save(update_fields=['quantity', 'updated_at'])
+                    cls._invalidate_cart_cache(request)
                     return item
 
-            return CartItem.objects.create(
+            new_item = CartItem.objects.create(
                 cart=cart,
                 dish=dish,
                 quantity=quantity,
                 selected_options=options_list,
             )
+            cls._invalidate_cart_cache(request)
+            return new_item
 
     @classmethod
     def update_item_quantity(
@@ -132,6 +165,7 @@ class CartService:
         if not item:
             return None
 
+        cls._invalidate_cart_cache(request)
         if quantity <= 0:
             item.delete()
             return None
@@ -150,6 +184,7 @@ class CartService:
 
         item = cart.items.filter(id=item_id).first()
         if item:
+            cls._invalidate_cart_cache(request)
             item.delete()
             return True
         return False
@@ -158,6 +193,7 @@ class CartService:
     def clear_cart(cls, request: HttpRequest) -> None:
         cart = cls.get_cart(request)
         if cart:
+            cls._invalidate_cart_cache(request)
             cart.items.all().delete()
 
     @classmethod

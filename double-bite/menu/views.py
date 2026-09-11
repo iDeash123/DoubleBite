@@ -1,5 +1,6 @@
 from decimal import Decimal, InvalidOperation
 
+from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
 
@@ -11,6 +12,8 @@ from .selectors import (
     get_active_categories,
     get_available_dish_by_slug,
 )
+
+DISHES_PER_PAGE = 12
 
 
 def catalog_view(request: HttpRequest, category_slug: str | None = None) -> HttpResponse:
@@ -44,7 +47,14 @@ def catalog_view(request: HttpRequest, category_slug: str | None = None) -> Http
     ordering_raw = request.GET.get('sort', '').strip()
     ordering = ordering_raw if ordering_raw in SORT_OPTIONS else 'default'
 
-    dishes = filter_dishes(
+    try:
+        page_number = int(request.GET.get('page', 1))
+        if page_number < 1:
+            page_number = 1
+    except (ValueError, TypeError):
+        page_number = 1
+
+    dishes_qs = filter_dishes(
         category_slug=category_slug,
         query=query,
         max_price=max_price,
@@ -53,10 +63,15 @@ def catalog_view(request: HttpRequest, category_slug: str | None = None) -> Http
         only_available=True,
         ordering=ordering,
     )
-    categories = get_active_categories()
+    categories = [] if request.headers.get('HX-Request') else get_active_categories()
+
+    paginator = Paginator(dishes_qs, DISHES_PER_PAGE)
+    page_obj = paginator.get_page(page_number)
 
     context = {
-        'dishes': dishes,
+        'dishes': page_obj,
+        'page_obj': page_obj,
+        'paginator': paginator,
         'categories': categories,
         'selected_category': category_slug,
         'search_query': query or '',
@@ -64,6 +79,7 @@ def catalog_view(request: HttpRequest, category_slug: str | None = None) -> Http
         'is_spicy': is_spicy,
         'max_price': max_price_raw if max_price is not None else '',
         'sort': ordering,
+        'total_dishes': paginator.count,
     }
 
     if request.headers.get('HX-Request'):

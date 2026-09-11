@@ -192,12 +192,14 @@
         </div>
       </div>
     {% endif %}
+    {% if request.META.HTTP_HX_REQUEST %}
     <span id="cart-badge" hx-swap-oob="true" class="inline-flex items-center justify-center min-w-[18px] h-4.5 px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
       {{ total_quantity|default:0 }}
     </span>
     <span id="cart-badge-mobile" hx-swap-oob="true" class="inline-flex items-center justify-center min-w-[18px] h-4.5 px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
       {{ total_quantity|default:0 }}
     </span>
+    {% endif %}
   </div>
   {% endpartialdef %}
 

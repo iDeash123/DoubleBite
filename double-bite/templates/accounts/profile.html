@@ -99,7 +99,7 @@
       <div class="bg-white p-6 sm:p-8 border border-fv-noir/20 rounded-none">
         <div class="flex items-center justify-between border-b border-fv-noir/10 pb-4 mb-6">
           <h2 class="text-lg font-bold tracking-tight text-fv-noir font-sans">Збережені адреси доставки</h2>
-          <span class="text-xs font-mono text-fv-slate">{{ addresses.count }} адрес(и)</span>
+          <span class="text-xs font-mono text-fv-slate">{{ addresses|length }} адрес(и)</span>
         </div>
 
         {% if addresses %}
@@ -239,7 +239,7 @@
                     <span class="text-[10px] font-mono px-2 py-0.5 bg-fv-noir text-white uppercase">{{ order.get_status_display }}</span>
                   </div>
                   <div class="text-xs font-mono text-fv-slate">
-                    {{ order.items.count }} позицій · {{ order.total_amount }} грн
+                    {{ order.items.all|length }} позицій · {{ order.total_amount }} грн
                   </div>
                 </div>
                 <a href="{% url 'orders:tracking' order.order_number %}" class="px-3 py-1 text-xs font-mono uppercase bg-fv-noir text-white hover:bg-black transition-colors">

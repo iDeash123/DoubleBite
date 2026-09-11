@@ -31,8 +31,8 @@ logger = logging.getLogger('orders')
 def cart_view(request: HttpRequest) -> HttpResponse:
     cart = CartService.get_cart(request)
     items = list(cart.items.select_related('dish', 'dish__category').all()) if cart else []
-    total_amount = cart.total_amount if cart else Decimal('0.00')
-    total_quantity = cart.total_quantity if cart else 0
+    total_amount = sum((item.total_price for item in items if item.is_available), Decimal('0.00'))
+    total_quantity = sum((item.quantity or 0 for item in items if item.is_available), 0)
 
     min_order_amount = Decimal(os.getenv('MIN_ORDER_AMOUNT', '200'))
     meets_min_amount = (total_amount >= min_order_amount)
@@ -158,8 +158,9 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
         messages.warning(request, 'Кошик порожній. Додайте страви для оформлення замовлення.')
         return redirect('orders:cart')
 
-    total_amount = cart.total_amount
-    total_quantity = cart.total_quantity
+    items = list(cart.items.select_related('dish', 'dish__category').all())
+    total_amount = sum((item.total_price for item in items if item.is_available), Decimal('0.00'))
+    total_quantity = sum((item.quantity or 0 for item in items if item.is_available), 0)
     min_order_amount = Decimal(os.getenv('MIN_ORDER_AMOUNT', '200'))
 
     if total_amount < min_order_amount:
@@ -168,8 +169,6 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
             f'Мінімальна сума замовлення — {min_order_amount} грн. Додайте ще страв до кошика.',
         )
         return redirect('orders:cart')
-
-    items = list(cart.items.select_related('dish', 'dish__category').all())
 
     if request.method == 'POST':
         form = OrderCheckoutForm(request.POST)
@@ -287,8 +286,8 @@ def order_cancel_view(request: HttpRequest, order_number: str) -> HttpResponse:
 def cart_drawer_view(request: HttpRequest) -> HttpResponse:
     cart = CartService.get_cart(request)
     items = list(cart.items.select_related('dish', 'dish__category').all()) if cart else []
-    total_amount = cart.total_amount if cart else Decimal('0.00')
-    total_quantity = cart.total_quantity if cart else 0
+    total_amount = sum((item.total_price for item in items if item.is_available), Decimal('0.00'))
+    total_quantity = sum((item.quantity or 0 for item in items if item.is_available), 0)
     min_order_amount = Decimal(os.getenv('MIN_ORDER_AMOUNT', '200'))
     meets_min_amount = (total_amount >= min_order_amount)
 

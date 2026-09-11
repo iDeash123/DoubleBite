@@ -74,7 +74,7 @@ class Cart(models.Model):
             return 0
         return sum(
             item.quantity or 0
-            for item in self.items.all()
+            for item in self.items.select_related('dish', 'dish__category').all()
             if item.is_available
         )
 
@@ -85,7 +85,7 @@ class Cart(models.Model):
         return sum(
             (
                 item.total_price
-                for item in self.items.all()
+                for item in self.items.select_related('dish', 'dish__category').all()
                 if item.is_available
             ),
             Decimal('0.00'),

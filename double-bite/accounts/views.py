@@ -79,8 +79,8 @@ class ProfileView(LoginRequiredMixin, View):
 
         user_form = UserProfileForm(instance=request.user)
         address_form = DeliveryAddressForm()
-        addresses = DeliveryAddress.objects.filter(user=request.user)
-        orders = Order.objects.filter(user=request.user).prefetch_related('items').order_by('-created_at')[:5]
+        addresses = list(DeliveryAddress.objects.filter(user=request.user))
+        orders = list(Order.objects.filter(user=request.user).prefetch_related('items').order_by('-created_at')[:5])
         return render(
             request,
             'accounts/profile.html',

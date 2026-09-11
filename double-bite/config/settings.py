@@ -30,6 +30,7 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 'yes')
+is_testing = 'pytest' in sys.modules or 'test' in sys.argv
 
 ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', '').split(',') if h.strip()]
 
@@ -59,6 +60,20 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+if DEBUG and not is_testing:
+    INSTALLED_APPS.append('debug_toolbar')
+    MIDDLEWARE.insert(0, 'debug_toolbar.middleware.DebugToolbarMiddleware')
+
+INTERNAL_IPS = [
+    '127.0.0.1',
+    '::1',
+    'localhost',
+]
+
+DEBUG_TOOLBAR_CONFIG = {
+    'SHOW_TOOLBAR_CALLBACK': lambda request: DEBUG and not is_testing and not request.headers.get('HX-Request'),
+}
+
 ROOT_URLCONF = 'config.urls'
 
 TEMPLATES = [
@@ -85,7 +100,6 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
 db_engine = os.getenv('DB_ENGINE', 'django.db.backends.sqlite3')
-is_testing = 'pytest' in sys.modules or 'test' in sys.argv
 
 if is_testing and not os.getenv('TEST_WITH_POSTGRES'):
     DATABASES = {

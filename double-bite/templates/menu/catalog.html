@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load menu_extras %}
 
 {% block title %}Меню страв — Double Bite™ | Авторська ресторанна доставка в Києві{% endblock %}
 {% block meta_description %}Ознайомтеся з повним авторським меню Double Bite: неаполітанська піца, сети преміальних суші, мармурові бургери, свіжі салати та вишукані десерти.{% endblock %}
@@ -29,7 +30,7 @@
         </h1>
       </div>
       <div class="text-xs font-mono text-fv-slate">
-        <span>Всього позицій у меню: <strong class="text-fv-noir">{{ dishes|length }}</strong></span>
+        <span>Всього позицій у меню: <strong class="text-fv-noir">{{ total_dishes }}</strong></span>
       </div>
     </div>
   </div>
@@ -38,10 +39,12 @@
         hx-get="{% url 'menu:catalog' %}"
         hx-target="#dish-grid"
         hx-swap="outerHTML"
-        hx-trigger="change from:input, keyup delay:300ms from:#search-input"
-        hx-push-url="true">
+        hx-trigger="change, input delay:300ms from:#search-input, input delay:600ms from:[name='max_price'], submit"
+        hx-push-url="true"
+        hx-on::before-request="document.getElementById('page-input').value = ''">
     
     <input type="hidden" name="category" id="category-input" value="{{ selected_category|default:'' }}">
+    <input type="hidden" name="page" id="page-input" value="">
 
     <div class="flex flex-wrap items-center gap-2 border-b border-fv-noir/10 pb-4">
       <button
@@ -138,18 +141,59 @@
   </form>
 
   {% partialdef dish-grid inline %}
-  <div id="dish-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-    {% for dish in dishes %}
-      {% include "menu/_dish_card.html" %}
-    {% empty %}
-      <div class="col-span-full py-16 text-center border border-dashed border-fv-noir/20 bg-white">
-        <p class="font-serif italic text-lg text-fv-noir mb-2">Страв за обраними критеріями не знайдено</p>
-        <p class="font-mono text-xs text-fv-slate uppercase tracking-wider mb-4">Спробуйте очистити пошуковий фільтр</p>
-        <a href="{% url 'menu:catalog' %}" class="inline-block px-6 py-2.5 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors">
-          Показати все меню
-        </a>
-      </div>
-    {% endfor %}
+  <div id="dish-grid">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+      {% for dish in dishes %}
+        {% include "menu/_dish_card.html" %}
+      {% empty %}
+        <div class="col-span-full py-16 text-center border border-dashed border-fv-noir/20 bg-white">
+          <p class="font-serif italic text-lg text-fv-noir mb-2">Страв за обраними критеріями не знайдено</p>
+          <p class="font-mono text-xs text-fv-slate uppercase tracking-wider mb-4">Спробуйте очистити пошуковий фільтр</p>
+          <a href="{% url 'menu:catalog' %}" class="inline-block px-6 py-2.5 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors">
+            Показати все меню
+          </a>
+        </div>
+      {% endfor %}
+    </div>
+
+    {% if paginator.num_pages > 1 %}
+    <nav class="mt-10 flex items-center justify-center gap-1 font-mono text-xs" aria-label="Пагінація">
+
+      {# ← Попередня #}
+      {% if page_obj.has_previous %}
+        <a href="?{% query_transform page=page_obj.previous_page_number %}"
+           class="px-3 py-2 border border-fv-noir/20 text-fv-noir hover:bg-fv-noir hover:text-white transition-colors"
+           aria-label="Попередня сторінка">←</a>
+      {% else %}
+        <span class="px-3 py-2 border border-fv-noir/10 text-fv-noir/30 cursor-not-allowed">←</span>
+      {% endif %}
+
+      {# Номери сторінок #}
+      {% for num in paginator.page_range %}
+        {% if num == page_obj.number %}
+          <span class="px-3 py-2 bg-fv-noir text-white border border-fv-noir" aria-current="page">{{ num }}</span>
+        {% elif num == 1 or num == paginator.num_pages or num >= page_obj.number|add:"-2" and num <= page_obj.number|add:"2" %}
+          <a href="?{% query_transform page=num %}"
+             class="px-3 py-2 border border-fv-noir/20 text-fv-noir hover:bg-fv-noir hover:text-white transition-colors">{{ num }}</a>
+        {% elif num == page_obj.number|add:"-3" or num == page_obj.number|add:"3" %}
+          <span class="px-3 py-2 text-fv-slate">…</span>
+        {% endif %}
+      {% endfor %}
+
+      {# → Наступна #}
+      {% if page_obj.has_next %}
+        <a href="?{% query_transform page=page_obj.next_page_number %}"
+           class="px-3 py-2 border border-fv-noir/20 text-fv-noir hover:bg-fv-noir hover:text-white transition-colors"
+           aria-label="Наступна сторінка">→</a>
+      {% else %}
+        <span class="px-3 py-2 border border-fv-noir/10 text-fv-noir/30 cursor-not-allowed">→</span>
+      {% endif %}
+
+    </nav>
+    <p class="mt-3 text-center font-mono text-[11px] text-fv-slate uppercase tracking-widest">
+      Сторінка {{ page_obj.number }} з {{ paginator.num_pages }} · Всього {{ total_dishes }} страв
+    </p>
+    {% endif %}
   </div>
   {% endpartialdef %}
 
