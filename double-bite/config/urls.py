@@ -12,7 +12,9 @@ urlpatterns = [
     path('menu/', include('menu.urls')),
     path('orders/', include('orders.urls')),
     path('cart/', orders_views.cart_view, name='cart_direct'),
+    path('cart/drawer/', orders_views.cart_drawer_view, name='cart_drawer_direct'),
     path('cart/add/<int:dish_id>/', orders_views.cart_add_view, name='cart_add_direct'),
     path('cart/update/<int:item_id>/', orders_views.cart_update_view, name='cart_update_direct'),
     path('cart/remove/<int:item_id>/', orders_views.cart_remove_view, name='cart_remove_direct'),
+    path('cart/clear/', orders_views.cart_clear_view, name='cart_clear_direct'),
 ]

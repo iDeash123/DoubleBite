@@ -120,7 +120,7 @@
 
       <div class="divide-y divide-fv-noir/10 max-h-[380px] overflow-y-auto pr-2 space-y-3">
         {% for item in items %}
-          <div class="pt-3 first:pt-0 flex items-center justify-between gap-3">
+          <div class="pt-3 first:pt-0 flex items-center justify-between gap-3 {% if not item.is_available %}opacity-50 bg-fv-offwhite/50 p-2 border border-dashed border-red-300{% endif %}">
             <div class="flex items-center gap-3">
               <div class="w-12 h-12 bg-fv-offwhite border border-fv-noir/10 flex-shrink-0 flex items-center justify-center overflow-hidden">
                 {% if item.dish.image %}
@@ -131,11 +131,28 @@
               </div>
               <div>
                 <div class="font-sans font-bold text-xs text-fv-noir">{{ item.dish.title }}</div>
+                {% if item.selected_options %}
+                  <div class="text-[10px] font-mono text-fv-slate">
+                    {% for opt in item.selected_options %}
+                      <span>+ {{ opt.name }}{% if not forloop.last %}, {% endif %}</span>
+                    {% endfor %}
+                  </div>
+                {% endif %}
                 <div class="text-[10px] font-mono text-fv-slate">{{ item.quantity }} × {{ item.unit_price }} грн</div>
+                {% if not item.is_available %}
+                  <div class="text-[10px] font-mono text-red-600 font-semibold mt-0.5">
+                    ⚠️ Ця страва тимчасово недоступна (не увійде до замовлення)
+                  </div>
+                {% endif %}
               </div>
             </div>
-            <div class="font-mono font-bold text-xs text-fv-noir">
-              {{ item.total_price }} грн
+            <div class="font-mono font-bold text-xs text-fv-noir text-right">
+              {% if item.is_available %}
+                {{ item.total_price }} грн
+              {% else %}
+                <span class="text-fv-slate line-through text-[11px] block">{{ item.total_price }} грн</span>
+                <span class="text-[9px] text-red-600 block">не враховано</span>
+              {% endif %}
             </div>
           </div>
         {% endfor %}

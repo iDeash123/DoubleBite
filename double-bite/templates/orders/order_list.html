@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Мої замовлення — Double Bite™{% endblock %}
+{% block meta_description %}Історія замовлень та відстеження доставки клієнта Double Bite.{% endblock %}
+
+{% block content %}
+<div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-8 sm:py-12">
+  <nav class="flex items-center text-xs font-mono uppercase tracking-wider text-fv-slate mb-6" aria-label="Хлібні крихти">
+    <a href="/" class="hover:text-fv-noir transition-colors">Головна</a>
+    <span class="mx-2 text-fv-slate/40">/</span>
+    <a href="{% url 'accounts:profile' %}" class="hover:text-fv-noir transition-colors">Особистий кабінет</a>
+    <span class="mx-2 text-fv-slate/40">/</span>
+    <span class="text-fv-noir font-semibold">Мої замовлення</span>
+  </nav>
+
+  <div class="border-b border-fv-noir/15 pb-6 mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+    <div>
+      <span class="font-serif italic text-sm text-fv-slate uppercase tracking-widest block mb-1">
+        Історія замовлень
+      </span>
+      <h1 class="font-sans font-black text-3xl sm:text-4xl text-fv-noir tracking-tight uppercase">
+        Мої замовлення
+      </h1>
+    </div>
+    <div class="font-mono text-xs text-fv-slate">
+      Клієнт: <span class="text-fv-noir font-semibold">{{ user.email }}</span>
+    </div>
+  </div>
+
+  {% if not orders %}
+    <div class="py-16 text-center border border-dashed border-fv-noir/20 bg-white">
+      <svg class="w-12 h-12 mx-auto text-fv-slate/40 mb-3 stroke-current" fill="none" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+      </svg>
+      <p class="font-serif italic text-xl text-fv-noir mb-2">У вас ще немає замовлень</p>
+      <p class="font-mono text-xs text-fv-slate uppercase tracking-wider mb-6">Оберіть авторські страви у нашому меню</p>
+      <a href="{% url 'menu:catalog' %}" class="inline-block px-8 py-3 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors">
+        Перейти до меню
+      </a>
+    </div>
+  {% else %}
+    <div class="space-y-4">
+      {% for order in orders %}
+        <div class="bg-white p-6 border border-fv-noir/15 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 hover:border-fv-noir/40 transition-colors">
+          <div class="space-y-2 flex-1">
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="font-mono font-bold text-base text-fv-noir">
+                {{ order.order_number }}
+              </span>
+              <span class="text-xs font-mono text-fv-slate">
+                {{ order.created_at|date:"d.m.Y H:i" }}
+              </span>
+              {% if order.status == 'DELIVERED' %}
+                <span class="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-mono font-bold uppercase tracking-wider">
+                  Доставлено ✓
+                </span>
+              {% elif order.status == 'CANCELLED' %}
+                <span class="px-2.5 py-0.5 bg-red-100 text-red-800 text-[10px] font-mono font-bold uppercase tracking-wider">
+                  Скасовано ✕
+                </span>
+              {% else %}
+                <span class="px-2.5 py-0.5 bg-fv-noir text-white text-[10px] font-mono uppercase tracking-wider">
+                  {{ order.get_status_display }}
+                </span>
+              {% endif %}
+            </div>
+
+            <div class="text-xs font-mono text-fv-slate">
+              {% for item in order.items.all %}
+                <span>{{ item.dish_title }} (×{{ item.quantity }}){% if not forloop.last %}, {% endif %}</span>
+              {% endfor %}
+            </div>
+
+            <div class="text-[11px] font-mono text-fv-slate">
+              Адреса: <span class="text-fv-noir">{{ order.delivery_address }}</span> ·
+              Оплата: <span class="text-fv-noir">{{ order.get_payment_method_display }}</span>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between md:justify-end gap-6 w-full md:w-auto border-t md:border-t-0 pt-4 md:pt-0 border-fv-noir/10">
+            <div class="text-right">
+              <div class="text-[10px] font-mono uppercase text-fv-slate">Сума</div>
+              <div class="font-mono font-bold text-lg text-fv-noir">{{ order.total_amount }} грн</div>
+            </div>
+            <a href="{% url 'orders:tracking' order.order_number %}"
+               class="px-5 py-2.5 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors">
+              Відстежити
+            </a>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

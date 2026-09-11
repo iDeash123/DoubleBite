@@ -218,6 +218,43 @@
 
       </div>
 
+      <div class="bg-white p-6 sm:p-8 border border-fv-noir/20 rounded-none mt-8">
+        <div class="flex items-center justify-between border-b border-fv-noir/10 pb-4 mb-6">
+          <h2 class="text-lg font-bold tracking-tight text-fv-noir font-sans">Останні замовлення</h2>
+          {% if orders %}
+            <a href="{% url 'orders:order_list' %}" class="text-xs font-mono text-fv-noir hover:underline">
+              Усі замовлення →
+            </a>
+          {% endif %}
+        </div>
+
+        {% if orders %}
+          <div class="space-y-3">
+            {% for order in orders %}
+              <div class="p-4 border border-fv-noir/15 bg-fv-offwhite/60 flex items-center justify-between gap-4">
+                <div>
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="font-mono font-bold text-xs text-fv-noir">{{ order.order_number }}</span>
+                    <span class="text-[10px] font-mono text-fv-slate">{{ order.created_at|date:"d.m.Y H:i" }}</span>
+                    <span class="text-[10px] font-mono px-2 py-0.5 bg-fv-noir text-white uppercase">{{ order.get_status_display }}</span>
+                  </div>
+                  <div class="text-xs font-mono text-fv-slate">
+                    {{ order.items.count }} позицій · {{ order.total_amount }} грн
+                  </div>
+                </div>
+                <a href="{% url 'orders:tracking' order.order_number %}" class="px-3 py-1 text-xs font-mono uppercase bg-fv-noir text-white hover:bg-black transition-colors">
+                  Статус
+                </a>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="p-6 bg-fv-offwhite border border-dashed border-fv-noir/20 text-center text-xs font-mono text-fv-slate">
+            У вас ще немає оформлених замовлень.
+          </div>
+        {% endif %}
+      </div>
+
     </div>
   </div>
 

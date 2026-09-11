@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client, RequestFactory, TestCase
 from django.urls import reverse
 
-from accounts.models import DeliveryAddress
+from accounts.models import DeliveryAddress, Role
 from menu.models import Category, Dish, DishOption
 from orders.exceptions import CartEmptyError, OrderMinimumAmountError
 from orders.models import Cart, CartItem, Order, OrderStatus
@@ -233,6 +233,15 @@ class CheckoutAndTrackingTest(TestCase):
         )
 
         cancel_url = reverse('orders:order_cancel', kwargs={'order_number': order.order_number})
+
+        # Anonymous attacker attempt is blocked
+        attacker_resp = self.client.post(cancel_url)
+        self.assertEqual(attacker_resp.status_code, 403)
+        order.refresh_from_db()
+        self.assertEqual(order.status, OrderStatus.PENDING)
+
+        # Authenticated owner can cancel
+        self.client.force_login(self.user)
         response = self.client.post(cancel_url)
         self.assertRedirects(response, reverse('orders:tracking', kwargs={'order_number': order.order_number}))
 
@@ -245,3 +254,26 @@ class CheckoutAndTrackingTest(TestCase):
         response2 = self.client.post(cancel_url)
         order.refresh_from_db()
         self.assertEqual(order.status, OrderStatus.DELIVERED)
+
+    def test_staff_cannot_checkout(self):
+        admin_user = User.objects.create_user(
+            email='admin@doublebite.ua',
+            password='AdminPassword123!',
+            role=Role.RESTAURANT_ADMIN,
+        )
+        self.client.force_login(admin_user)
+        response = self.client.get(reverse('orders:checkout'))
+        self.assertEqual(response.status_code, 403)
+
+    def test_checkout_view_displays_unavailable_item_warning(self):
+        self.client.force_login(self.user)
+        # Add available and unavailable dish
+        self.client.post(reverse('orders:cart_add', kwargs={'dish_id': self.dish1.id}))
+        cart = Cart.objects.get(user=self.user)
+        CartItem.objects.create(cart=cart, dish=self.dish_unavailable, quantity=1)
+
+        response = self.client.get(reverse('orders:checkout'))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode('utf-8')
+        self.assertIn('Ця страва тимчасово недоступна', content)
+        self.assertIn('не враховано', content)

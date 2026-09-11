@@ -30,7 +30,7 @@
   {% partialdef order-status inline %}
   <div id="order-status"
        hx-get="{% url 'orders:tracking_status' order.order_number %}"
-       hx-trigger="every 10s"
+       {% if order.status != 'DELIVERED' and order.status != 'CANCELLED' %}hx-trigger="every 10s"{% endif %}
        hx-swap="outerHTML"
        class="space-y-8">
     
@@ -114,7 +114,7 @@
         </div>
       {% endif %}
 
-      {% if order.status in 'PENDING,PAID' %}
+      {% if can_cancel %}
         <div class="pt-6 mt-4 border-t border-fv-noir/10 flex justify-end">
           <form method="post" action="{% url 'orders:order_cancel' order.order_number %}">
             {% csrf_token %}

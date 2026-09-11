@@ -40,6 +40,7 @@
   <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
 
   <style>
+    [x-cloak] { display: none !important; }
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #f1f1f1; }
     ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 0; }
@@ -52,9 +53,22 @@
       body { background: white !important; color: black !important; }
     }
   </style>
+  <script>
+    document.addEventListener('htmx:configRequest', function(evt) {
+      let token = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
+      if (!token) {
+        const match = document.cookie.match(/csrftoken=([^;]+)/);
+        if (match) token = match[1];
+      }
+      if (token) {
+        evt.detail.headers['X-CSRFToken'] = token;
+      }
+    });
+  </script>
   {% block extra_head %}{% endblock %}
 </head>
-<body class="bg-fv-offwhite text-fv-noir font-sans antialiased selection:bg-fv-noir selection:text-white relative min-h-screen flex flex-col" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+<body class="bg-fv-offwhite text-fv-noir font-sans antialiased selection:bg-fv-noir selection:text-white relative min-h-screen flex flex-col">
+  <div style="display:none">{% csrf_token %}</div>
 
   <div id="grid-overlay" class="fixed inset-0 pointer-events-none z-50 overflow-hidden hidden">
     <div class="max-w-[1440px] mx-auto h-full px-4 sm:px-8 relative border-x border-red-500/20">
@@ -143,9 +157,11 @@
             </a>
           {% endif %}
 
-          <a
-            href="/orders/cart/"
-            class="flex items-center justify-center hover:bg-fv-offwhite transition-colors text-fv-noir relative gap-1"
+          <button
+            type="button"
+            @click="$dispatch('open-cart-drawer')"
+            onclick="window.dispatchEvent(new CustomEvent('open-cart-drawer'))"
+            class="flex items-center justify-center hover:bg-fv-offwhite transition-colors text-fv-noir relative gap-1 cursor-pointer"
             title="Кошик"
           >
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -153,8 +169,10 @@
               <line x1="3" y1="6" x2="21" y2="6"></line>
               <path d="M16 10a4 4 0 0 1-8 0"></path>
             </svg>
-            {% include "partials/cart_badge.html" %}
-          </a>
+            <span id="cart-badge" class="inline-flex items-center justify-center min-w-[18px] h-4.5 px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
+              {{ cart_items_count|default:0 }}
+            </span>
+          </button>
         </div>
       </nav>
 
@@ -178,10 +196,18 @@
             </a>
           {% endif %}
 
-          <a href="/orders/cart/" class="flex items-center gap-1 px-2 py-1 border border-fv-noir/20 text-fv-noir">
+          <button
+            type="button"
+            @click="$dispatch('open-cart-drawer')"
+            onclick="window.dispatchEvent(new CustomEvent('open-cart-drawer'))"
+            class="flex items-center gap-1 px-2 py-1 border border-fv-noir/20 text-fv-noir cursor-pointer"
+            title="Кошик"
+          >
             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/></svg>
-            {% include "partials/cart_badge.html" %}
-          </a>
+            <span id="cart-badge-mobile" class="inline-flex items-center justify-center min-w-[18px] h-4.5 px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
+              {{ cart_items_count|default:0 }}
+            </span>
+          </button>
 
           <button @click="mobileOpen = !mobileOpen" class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
@@ -808,6 +834,7 @@
     </div>
   </footer>
 
+  {% include "partials/cart_drawer.html" %}
   {% include "support/chat_widget.html" %}
 
   <script>
