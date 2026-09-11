@@ -31,15 +31,22 @@ class CartService:
             cart, _ = Cart.objects.get_or_create(user=request.user)
             return cart
 
-        cart, _ = Cart.objects.get_or_create(session_key=request.session.session_key)
+        cart, _ = Cart.objects.get_or_create(session_key=request.session.session_key, user__isnull=True)
+        request.session['guest_cart_id'] = cart.id
+        request.session.modified = True
         return cart
 
     @staticmethod
     def get_cart(request: HttpRequest) -> Cart | None:
         if request.user.is_authenticated:
             return Cart.objects.filter(user=request.user).first()
+        cart_id = request.session.get('guest_cart_id')
+        if cart_id:
+            cart = Cart.objects.filter(id=cart_id, user__isnull=True).first()
+            if cart:
+                return cart
         if request.session.session_key:
-            return Cart.objects.filter(session_key=request.session.session_key).first()
+            return Cart.objects.filter(session_key=request.session.session_key, user__isnull=True).first()
         return None
 
     @classmethod
@@ -82,8 +89,8 @@ class CartService:
         cart = cls.get_or_create_cart(request)
 
         with transaction.atomic():
-            # Find item matching dish and identical options
-            for item in cart.items.select_for_update().filter(dish=dish):
+            cart = Cart.objects.select_for_update().get(id=cart.id)
+            for item in cart.items.filter(dish=dish):
                 if item.selected_options == options_list:
                     item.quantity = min(99, item.quantity + quantity)
                     item.save(update_fields=['quantity', 'updated_at'])
@@ -142,20 +149,26 @@ class CartService:
 
     @classmethod
     def merge_guest_cart(cls, request: HttpRequest, user: Any) -> None:
-        session_key = getattr(request.session, 'session_key', None)
-        if not session_key:
-            return
+        guest_cart = None
+        cart_id = request.session.get('guest_cart_id')
+        if cart_id:
+            guest_cart = Cart.objects.filter(id=cart_id, user__isnull=True).first()
 
-        guest_cart = (
-            Cart.objects.filter(session_key=session_key)
-            .exclude(user__isnull=False)
-            .first()
-        )
+        if not guest_cart:
+            pre_key = request.session.get('_pre_login_session_key')
+            if pre_key:
+                guest_cart = Cart.objects.filter(session_key=pre_key, user__isnull=True).first()
+
+        if not guest_cart:
+            session_key = getattr(request.session, 'session_key', None)
+            if session_key:
+                guest_cart = Cart.objects.filter(session_key=session_key, user__isnull=True).first()
+
         if not guest_cart:
             return
 
         with transaction.atomic():
-            user_cart, _ = Cart.objects.get_or_create(user=user)
+            user_cart, _ = Cart.objects.select_for_update().get_or_create(user=user)
 
             for guest_item in list(guest_cart.items.select_related('dish').all()):
                 matched = False
@@ -171,6 +184,9 @@ class CartService:
                     guest_item.save(update_fields=['cart', 'updated_at'])
 
             guest_cart.delete()
+            request.session.pop('guest_cart_id', None)
+            request.session.pop('_pre_login_session_key', None)
+            request.session.modified = True
 
 
 class OrderService:
@@ -249,8 +265,7 @@ class OrderService:
                     selected_options=item.selected_options,
                 )
 
-            # Clear cart items upon successful order placement
-            cart.items.all().delete()
+            cart.items.filter(id__in=[item.id for item in available_items]).delete()
 
         return order
 

@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from django.conf import settings
@@ -124,7 +124,10 @@ class CartItem(models.Model):
             for opt in self.selected_options:
                 if isinstance(opt, dict):
                     val = opt.get('price_delta', 0)
-                    delta += Decimal(str(val))
+                    try:
+                        delta += Decimal(str(val))
+                    except (InvalidOperation, TypeError):
+                        pass
         return base + delta
 
     @property

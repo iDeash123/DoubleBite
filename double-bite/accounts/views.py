@@ -29,6 +29,8 @@ class RegisterView(View):
         form = UserRegistrationForm(request.POST)
         if form.is_valid():
             user = form.save()
+            if request.session.session_key:
+                request.session['_pre_login_session_key'] = request.session.session_key
             login(request, user)
             messages.success(request, 'Реєстрація успішна! Ласкаво просимо до Double Bite.')
             return redirect(request.GET.get('next', 'accounts:profile'))
@@ -49,6 +51,8 @@ class LoginView(View):
         if form.is_valid():
             user = form.get_user()
             if user:
+                if request.session.session_key:
+                    request.session['_pre_login_session_key'] = request.session.session_key
                 login(request, user)
                 messages.success(request, 'Ви успішно увійшли в систему.')
                 return redirect(request.GET.get('next', 'accounts:profile'))
@@ -71,9 +75,12 @@ class ProfileView(LoginRequiredMixin, View):
     login_url = '/accounts/login/'
 
     def get(self, request: HttpRequest) -> HttpResponse:
+        from orders.models import Order
+
         user_form = UserProfileForm(instance=request.user)
         address_form = DeliveryAddressForm()
         addresses = DeliveryAddress.objects.filter(user=request.user)
+        orders = Order.objects.filter(user=request.user).prefetch_related('items').order_by('-created_at')[:5]
         return render(
             request,
             'accounts/profile.html',
@@ -81,6 +88,7 @@ class ProfileView(LoginRequiredMixin, View):
                 'user_form': user_form,
                 'address_form': address_form,
                 'addresses': addresses,
+                'orders': orders,
             },
         )
 

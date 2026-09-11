@@ -145,19 +145,61 @@ class CartServiceTest(TestCase):
         CartService.add_dish(req, dish_id=self.dish1.id, quantity=2)
         CartService.add_dish(req, dish_id=self.dish2.id, quantity=1)
 
-        # Pre-existing user cart with 1 dish1
         user_cart = Cart.objects.create(user=self.user)
         CartItem.objects.create(cart=user_cart, dish=self.dish1, quantity=1)
 
-        # Merge
         CartService.merge_guest_cart(req, user=self.user)
 
         user_cart.refresh_from_db()
         self.assertEqual(user_cart.items.count(), 2)
         item_d1 = user_cart.items.get(dish=self.dish1)
-        self.assertEqual(item_d1.quantity, 3) # 1 + 2 = 3
+        self.assertEqual(item_d1.quantity, 3)
         item_d2 = user_cart.items.get(dish=self.dish2)
         self.assertEqual(item_d2.quantity, 1)
 
-        # Guest cart was deleted
         self.assertFalse(Cart.objects.filter(session_key='guest_session_999').exists())
+
+    def test_merge_guest_cart_via_real_login_view(self):
+        client = self.client_class()
+        client.post(f'/cart/add/{self.dish1.id}/', {'quantity': '2'})
+
+        guest_session_key = client.session.session_key
+        self.assertTrue(bool(guest_session_key))
+        guest_cart = Cart.objects.filter(session_key=guest_session_key).first()
+        self.assertIsNotNone(guest_cart)
+        self.assertEqual(guest_cart.items.count(), 1)
+
+        resp = client.post('/accounts/login/', {
+            'email': 'shopper@doublebite.ua',
+            'password': 'StrongPassword123!',
+        })
+        self.assertEqual(resp.status_code, 302)
+
+        user_cart = Cart.objects.filter(user=self.user).first()
+        self.assertIsNotNone(user_cart)
+        self.assertEqual(user_cart.items.count(), 1)
+        self.assertEqual(user_cart.items.first().quantity, 2)
+        self.assertFalse(Cart.objects.filter(id=guest_cart.id).exists())
+
+    def test_unit_price_handles_malformed_delta(self):
+        cart = Cart.objects.create(user=self.user)
+        item = CartItem.objects.create(
+            cart=cart,
+            dish=self.dish1,
+            quantity=1,
+            selected_options=[
+                {'name': 'Тест', 'price_delta': None},
+                {'name': 'Невірне', 'price_delta': 'invalid'},
+                {'name': 'Валідне', 'price_delta': '25.50'},
+            ],
+        )
+        self.assertEqual(item.unit_price, Decimal('275.50'))
+
+    def test_add_dish_same_dish_multiple_calls(self):
+        req = self._get_request(user=self.user)
+        CartService.add_dish(req, dish_id=self.dish1.id, quantity=2)
+        CartService.add_dish(req, dish_id=self.dish1.id, quantity=3)
+
+        cart = CartService.get_cart(req)
+        self.assertEqual(cart.items.count(), 1)
+        self.assertEqual(cart.items.first().quantity, 5)
