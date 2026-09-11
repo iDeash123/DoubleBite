@@ -37,6 +37,7 @@
   <form id="menu-filter-form" method="get" action="{% url 'menu:catalog' %}" class="space-y-6 mb-10"
         hx-get="{% url 'menu:catalog' %}"
         hx-target="#dish-grid"
+        hx-swap="outerHTML"
         hx-trigger="change from:input, keyup delay:300ms from:#search-input"
         hx-push-url="true">
     
@@ -78,7 +79,7 @@
         </svg>
       </div>
 
-      <div class="md:col-span-3">
+      <div class="md:col-span-2">
         <input
           type="number"
           name="max_price"
@@ -90,7 +91,23 @@
         >
       </div>
 
-      <div class="md:col-span-4 flex items-center justify-start md:justify-end gap-5 text-xs font-mono select-none">
+      <div class="md:col-span-2">
+        <select
+          name="sort"
+          class="w-full px-3 py-2.5 text-xs font-mono bg-fv-offwhite border border-fv-noir/20 focus:outline-none focus:border-fv-noir text-fv-noir appearance-none cursor-pointer"
+          style="background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23888' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E\"); background-repeat: no-repeat; background-position: right 0.6rem center; background-size: 1rem; padding-right: 2rem;"
+        >
+          <option value="default"     {% if sort == 'default'     %}selected{% endif %}>За замовчуванням</option>
+          <option value="price_asc"   {% if sort == 'price_asc'   %}selected{% endif %}>Ціна: від низької</option>
+          <option value="price_desc"  {% if sort == 'price_desc'  %}selected{% endif %}>Ціна: від високої</option>
+          <option value="name_asc"    {% if sort == 'name_asc'    %}selected{% endif %}>Назва: А → Я</option>
+          <option value="name_desc"   {% if sort == 'name_desc'   %}selected{% endif %}>Назва: Я → А</option>
+          <option value="calories_asc"  {% if sort == 'calories_asc'  %}selected{% endif %}>Калорії: від менших</option>
+          <option value="calories_desc" {% if sort == 'calories_desc' %}selected{% endif %}>Калорії: від більших</option>
+        </select>
+      </div>
+
+      <div class="md:col-span-3 flex items-center justify-start md:justify-end gap-5 text-xs font-mono select-none">
         <label class="inline-flex items-center gap-2 cursor-pointer">
           <input
             type="checkbox"

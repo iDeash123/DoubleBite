@@ -6,6 +6,7 @@ from django.shortcuts import render
 from config.partials import render_partial_or_full
 from .models import Category
 from .selectors import (
+    SORT_OPTIONS,
     filter_dishes,
     get_active_categories,
     get_available_dish_by_slug,
@@ -40,6 +41,9 @@ def catalog_view(request: HttpRequest, category_slug: str | None = None) -> Http
     elif is_spicy_raw in ('false', '0'):
         is_spicy = False
 
+    ordering_raw = request.GET.get('sort', '').strip()
+    ordering = ordering_raw if ordering_raw in SORT_OPTIONS else 'default'
+
     dishes = filter_dishes(
         category_slug=category_slug,
         query=query,
@@ -47,6 +51,7 @@ def catalog_view(request: HttpRequest, category_slug: str | None = None) -> Http
         is_vegetarian=is_vegetarian,
         is_spicy=is_spicy,
         only_available=True,
+        ordering=ordering,
     )
     categories = get_active_categories()
 
@@ -58,6 +63,7 @@ def catalog_view(request: HttpRequest, category_slug: str | None = None) -> Http
         'is_vegetarian': is_vegetarian,
         'is_spicy': is_spicy,
         'max_price': max_price_raw if max_price is not None else '',
+        'sort': ordering,
     }
 
     if request.headers.get('HX-Request'):

@@ -55,6 +55,17 @@ def get_dish_by_id(dish_id: int) -> Dish | None:
         return None
 
 
+SORT_OPTIONS: dict[str, list[str]] = {
+    'default':       ['category__display_order', 'title'],
+    'price_asc':     ['price', 'title'],
+    'price_desc':    ['-price', 'title'],
+    'name_asc':      ['title'],
+    'name_desc':     ['-title'],
+    'calories_asc':  ['calories', 'title'],
+    'calories_desc': ['-calories', 'title'],
+}
+
+
 def filter_dishes(
     *,
     category_slug: str | None = None,
@@ -65,6 +76,7 @@ def filter_dishes(
     max_calories: int | None = None,
     exclude_allergens: list[str] | None = None,
     only_available: bool = True,
+    ordering: str | None = None,
 ) -> QuerySet[Dish]:
     queryset = Dish.objects.select_related('category').prefetch_related('options')
 
@@ -112,7 +124,8 @@ def filter_dishes(
             if cleaned_allergen:
                 queryset = queryset.exclude(allergens__icontains=cleaned_allergen)
 
-    return queryset.order_by('category__display_order', 'title')
+    order_fields = SORT_OPTIONS.get(ordering or '', SORT_OPTIONS['default'])
+    return queryset.order_by(*order_fields)
 
 
 def search_dishes_for_agent(
