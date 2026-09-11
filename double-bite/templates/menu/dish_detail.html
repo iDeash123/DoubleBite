@@ -134,7 +134,7 @@
             {% for opt in options %}
               <button
                 type="button"
-                @click="setOption('{{ opt.id }}', '{{ opt.price_delta }}')"
+                @click="setOption('{{ opt.id }}', '{{ opt.price_delta|unlocalize }}')"
                 :class="selectedOptionId === '{{ opt.id }}' ? 'border-fv-noir bg-fv-noir text-white' : 'border-fv-noir/20 bg-white text-fv-noir hover:bg-fv-offwhite'"
                 class="p-3 border text-left font-mono transition-colors flex justify-between items-center"
               >
@@ -174,7 +174,7 @@
           </div>
 
           <button
-            type="button"
+            type="submit"
             hx-post="/cart/add/{{ dish.id }}/"
             hx-target="#cart-badge"
             hx-swap="outerHTML"

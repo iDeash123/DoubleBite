@@ -197,3 +197,15 @@ class MenuViewsTest(TestCase):
         url = reverse('menu:dish_detail', kwargs={'dish_slug': self.dish_inactive_cat.slug})
         response = self.client.get(url)
         self.assertEqual(response.status_code, 404)
+
+    def test_category_slug_url_renders_catalog(self):
+        url = reverse('menu:dish_detail', kwargs={'dish_slug': self.category_pizza.slug})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'menu/catalog.html')
+        dishes = list(response.context['dishes'])
+        self.assertEqual(len(dishes), 2)
+        self.assertIn(self.dish_margarita, dishes)
+        self.assertIn(self.dish_diavola, dishes)
+        self.assertNotIn(self.dish_burger, dishes)
+

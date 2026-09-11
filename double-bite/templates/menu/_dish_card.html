@@ -88,7 +88,7 @@
       <form method="post" action="/cart/add/{{ dish.id }}/" class="m-0 p-0">
         {% csrf_token %}
         <button
-          type="button"
+          type="submit"
           hx-post="/cart/add/{{ dish.id }}/"
           hx-target="#cart-badge"
           hx-swap="outerHTML"
