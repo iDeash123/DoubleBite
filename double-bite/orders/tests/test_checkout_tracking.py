@@ -265,6 +265,22 @@ class CheckoutAndTrackingTest(TestCase):
         response = self.client.get(reverse('orders:checkout'))
         self.assertEqual(response.status_code, 403)
 
+    def test_superuser_can_checkout(self):
+        superuser = User.objects.create_superuser(
+            email='super_checkout@doublebite.ua',
+            password='SuperPassword123!',
+        )
+        self.client.force_login(superuser)
+        # Add dish to cart so checkout does not redirect on empty cart
+        self.client.post(reverse('orders:cart_add', kwargs={'dish_id': self.dish1.id}))
+        # Increase quantity to meet minimum
+        cart = Cart.objects.get(user=superuser)
+        item = cart.items.first()
+        item.quantity = 5
+        item.save()
+        response = self.client.get(reverse('orders:checkout'))
+        self.assertEqual(response.status_code, 200)
+
     def test_checkout_view_displays_unavailable_item_warning(self):
         self.client.force_login(self.user)
         # Add available and unavailable dish

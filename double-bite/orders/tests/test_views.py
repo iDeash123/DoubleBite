@@ -226,3 +226,30 @@ class CartViewsTest(TestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 403)
 
+        # Superuser gets 200
+        superuser = User.objects.create_superuser(
+            email='superuser@test.com',
+            password='superpassword123',
+        )
+        self.client.force_login(superuser)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+    def test_cart_add_triggers_open_cart_drawer_header(self):
+        url = reverse('orders:cart_add', kwargs={'dish_id': self.dish1.id})
+        response = self.client.post(url, {'quantity': '1'}, HTTP_HX_REQUEST='true')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get('HX-Trigger'), 'open-cart-drawer')
+
+    def test_cart_add_superuser_allowed(self):
+        superuser = User.objects.create_superuser(
+            email='superuser_cart@test.com',
+            password='superpassword123',
+        )
+        self.client.force_login(superuser)
+        url = reverse('orders:cart_add', kwargs={'dish_id': self.dish1.id})
+        response = self.client.post(url, {'quantity': '1'}, HTTP_HX_REQUEST='true')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get('HX-Trigger'), 'open-cart-drawer')
+
+

@@ -49,9 +49,13 @@ def cart_view(request: HttpRequest) -> HttpResponse:
 
 @require_POST
 def cart_add_view(request: HttpRequest, dish_id: int) -> HttpResponse:
-    if request.user.is_authenticated and getattr(request.user, 'role', None) in (
-        Role.RESTAURANT_ADMIN,
-        Role.COURIER,
+    if (
+        request.user.is_authenticated
+        and not request.user.is_superuser
+        and getattr(request.user, 'role', None) in (
+            Role.RESTAURANT_ADMIN,
+            Role.COURIER,
+        )
     ):
         return HttpResponseForbidden('Персонал ресторану не може замовляти страви через клієнтський кошик.')
 
@@ -80,7 +84,9 @@ def cart_add_view(request: HttpRequest, dish_id: int) -> HttpResponse:
 
     if request.headers.get('HX-Request'):
         count = CartService.get_items_count(request)
-        return render(request, 'partials/cart_badge.html', {'cart_items_count': count})
+        response = render(request, 'partials/cart_badge.html', {'cart_items_count': count})
+        response['HX-Trigger'] = 'open-cart-drawer'
+        return response
 
     referer = request.META.get('HTTP_REFERER')
     return redirect(referer or 'menu:catalog')
@@ -130,9 +136,13 @@ def cart_clear_view(request: HttpRequest) -> HttpResponse:
 
 
 def checkout_view(request: HttpRequest) -> HttpResponse:
-    if request.user.is_authenticated and getattr(request.user, 'role', None) in (
-        Role.RESTAURANT_ADMIN,
-        Role.COURIER,
+    if (
+        request.user.is_authenticated
+        and not request.user.is_superuser
+        and getattr(request.user, 'role', None) in (
+            Role.RESTAURANT_ADMIN,
+            Role.COURIER,
+        )
     ):
         return HttpResponseForbidden('Персонал ресторану не може оформлювати клієнтські замовлення.')
 
@@ -202,6 +212,7 @@ def _user_can_cancel_order(request: HttpRequest, order: Order) -> bool:
     if request.user.is_authenticated:
         return bool(
             order.user_id == request.user.id
+            or request.user.is_superuser
             or getattr(request.user, 'role', None) == Role.RESTAURANT_ADMIN
         )
     if order.session_key and request.session.session_key:
@@ -231,7 +242,10 @@ def order_cancel_view(request: HttpRequest, order_number: str) -> HttpResponse:
 
     is_admin = bool(
         request.user.is_authenticated
-        and getattr(request.user, 'role', None) == Role.RESTAURANT_ADMIN
+        and (
+            request.user.is_superuser
+            or getattr(request.user, 'role', None) == Role.RESTAURANT_ADMIN
+        )
     )
     is_owner = False
     if request.user.is_authenticated:
@@ -282,7 +296,7 @@ def cart_drawer_view(request: HttpRequest) -> HttpResponse:
 
 @login_required(login_url='/accounts/login/')
 def order_list_view(request: HttpRequest) -> HttpResponse:
-    if getattr(request.user, 'role', None) != Role.CUSTOMER:
+    if getattr(request.user, 'role', None) != Role.CUSTOMER and not request.user.is_superuser:
         return HttpResponseForbidden('Перегляд списку замовлень доступний лише клієнтам.')
     orders = (
         Order.objects.filter(user=request.user)
