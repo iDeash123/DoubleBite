@@ -4,17 +4,19 @@
        drawerOpen: false,
        openDrawer() {
          this.drawerOpen = true;
+         window.dispatchEvent(new CustomEvent('drawer-opened'));
          htmx.ajax('GET', '{% url 'orders:cart_drawer' %}', { target: '#cart-drawer-container', swap: 'outerHTML' });
        },
        closeDrawer() {
          this.drawerOpen = false;
+         window.dispatchEvent(new CustomEvent('drawer-closed'));
        }
      }"
      @open-cart-drawer.window="openDrawer()"
      @keydown.escape.window="closeDrawer()"
      x-show="drawerOpen"
      x-cloak
-     class="fixed inset-0 z-50 overflow-hidden select-none">
+     class="fixed inset-0 z-[70] overflow-hidden select-none">
   
   <div x-show="drawerOpen"
        x-transition:enter="ease-out duration-300"
@@ -137,11 +139,13 @@
 
           <div class="grid grid-cols-2 gap-2 pt-2">
             <a href="{% url 'orders:cart' %}"
+               @click="closeDrawer()"
                class="py-3 px-3 border border-fv-noir/30 bg-white text-fv-noir text-xs font-mono uppercase tracking-wider text-center hover:bg-fv-lightgray transition-colors">
               Переглянути
             </a>
             {% if meets_min_amount %}
               <a href="{% url 'orders:checkout' %}"
+                 @click="closeDrawer()"
                  class="py-3 px-3 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider text-center hover:bg-black transition-colors">
                 Оформити
               </a>
@@ -154,6 +158,7 @@
         </div>
       {% endif %}
 
+      {% if request.META.HTTP_HX_REQUEST or request.headers.hx_request %}
       <span id="cart-drawer-count" hx-swap-oob="true" class="text-xs font-mono bg-fv-offwhite px-2 py-0.5 border border-fv-noir/10 text-fv-slate">
         {{ total_quantity|default:0 }} од.
       </span>
@@ -163,6 +168,7 @@
       <span id="cart-badge-mobile" hx-swap-oob="true" class="inline-flex items-center justify-center min-w-[18px] h-4.5 px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
         {{ total_quantity|default:0 }}
       </span>
+      {% endif %}
     </div>
     {% endpartialdef %}
 

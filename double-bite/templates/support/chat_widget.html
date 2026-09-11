@@ -1,5 +1,6 @@
 <div id="ai-chat-widget" x-data="{
     open: false,
+    hiddenByModal: false,
     input: '',
     loading: false,
     messages: [
@@ -75,11 +76,27 @@
         }, 400);
       }
     }
-  }" class="relative z-50 select-none">
+  }"
+  @open-cart-drawer.window="hiddenByModal = true; open = false"
+  @drawer-opened.window="hiddenByModal = true; open = false"
+  @drawer-closed.window="hiddenByModal = false"
+  @open-dish-modal.window="hiddenByModal = true; open = false"
+  @modal-opened.window="hiddenByModal = true; open = false"
+  @modal-closed.window="hiddenByModal = false"
+  @open-ai-chat.window="open = true"
+  class="relative z-30 select-none">
 
   <button
+    id="ai-chat-toggle-btn"
+    x-show="!hiddenByModal"
+    x-transition:enter="transition ease-out duration-150"
+    x-transition:enter-start="opacity-0 scale-90"
+    x-transition:enter-end="opacity-100 scale-100"
+    x-transition:leave="transition ease-in duration-100"
+    x-transition:leave-start="opacity-100 scale-100"
+    x-transition:leave-end="opacity-0 scale-90"
     @click="open = !open"
-    class="fixed bottom-6 right-6 z-40 bg-fv-noir text-white hover:bg-black font-mono text-xs uppercase px-4 py-3.5 border border-fv-noir shadow-2xl flex items-center gap-2.5 transition-all cursor-pointer rounded-none"
+    class="fixed bottom-6 right-6 z-30 bg-fv-noir text-white hover:bg-black font-mono text-xs uppercase px-4 py-3.5 border border-fv-noir shadow-2xl flex items-center gap-2.5 transition-all cursor-pointer rounded-none"
     title="AI Консьєрж підтримки"
   >
     <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse"></span>
@@ -90,14 +107,14 @@
   </button>
 
   <div
-    x-show="open"
+    x-show="open && !hiddenByModal"
     x-transition:enter="transition ease-out duration-200"
     x-transition:enter-start="opacity-0 translate-y-4"
     x-transition:enter-end="opacity-100 translate-y-0"
     x-transition:leave="transition ease-in duration-150"
     x-transition:leave-start="opacity-100 translate-y-0"
     x-transition:leave-end="opacity-0 translate-y-4"
-    class="fixed bottom-22 right-4 sm:right-6 z-50 w-96 max-w-[calc(100vw-2rem)] bg-white border border-fv-noir/20 shadow-2xl rounded-none flex flex-col h-[520px] max-h-[calc(100vh-7rem)]"
+    class="fixed bottom-22 right-4 sm:right-6 z-40 w-96 max-w-[calc(100vw-2rem)] bg-white border border-fv-noir/20 shadow-2xl rounded-none flex flex-col h-[520px] max-h-[calc(100vh-7rem)]"
     style="display: none;"
   >
     <div class="p-4 border-b border-fv-noir/10 flex items-center justify-between bg-white">
