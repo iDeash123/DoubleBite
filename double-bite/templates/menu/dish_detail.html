@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% load l10n %}
+
+{% block title %}{{ dish.title }} — {{ dish.price }} грн | Double Bite™{% endblock %}
+{% block meta_description %}{{ dish.description|default:dish.title|truncatewords:25 }} Доставка авторських страв Double Bite у Києві.{% endblock %}
+
+{% block content %}
+<div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-8 sm:py-12"
+     x-data="{
+       basePrice: parseFloat('{{ dish.price|unlocalize }}'),
+       selectedOptionId: '{% if options %}{{ options.0.id }}{% endif %}',
+       optionDelta: {% if options %}parseFloat('{{ options.0.price_delta|unlocalize }}'){% else %}0{% endif %},
+       quantity: 1,
+       get unitPrice() {
+         return this.basePrice + this.optionDelta;
+       },
+       get totalPrice() {
+         return (this.unitPrice * this.quantity).toFixed(2);
+       },
+       setOption(id, delta) {
+         this.selectedOptionId = id;
+         this.optionDelta = parseFloat(delta);
+       },
+       increment() {
+         if (this.quantity < 99) this.quantity++;
+       },
+       decrement() {
+         if (this.quantity > 1) this.quantity--;
+       }
+     }">
+
+  <nav class="flex items-center text-xs font-mono uppercase tracking-wider text-fv-slate mb-8 overflow-x-auto pb-2 border-b border-fv-noir/10" aria-label="Хлібні крихти">
+    {% for crumb in breadcrumbs %}
+      {% if not forloop.first %}
+        <span class="mx-2 text-fv-slate/40 select-none">/</span>
+      {% endif %}
+      {% if crumb.url %}
+        <a href="{{ crumb.url }}" class="hover:text-fv-noir transition-colors whitespace-nowrap">{{ crumb.title }}</a>
+      {% else %}
+        <span class="text-fv-noir font-semibold whitespace-nowrap">{{ crumb.title }}</span>
+      {% endif %}
+    {% endfor %}
+  </nav>
+
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
+    
+    <div class="lg:col-span-7">
+      <div class="bg-fv-offwhite aspect-square p-8 sm:p-12 border border-fv-noir/15 flex items-center justify-center relative overflow-hidden group">
+        {% if dish.image %}
+          <img
+            src="{{ dish.image }}"
+            alt="{{ dish.title }}"
+            class="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-700"
+          >
+        {% else %}
+          <div class="flex flex-col items-center justify-center text-fv-slate/40">
+            <svg class="w-20 h-20 stroke-current" fill="none" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+            </svg>
+            <span class="font-mono text-xs uppercase tracking-widest mt-2 text-fv-slate/60">Double Bite</span>
+          </div>
+        {% endif %}
+
+        <div class="absolute top-4 left-4 flex flex-col gap-1.5 z-10">
+          {% if dish.is_vegetarian %}
+            <span class="bg-emerald-700 text-white font-mono text-[10px] px-2.5 py-1 tracking-wider uppercase">
+              Вегетаріанське
+            </span>
+          {% endif %}
+          {% if dish.is_spicy %}
+            <span class="bg-red-700 text-white font-mono text-[10px] px-2.5 py-1 tracking-wider uppercase">
+              Гостре
+            </span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="lg:col-span-5 space-y-6">
+      
+      <div>
+        <div class="inline-block px-2.5 py-1 bg-fv-offwhite text-fv-slate text-[11px] font-mono uppercase tracking-widest mb-3 border border-fv-noir/10">
+          {{ dish.category.name }}
+        </div>
+        <h1 class="font-sans font-black text-2xl sm:text-3xl lg:text-4xl text-fv-noir tracking-tight leading-tight uppercase mb-3">
+          {{ dish.title }}
+        </h1>
+        <div class="flex items-baseline gap-3">
+          <span class="font-mono font-bold text-2xl sm:text-3xl text-fv-noir">
+            <span x-text="totalPrice">{{ dish.price }}</span> грн
+          </span>
+          <span class="font-mono text-xs text-fv-slate uppercase tracking-wider" x-show="quantity > 1">
+            (<span x-text="unitPrice.toFixed(2)"></span> грн / од.)
+          </span>
+        </div>
+      </div>
+
+      {% if dish.description %}
+        <div class="border-t border-fv-noir/10 pt-4">
+          <h2 class="font-mono text-xs uppercase tracking-wider text-fv-slate mb-2">Опис та рецептура</h2>
+          <p class="text-sm text-fv-noir leading-relaxed font-normal">
+            {{ dish.description }}
+          </p>
+        </div>
+      {% endif %}
+
+      <div class="grid grid-cols-3 gap-3 py-4 border-t border-b border-fv-noir/10 text-center font-mono">
+        <div class="bg-fv-offwhite p-3 border border-fv-noir/10">
+          <div class="text-[10px] uppercase text-fv-slate tracking-widest mb-1">Вага</div>
+          <div class="font-bold text-sm text-fv-noir">{{ dish.weight_grams }} г</div>
+        </div>
+        <div class="bg-fv-offwhite p-3 border border-fv-noir/10">
+          <div class="text-[10px] uppercase text-fv-slate tracking-widest mb-1">Калорії</div>
+          <div class="font-bold text-sm text-fv-noir">{{ dish.calories|default:"-" }} ккал</div>
+        </div>
+        <div class="bg-fv-offwhite p-3 border border-fv-noir/10">
+          <div class="text-[10px] uppercase text-fv-slate tracking-widest mb-1">Статус</div>
+          <div class="font-bold text-sm text-emerald-700 uppercase">В наявності</div>
+        </div>
+      </div>
+
+      {% if dish.allergens %}
+        <div class="text-xs font-mono text-fv-slate">
+          <span class="text-fv-noir uppercase tracking-wider font-semibold">Алергени:</span> {{ dish.allergens }}
+        </div>
+      {% endif %}
+
+      {% if options %}
+        <div class="space-y-3 pt-2">
+          <label class="font-mono text-xs uppercase tracking-wider text-fv-slate block">
+            Оберіть модифікатор / розмір
+          </label>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {% for opt in options %}
+              <button
+                type="button"
+                @click="setOption('{{ opt.id }}', '{{ opt.price_delta }}')"
+                :class="selectedOptionId === '{{ opt.id }}' ? 'border-fv-noir bg-fv-noir text-white' : 'border-fv-noir/20 bg-white text-fv-noir hover:bg-fv-offwhite'"
+                class="p-3 border text-left font-mono transition-colors flex justify-between items-center"
+              >
+                <span class="text-xs font-medium">{{ opt.name }}</span>
+                <span class="text-[11px] opacity-80 font-semibold">
+                  {% if opt.price_delta > 0 %}+{{ opt.price_delta }} грн{% else %}0.00 грн{% endif %}
+                </span>
+              </button>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
+      <form method="post" action="/cart/add/{{ dish.id }}/" class="space-y-4 pt-4 border-t border-fv-noir/10">
+        {% csrf_token %}
+        <input type="hidden" name="dish_id" value="{{ dish.id }}">
+        <input type="hidden" name="option_id" :value="selectedOptionId">
+        <input type="hidden" name="quantity" :value="quantity">
+
+        <div class="flex items-center gap-4">
+          <div class="flex items-center border border-fv-noir/20 bg-white">
+            <button
+              type="button"
+              @click="decrement()"
+              class="w-10 h-12 flex items-center justify-center text-fv-noir hover:bg-fv-offwhite transition-colors text-base font-mono"
+            >
+              -
+            </button>
+            <span class="w-12 h-12 flex items-center justify-center font-mono font-bold text-sm text-fv-noir" x-text="quantity"></span>
+            <button
+              type="button"
+              @click="increment()"
+              class="w-10 h-12 flex items-center justify-center text-fv-noir hover:bg-fv-offwhite transition-colors text-base font-mono"
+            >
+              +
+            </button>
+          </div>
+
+          <button
+            type="button"
+            hx-post="/cart/add/{{ dish.id }}/"
+            hx-target="#cart-badge"
+            hx-swap="outerHTML"
+            hx-include="closest form"
+            class="flex-1 py-3.5 px-6 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors font-medium flex items-center justify-center gap-2"
+          >
+            <span>Додати до кошика · <span x-text="totalPrice"></span> грн</span>
+          </button>
+        </div>
+      </form>
+
+      <div class="pt-4 border-t border-fv-noir/10">
+        <div class="grid grid-cols-2 gap-4 text-[11px] font-mono text-fv-slate">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-fv-noir" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <span>Доставка 30-45 хв</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-fv-noir" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <span>Контроль свіжості</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}

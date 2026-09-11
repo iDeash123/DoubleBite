@@ -1,0 +1,102 @@
+<article class="bg-white p-5 sm:p-6 border border-fv-noir/10 flex flex-col justify-between hover:border-fv-noir/30 transition-all group relative">
+  <div>
+    <div class="bg-fv-offwhite aspect-square p-4 flex items-center justify-center overflow-hidden relative mb-4">
+      {% if dish.image %}
+        <img
+          src="{{ dish.image }}"
+          alt="{{ dish.title }}"
+          loading="lazy"
+          class="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-500"
+        >
+      {% else %}
+        <div class="w-full h-full flex flex-col items-center justify-center text-fv-slate/40">
+          <svg class="w-12 h-12 stroke-current" fill="none" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+          </svg>
+          <span class="text-[10px] font-mono uppercase tracking-widest mt-1 text-fv-slate/60">Double Bite</span>
+        </div>
+      {% endif %}
+
+      <div class="absolute top-2 left-2 flex flex-col gap-1 z-10">
+        {% if dish.is_vegetarian %}
+          <span class="bg-emerald-700 text-white font-mono text-[9px] px-2 py-0.5 tracking-wider uppercase">Вегетаріанське</span>
+        {% endif %}
+        {% if dish.is_spicy %}
+          <span class="bg-red-700 text-white font-mono text-[9px] px-2 py-0.5 tracking-wider uppercase">Гостре</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="space-y-1.5 mb-4">
+      <div class="text-[11px] font-mono text-fv-slate uppercase tracking-wider">
+        {{ dish.category.name }}
+      </div>
+      <h3 class="font-sans font-bold text-base text-fv-noir group-hover:text-black transition-colors leading-snug">
+        <a href="{% url 'menu:dish_detail' dish.slug %}" class="hover:underline">
+          {{ dish.title }}
+        </a>
+      </h3>
+      {% if dish.description %}
+        <p class="text-xs text-fv-slate line-clamp-2 leading-relaxed font-normal">
+          {{ dish.description }}
+        </p>
+      {% endif %}
+    </div>
+
+    <div class="flex items-center gap-3 text-[11px] font-mono text-fv-slate py-2 border-t border-b border-fv-noir/10 mb-4">
+      <span>{{ dish.weight_grams }} г</span>
+      {% if dish.calories %}
+        <span>·</span>
+        <span>{{ dish.calories }} ккал</span>
+      {% endif %}
+      {% if dish.allergens %}
+        <span>·</span>
+        <span class="truncate" title="{{ dish.allergens }}">{{ dish.allergens }}</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="pt-2">
+    <div class="flex items-baseline justify-between mb-3">
+      <span class="text-xs font-mono uppercase text-fv-slate">Вартість</span>
+      <span class="font-mono font-bold text-base sm:text-lg text-fv-noir tracking-tight">
+        {{ dish.price }} грн
+      </span>
+    </div>
+
+    <div class="grid grid-cols-2 gap-2">
+      <button
+        type="button"
+        @click="$dispatch('open-dish-modal', {
+          id: '{{ dish.id }}',
+          title: '{{ dish.title|escapejs }}',
+          slug: '{{ dish.slug|escapejs }}',
+          description: '{{ dish.description|escapejs }}',
+          price: '{{ dish.price }}',
+          weight: '{{ dish.weight_grams }}',
+          calories: '{{ dish.calories }}',
+          allergens: '{{ dish.allergens|escapejs }}',
+          image: '{{ dish.image|escapejs }}',
+          category: '{{ dish.category.name|escapejs }}',
+          detailUrl: '{% url 'menu:dish_detail' dish.slug %}'
+        })"
+        class="py-2.5 px-2 bg-fv-offwhite text-fv-noir text-[11px] font-mono uppercase tracking-wider hover:bg-fv-lightgray transition-colors border border-fv-noir/15 text-center select-none"
+      >
+        Деталі
+      </button>
+
+      <form method="post" action="/cart/add/{{ dish.id }}/" class="m-0 p-0">
+        {% csrf_token %}
+        <button
+          type="button"
+          hx-post="/cart/add/{{ dish.id }}/"
+          hx-target="#cart-badge"
+          hx-swap="outerHTML"
+          class="w-full py-2.5 px-2 bg-fv-noir text-white text-[11px] font-mono uppercase tracking-wider hover:bg-black transition-colors text-center select-none font-medium flex items-center justify-center gap-1"
+        >
+          <span>В кошик</span>
+        </button>
+      </form>
+    </div>
+  </div>
+</article>

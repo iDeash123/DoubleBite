@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+
+{% block title %}Меню страв — Double Bite™ | Авторська ресторанна доставка в Києві{% endblock %}
+{% block meta_description %}Ознайомтеся з повним авторським меню Double Bite: неаполітанська піца, сети преміальних суші, мармурові бургери, свіжі салати та вишукані десерти.{% endblock %}
+
+{% block content %}
+<div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-8 sm:py-12" x-data="{
+  modalOpen: false,
+  modalDish: {},
+  category: '{{ selected_category|default:'' }}',
+  setCategory(slug) {
+    this.category = slug;
+    const input = document.getElementById('category-input');
+    if (input) {
+      input.value = slug;
+      htmx.trigger(input, 'change');
+    }
+  }
+}" @open-dish-modal.window="modalDish = $event.detail; modalOpen = true">
+
+  <div class="border-b border-fv-noir/15 pb-8 mb-8">
+    <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
+      <div>
+        <span class="font-serif italic text-sm sm:text-base text-fv-slate uppercase tracking-widest block mb-2">
+          Авторська гастрономія · Сезонне меню
+        </span>
+        <h1 class="font-sans font-black text-3xl sm:text-4xl text-fv-noir tracking-tight uppercase">
+          Каталог страв
+        </h1>
+      </div>
+      <div class="text-xs font-mono text-fv-slate">
+        <span>Всього позицій у меню: <strong class="text-fv-noir">{{ dishes|length }}</strong></span>
+      </div>
+    </div>
+  </div>
+
+  <form id="menu-filter-form" method="get" action="{% url 'menu:catalog' %}" class="space-y-6 mb-10"
+        hx-get="{% url 'menu:catalog' %}"
+        hx-target="#dish-grid"
+        hx-trigger="change from:input, keyup delay:300ms from:#search-input"
+        hx-push-url="true">
+    
+    <input type="hidden" name="category" id="category-input" value="{{ selected_category|default:'' }}">
+
+    <div class="flex flex-wrap items-center gap-2 border-b border-fv-noir/10 pb-4">
+      <button
+        type="button"
+        @click="setCategory('')"
+        :class="category === '' ? 'bg-fv-noir text-white' : 'bg-fv-offwhite text-fv-noir hover:bg-fv-lightgray'"
+        class="px-4 py-2 text-xs font-mono uppercase tracking-wider transition-colors border border-fv-noir/15"
+      >
+        Усі страви
+      </button>
+      {% for cat in categories %}
+        <button
+          type="button"
+          @click="setCategory('{{ cat.slug }}')"
+          :class="category === '{{ cat.slug }}' ? 'bg-fv-noir text-white' : 'bg-fv-offwhite text-fv-noir hover:bg-fv-lightgray'"
+          class="px-4 py-2 text-xs font-mono uppercase tracking-wider transition-colors border border-fv-noir/15"
+        >
+          {{ cat.name }}
+        </button>
+      {% endfor %}
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-center bg-white p-4 border border-fv-noir/15">
+      <div class="md:col-span-5 relative">
+        <input
+          type="text"
+          id="search-input"
+          name="q"
+          value="{{ search_query }}"
+          placeholder="Пошук за назвою чи інгредієнтами..."
+          class="w-full pl-9 pr-4 py-2.5 text-xs font-mono bg-fv-offwhite border border-fv-noir/20 focus:outline-none focus:border-fv-noir text-fv-noir placeholder:text-fv-slate"
+        >
+        <svg class="w-4 h-4 text-fv-slate absolute left-3 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+      </div>
+
+      <div class="md:col-span-3">
+        <input
+          type="number"
+          name="max_price"
+          value="{{ max_price }}"
+          placeholder="Макс. ціна (грн)"
+          min="0"
+          step="10"
+          class="w-full px-3 py-2.5 text-xs font-mono bg-fv-offwhite border border-fv-noir/20 focus:outline-none focus:border-fv-noir text-fv-noir placeholder:text-fv-slate"
+        >
+      </div>
+
+      <div class="md:col-span-4 flex items-center justify-start md:justify-end gap-5 text-xs font-mono select-none">
+        <label class="inline-flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            name="is_vegetarian"
+            value="true"
+            {% if is_vegetarian %}checked{% endif %}
+            class="accent-fv-noir rounded-none w-4 h-4"
+          >
+          <span class="text-fv-noir uppercase tracking-wider text-[11px]">Вегетаріанське</span>
+        </label>
+
+        <label class="inline-flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            name="is_spicy"
+            value="true"
+            {% if is_spicy %}checked{% endif %}
+            class="accent-fv-noir rounded-none w-4 h-4"
+          >
+          <span class="text-fv-noir uppercase tracking-wider text-[11px]">Гостре</span>
+        </label>
+
+        <a href="{% url 'menu:catalog' %}" class="text-[11px] uppercase tracking-wider text-fv-slate hover:text-fv-noir underline">
+          Очистити
+        </a>
+      </div>
+    </div>
+  </form>
+
+  {% partialdef dish-grid inline %}
+  <div id="dish-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+    {% for dish in dishes %}
+      {% include "menu/_dish_card.html" %}
+    {% empty %}
+      <div class="col-span-full py-16 text-center border border-dashed border-fv-noir/20 bg-white">
+        <p class="font-serif italic text-lg text-fv-noir mb-2">Страв за обраними критеріями не знайдено</p>
+        <p class="font-mono text-xs text-fv-slate uppercase tracking-wider mb-4">Спробуйте очистити пошуковий фільтр</p>
+        <a href="{% url 'menu:catalog' %}" class="inline-block px-6 py-2.5 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors">
+          Показати все меню
+        </a>
+      </div>
+    {% endfor %}
+  </div>
+  {% endpartialdef %}
+
+  <div
+    x-show="modalOpen"
+    x-cloak
+    @keydown.escape.window="modalOpen = false"
+    class="fixed inset-0 z-50 overflow-y-auto"
+    aria-labelledby="modal-title"
+    role="dialog"
+    aria-modal="true"
+  >
+    <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+      <div
+        x-show="modalOpen"
+        x-transition:enter="ease-out duration-300"
+        x-transition:enter-start="opacity-0"
+        x-transition:enter-end="opacity-100"
+        x-transition:leave="ease-in duration-200"
+        x-transition:leave-start="opacity-100"
+        x-transition:leave-end="opacity-0"
+        class="fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity"
+        @click="modalOpen = false"
+      ></div>
+
+      <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+
+      <div
+        x-show="modalOpen"
+        x-transition:enter="ease-out duration-300"
+        x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+        x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100"
+        x-transition:leave="ease-in duration-200"
+        x-transition:leave-start="opacity-100 translate-y-0 sm:scale-100"
+        x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+        class="inline-block align-bottom bg-white border border-fv-noir/30 text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full"
+      >
+        <div class="flex justify-between items-center px-6 py-4 border-b border-fv-noir/10">
+          <span class="font-mono text-xs uppercase tracking-widest text-fv-slate" x-text="modalDish.category"></span>
+          <button @click="modalOpen = false" class="text-fv-slate hover:text-fv-noir transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="p-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div class="bg-fv-offwhite aspect-square p-4 flex items-center justify-center overflow-hidden">
+            <template x-if="modalDish.image">
+              <img :src="modalDish.image" :alt="modalDish.title" class="w-full h-full object-contain mix-blend-multiply">
+            </template>
+            <template x-if="!modalDish.image">
+              <span class="font-mono text-xs text-fv-slate uppercase">Double Bite</span>
+            </template>
+          </div>
+
+          <div class="flex flex-col justify-between space-y-4">
+            <div>
+              <h2 id="modal-title" class="font-sans font-bold text-xl text-fv-noir mb-2" x-text="modalDish.title"></h2>
+              <p class="text-xs text-fv-slate leading-relaxed font-normal mb-4" x-text="modalDish.description"></p>
+
+              <div class="space-y-2 py-3 border-t border-b border-fv-noir/10 text-xs font-mono text-fv-slate">
+                <div class="flex justify-between">
+                  <span>Вага страви:</span>
+                  <span class="text-fv-noir font-medium" x-text="modalDish.weight + ' г'"></span>
+                </div>
+                <div class="flex justify-between" x-show="modalDish.calories > 0">
+                  <span>Калорійність:</span>
+                  <span class="text-fv-noir font-medium" x-text="modalDish.calories + ' ккал'"></span>
+                </div>
+                <div class="flex justify-between" x-show="modalDish.allergens">
+                  <span>Алергени:</span>
+                  <span class="text-fv-noir font-medium" x-text="modalDish.allergens"></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="pt-4 space-y-3">
+              <div class="flex justify-between items-baseline">
+                <span class="text-xs font-mono text-fv-slate uppercase">Вартість:</span>
+                <span class="font-mono font-bold text-xl text-fv-noir" x-text="modalDish.price + ' грн'"></span>
+              </div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <a
+                  :href="modalDish.detailUrl"
+                  class="py-3 px-3 text-center bg-fv-offwhite text-fv-noir border border-fv-noir/20 text-xs font-mono uppercase tracking-wider hover:bg-fv-lightgray transition-colors font-medium"
+                >
+                  Детальна сторінка
+                </a>
+                <button
+                  type="button"
+                  @click="htmx.ajax('POST', '/cart/add/' + modalDish.id + '/', { target: '#cart-badge', swap: 'outerHTML' }); modalOpen = false"
+                  class="py-3 px-3 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors font-medium text-center"
+                >
+                  До кошика
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

@@ -1,1 +1,85 @@
+from decimal import Decimal, InvalidOperation
+
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
+
+from config.partials import render_partial_or_full
+from .selectors import (
+    filter_dishes,
+    get_active_categories,
+    get_available_dish_by_slug,
+)
+
+
+def catalog_view(request: HttpRequest) -> HttpResponse:
+    category_slug = request.GET.get('category', '').strip() or None
+    query = (request.GET.get('q') or request.GET.get('search', '')).strip() or None
+
+    max_price_raw = request.GET.get('max_price', '').strip()
+    max_price: Decimal | None = None
+    if max_price_raw:
+        try:
+            max_price = Decimal(max_price_raw)
+        except InvalidOperation:
+            max_price = None
+
+    is_veg_raw = request.GET.get('is_vegetarian', '').strip().lower()
+    is_vegetarian: bool | None = None
+    if is_veg_raw in ('true', '1', 'on'):
+        is_vegetarian = True
+    elif is_veg_raw in ('false', '0'):
+        is_vegetarian = False
+
+    is_spicy_raw = request.GET.get('is_spicy', '').strip().lower()
+    is_spicy: bool | None = None
+    if is_spicy_raw in ('true', '1', 'on'):
+        is_spicy = True
+    elif is_spicy_raw in ('false', '0'):
+        is_spicy = False
+
+    dishes = filter_dishes(
+        category_slug=category_slug,
+        query=query,
+        max_price=max_price,
+        is_vegetarian=is_vegetarian,
+        is_spicy=is_spicy,
+        only_available=True,
+    )
+    categories = get_active_categories()
+
+    context = {
+        'dishes': dishes,
+        'categories': categories,
+        'selected_category': category_slug,
+        'search_query': query or '',
+        'is_vegetarian': is_vegetarian,
+        'is_spicy': is_spicy,
+        'max_price': max_price_raw if max_price is not None else '',
+    }
+
+    if request.headers.get('HX-Request'):
+        return render_partial_or_full(request, 'menu/catalog.html#dish-grid', context)
+
+    return render_partial_or_full(request, 'menu/catalog.html', context)
+
+
+def dish_detail_view(
+    request: HttpRequest,
+    dish_slug: str,
+    category_slug: str | None = None,
+) -> HttpResponse:
+    dish = get_available_dish_by_slug(dish_slug=dish_slug, category_slug=category_slug)
+    if not dish:
+        raise Http404('Страву не знайдено або вона тимчасово недоступна')
+
+    context = {
+        'dish': dish,
+        'options': list(dish.options.all()),
+        'breadcrumbs': [
+            {'title': 'Головна', 'url': '/'},
+            {'title': 'Меню', 'url': '/menu/'},
+            {'title': dish.category.name, 'url': f'/menu/?category={dish.category.slug}'},
+            {'title': dish.title, 'url': ''},
+        ],
+    }
+    return render(request, 'menu/dish_detail.html', context)

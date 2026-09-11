@@ -30,6 +30,20 @@ def get_dish_by_slug(category_slug: str, dish_slug: str) -> Dish | None:
         return None
 
 
+def get_available_dish_by_slug(dish_slug: str, category_slug: str | None = None) -> Dish | None:
+    try:
+        qs = (
+            Dish.objects.filter(is_available=True, category__is_active=True)
+            .select_related('category')
+            .prefetch_related('options')
+        )
+        if category_slug:
+            qs = qs.filter(category__slug=category_slug)
+        return qs.get(slug=dish_slug)
+    except Dish.DoesNotExist:
+        return None
+
+
 def get_dish_by_id(dish_id: int) -> Dish | None:
     try:
         return (
