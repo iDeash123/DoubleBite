@@ -26,13 +26,11 @@ class ChatSessionService:
         session_key = request.session.session_key or ''
 
         if request.user.is_authenticated:
-            # Multi-Tenant Session Isolation: user-scoped active/escalated session
             active_session = ChatSession.objects.filter(
                 user=request.user,
                 status__in=[ChatSessionStatus.ACTIVE, ChatSessionStatus.ESCALATED],
             ).first()
 
-            # Account Linking: link existing guest session to user if present
             if not active_session and session_key:
                 guest_session = ChatSession.objects.filter(
                     session_key=session_key,
@@ -52,7 +50,6 @@ class ChatSessionService:
                 )
             return active_session
 
-        # Guest user isolation: session_key scoped
         active_session = ChatSession.objects.filter(
             session_key=session_key,
             user__isnull=True,
@@ -167,7 +164,6 @@ def validate_order_access(order: Order, request: HttpRequest) -> bool:
     if order.session_key and session_key and order.session_key == session_key:
         return True
 
-    # Check verified phone saved in session
     session_phone = request.session.get('guest_phone')
     if session_phone and order.customer_phone and session_phone == order.customer_phone:
         return True

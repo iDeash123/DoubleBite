@@ -1,1 +1,1 @@
-# support tests package
+__all__ = []

@@ -55,12 +55,10 @@ class SupportAdminTest(TestCase):
         admin_obj = SupportTicketAdmin(SupportTicket, site)
         queryset = SupportTicket.objects.filter(id=self.ticket.id)
 
-        # Mark in progress
         admin_obj.mark_in_progress(None, queryset)
         self.ticket.refresh_from_db()
         self.assertEqual(self.ticket.status, TicketStatus.IN_PROGRESS)
 
-        # Mark resolved
         admin_obj.mark_resolved(None, queryset)
         self.ticket.refresh_from_db()
         self.assertEqual(self.ticket.status, TicketStatus.RESOLVED)
