@@ -2,12 +2,13 @@ import json
 import os
 from decimal import Decimal
 from unittest.mock import patch
-from asgiref.sync import sync_to_async
+
 from django.contrib.auth import get_user_model
 from django.test import AsyncClient, RequestFactory, TestCase
 from menu.models import Category, Dish, DishOption
-from orders.models import Cart, CartItem
+from orders.models import Cart
 from orders.services import CartService
+
 from support.agent.tools import execute_agent_tool
 from support.models import ChatSession
 

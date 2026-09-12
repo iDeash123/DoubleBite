@@ -1,11 +1,11 @@
-from decimal import Decimal
 from typing import Any
 
 from django.http import HttpRequest
 from menu.selectors import search_dishes_for_agent
 from orders.exceptions import DishUnavailableError
 from orders.services import CartService
-from support.models import ChatSession, SupportTicket, TicketReason
+
+from support.models import ChatSession, TicketReason
 from support.services import (
     ChatSessionService,
     check_order_status_for_request,
@@ -286,8 +286,8 @@ def execute_agent_tool(
             }
         except DishUnavailableError as e:
             return {"error": str(e)}
-        except Exception as e:
-            return {"error": f"Помилка при додаванні до кошика: {str(e)}"}
+        except (ValueError, KeyError, TypeError) as e:
+            return {"error": f"Помилка при додаванні до кошика: {e!s}"}
 
     elif tool_name == "remove_from_cart":
         if request is None:

@@ -287,7 +287,7 @@
                   Переглянути меню
                 </a>
                 <button
-                  onclick="document.getElementById('ai-chat-widget').querySelector('button').click()"
+                  onclick="window.dispatchEvent(new CustomEvent('open-ai-chat'))"
                   class="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-fv-noir hover:underline underline-offset-4 transition-all"
                 >
                   <span>Запитати AI-консьєржа</span>

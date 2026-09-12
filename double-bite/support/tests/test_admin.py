@@ -1,10 +1,9 @@
 from django.contrib.admin.sites import site
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase
+
 from support.admin import (
     ChatMessageAdmin,
-    ChatSessionAdmin,
-    FAQKnowledgeAdmin,
     SupportTicketAdmin,
 )
 from support.models import (

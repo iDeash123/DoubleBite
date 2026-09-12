@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from asgiref.sync import sync_to_async
 from django.core.cache import cache
@@ -11,6 +12,7 @@ from django.http import (
     StreamingHttpResponse,
 )
 from django.views.decorators.http import require_GET, require_POST
+
 from support.agent.client import MistralSupportAgent
 from support.models import ChatMessage, ChatSession, MessageRole
 from support.services import ChatSessionService
@@ -39,7 +41,7 @@ async def chat_stream_view(request: HttpRequest) -> HttpResponse:
 
     try:
         data = json.loads(request.body.decode('utf-8'))
-    except Exception:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return JsonResponse({'error': 'Невірний формат JSON.'}, status=400)
 
     user_text = str(data.get('message', '')).strip()
@@ -92,8 +94,8 @@ async def chat_stream_view(request: HttpRequest) -> HttpResponse:
                     session_uuid, MessageRole.ASSISTANT, full_reply
                 )
             yield f"data: {json.dumps({'done': True})}\n\n"
-        except Exception as exc:
-            logger.error('Stream error: %s', exc, exc_info=True)
+        except Exception:
+            logger.exception('Stream error')
             yield f"data: {json.dumps({'error': 'Виникла помилка під час формування відповіді.'}, ensure_ascii=False)}\n\n"
 
     response = StreamingHttpResponse(

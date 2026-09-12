@@ -1,12 +1,13 @@
 import json
 import logging
 import os
-import uuid
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.http import HttpRequest
+
 from support.models import ChatSession
 
 from .prompts import SYSTEM_PROMPT
@@ -112,7 +113,7 @@ class MistralSupportAgent:
                         if isinstance(args_raw, str):
                             try:
                                 args = json.loads(args_raw)
-                            except Exception:
+                            except json.JSONDecodeError:
                                 args = {}
                         else:
                             args = dict(args_raw)
@@ -128,15 +129,14 @@ class MistralSupportAgent:
                                 'support_phone': tool_res.get('support_phone', '+380 44 123 45 67'),
                             }
 
-                        if fn_name in ('add_to_cart', 'remove_from_cart'):
-                            if tool_res.get('success'):
-                                yield {
-                                    'cart_mutation': True,
-                                    'cart_items_count': tool_res.get('cart_items_count', 0),
-                                    'total_amount': tool_res.get('total_amount', 0.0),
-                                    'action': tool_res.get('action'),
-                                    'dish_id': tool_res.get('dish_id'),
-                                }
+                        if fn_name in ('add_to_cart', 'remove_from_cart') and tool_res.get('success'):
+                            yield {
+                                'cart_mutation': True,
+                                'cart_items_count': tool_res.get('cart_items_count', 0),
+                                'total_amount': tool_res.get('total_amount', 0.0),
+                                'action': tool_res.get('action'),
+                                'dish_id': tool_res.get('dish_id'),
+                            }
 
                         messages.append({
                             'role': 'tool',
@@ -174,8 +174,8 @@ class MistralSupportAgent:
                             if content:
                                 yield {'token': content}
 
-        except Exception as exc:
-            logger.error('Mistral API error: %s', exc, exc_info=True)
+        except Exception:
+            logger.exception('Mistral API error')
             yield {
                 'error': (
                     'Вибачте, асистент тимчасово недоступний. Будь ласка, спробуйте через '

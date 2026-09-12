@@ -1,8 +1,10 @@
 import uuid
+
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from orders.models import Order, OrderStatus
+
 from support.models import (
     ChatMessage,
     ChatSession,

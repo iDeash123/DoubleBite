@@ -1,11 +1,13 @@
 import json
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
+
 from django.contrib.auth import get_user_model
 from django.contrib.sessions.backends.db import SessionStore
 from django.test import RequestFactory, TestCase
 from menu.models import Category, Dish
 from orders.models import Order, OrderStatus
+
 from support.agent.client import MistralSupportAgent
 from support.agent.prompts import SYSTEM_PROMPT
 from support.models import ChatSession

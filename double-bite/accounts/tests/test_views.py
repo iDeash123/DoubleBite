@@ -1,5 +1,5 @@
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase
+from django.test import AsyncClient, Client, TestCase
 from django.urls import reverse
 
 from accounts.models import DeliveryAddress, Role
@@ -19,6 +19,12 @@ class HomeViewTest(TestCase):
         self.assertContains(response, 'Plus Jakarta Sans')
         self.assertContains(response, 'htmx.org')
         self.assertContains(response, 'alpinejs')
+
+    async def test_home_page_renders_200_async(self):
+        async_client = AsyncClient()
+        response = await async_client.get(reverse('home'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'double bite')
 
 
 class RegisterViewTest(TestCase):

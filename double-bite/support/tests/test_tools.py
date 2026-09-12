@@ -1,9 +1,11 @@
 from decimal import Decimal
+
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase
 from menu.models import Category, Dish, DishOption
 from orders.models import Order, OrderStatus
 from orders.services import CartService
+
 from support.agent.tools import SUPPORT_AGENT_TOOLS, execute_agent_tool
 from support.models import ChatSession, FAQKnowledge, SupportTicket, TicketReason
 

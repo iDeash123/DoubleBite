@@ -6,8 +6,8 @@ from django.db import transaction
 from django.db.models import Q
 from django.http import HttpRequest
 from orders.models import Order
+
 from support.models import (
-    ChatMessage,
     ChatSession,
     ChatSessionStatus,
     FAQKnowledge,
@@ -165,10 +165,7 @@ def validate_order_access(order: Order, request: HttpRequest) -> bool:
         return True
 
     session_phone = request.session.get('guest_phone')
-    if session_phone and order.customer_phone and session_phone == order.customer_phone:
-        return True
-
-    return False
+    return bool(session_phone and order.customer_phone and session_phone == order.customer_phone)
 
 
 def check_order_status_for_request(

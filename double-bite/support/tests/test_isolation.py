@@ -1,9 +1,10 @@
 import uuid
+
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase
 from orders.models import Order, OrderStatus
+
 from support.models import (
-    ChatSession,
     ChatSessionStatus,
     SupportTicket,
     TicketReason,
@@ -12,7 +13,6 @@ from support.models import (
 from support.services import (
     ChatSessionService,
     check_order_status_for_request,
-    validate_order_access,
 )
 
 User = get_user_model()
