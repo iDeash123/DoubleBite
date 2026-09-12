@@ -11,6 +11,7 @@ urlpatterns = [
     path('accounts/', include('accounts.urls')),
     path('menu/', include('menu.urls')),
     path('orders/', include('orders.urls')),
+    path('support/', include('support.urls')),
     path('cart/', orders_views.cart_view, name='cart_direct'),
     path('cart/drawer/', orders_views.cart_drawer_view, name='cart_drawer_direct'),
     path('cart/add/<int:dish_id>/', orders_views.cart_add_view, name='cart_add_direct'),

@@ -1,6 +1,7 @@
 <div id="ai-chat-widget" x-data="{
     open: false,
     hiddenByModal: false,
+    isEscalated: false,
     input: '',
     loading: false,
     messages: [
@@ -12,6 +13,28 @@
     sendQuick(text) {
       this.input = text;
       this.sendMessage();
+    },
+    async resetChat() {
+      if (this.loading) return;
+      try {
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+        const res = await fetch('/support/chat/reset/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+          }
+        });
+        if (res.ok) {
+          this.isEscalated = false;
+          this.messages = [
+            {
+              role: 'assistant',
+              content: 'Контекст діалогу очищено. Чим я можу вам допомогти сьогодні?'
+            }
+          ];
+        }
+      } catch (e) {}
     },
     async sendMessage() {
       const query = this.input.trim();
@@ -34,47 +57,72 @@
           },
           body: JSON.stringify({ message: query })
         });
+
         if (res.ok && res.body) {
           const reader = res.body.getReader();
           const decoder = new TextDecoder();
           let assistantMsg = { role: 'assistant', content: '' };
           this.messages.push(assistantMsg);
+          this.loading = false;
+
+          let buffer = '';
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            assistantMsg.content += decoder.decode(value);
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (trimmed.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(trimmed.slice(6));
+                  if (data.token) {
+                    assistantMsg.content += data.token;
+                  }
+                  if (data.escalated) {
+                    this.isEscalated = true;
+                  }
+                  if (data.cart_mutation) {
+                    if (window.htmx) {
+                      htmx.ajax('GET', '/cart/badge/', { target: '#cart-badge', swap: 'outerHTML' });
+                    }
+                    window.dispatchEvent(new CustomEvent('open-cart-drawer'));
+                    this.hiddenByModal = true;
+                    this.open = false;
+                  }
+                  if (data.error) {
+                    assistantMsg.content = data.error;
+                  }
+                } catch (err) {}
+              }
+            }
             this.$nextTick(() => {
               const c = this.$refs.msgContainer;
               if (c) c.scrollTop = c.scrollHeight;
             });
           }
-          this.loading = false;
         } else {
-          setTimeout(() => {
-            this.messages.push({
-              role: 'assistant',
-              content: 'Дякую за запит! Рекомендуємо скуштувати наш флагманський Truffle Wagyu Burger або неаполітанську піцу Quattro Formaggi з трюфельним медом. Середній час доставки по Києву складає 30–40 хвилин.'
-            });
-            this.loading = false;
-            this.$nextTick(() => {
-              const c = this.$refs.msgContainer;
-              if (c) c.scrollTop = c.scrollHeight;
-            });
-          }, 400);
+          this.loading = false;
+          let errMsg = 'Вибачте, виникла помилка під час формування відповіді. Спробуйте пізніше.';
+          try {
+            const errData = await res.json();
+            if (errData.error) errMsg = errData.error;
+          } catch(e) {}
+          this.messages.push({ role: 'assistant', content: errMsg });
         }
       } catch (e) {
-        setTimeout(() => {
-          this.messages.push({
-            role: 'assistant',
-            content: 'Дякую за звернення! Наша служба турботи завжди рада допомогти обрати ідеальний гастрономічний сет. Завітайте також до нашого каталогу страв у розділі Меню.'
-          });
-          this.loading = false;
-          this.$nextTick(() => {
-            const c = this.$refs.msgContainer;
-            if (c) c.scrollTop = c.scrollHeight;
-          });
-        }, 400);
+        this.loading = false;
+        this.messages.push({
+          role: 'assistant',
+          content: 'Вибачте, асистент тимчасово недоступний. Будь ласка, зверніться за номером: +380 44 123 45 67.'
+        });
       }
+      this.$nextTick(() => {
+        const c = this.$refs.msgContainer;
+        if (c) c.scrollTop = c.scrollHeight;
+      });
     }
   }"
   @open-cart-drawer.window="hiddenByModal = true; open = false"
@@ -99,8 +147,8 @@
     class="fixed bottom-6 right-6 z-30 bg-fv-noir text-white hover:bg-black font-mono text-xs uppercase px-4 py-3.5 border border-fv-noir shadow-2xl flex items-center gap-2.5 transition-all cursor-pointer rounded-none"
     title="AI Консьєрж підтримки"
   >
-    <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse"></span>
-    <span class="tracking-wider">AI Консьєрж</span>
+    <span :class="isEscalated ? 'bg-amber-400' : 'bg-emerald-400'" class="w-2 h-2 rounded-full inline-block animate-pulse"></span>
+    <span class="tracking-wider" x-text="isEscalated ? 'Адміністратор' : 'AI Консьєрж'"></span>
     <svg class="w-3.5 h-3.5 text-white/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
     </svg>
@@ -121,13 +169,18 @@
       <div>
         <div class="flex items-center gap-2">
           <span class="font-bold text-sm font-sans tracking-tight text-fv-noir">double bite<span class="text-[10px] font-mono align-top ml-0.5">™</span></span>
-          <span class="text-[9px] font-mono uppercase tracking-widest px-1.5 py-0.5 bg-fv-offwhite text-fv-slate border border-fv-noir/10">Mistral AI</span>
+          <span :class="isEscalated ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-fv-offwhite text-fv-slate border-fv-noir/10'" class="text-[9px] font-mono uppercase tracking-widest px-1.5 py-0.5 border" x-text="isEscalated ? 'Адміністратор' : 'Mistral AI'"></span>
         </div>
-        <div class="text-[10px] font-mono uppercase tracking-wider text-fv-slate mt-0.5">Персональний гастро-консьєрж</div>
+        <div class="text-[10px] font-mono uppercase tracking-wider text-fv-slate mt-0.5" x-text="isEscalated ? '⚠️ Підключено персонал · +380 44 123 45 67' : 'Персональний гастро-консьєрж'"></div>
       </div>
-      <button @click="open = false" class="p-1 text-fv-slate hover:text-fv-noir transition-colors text-base font-mono">
-        ✕
-      </button>
+      <div class="flex items-center gap-2">
+        <button @click="resetChat()" title="Почати новий діалог" class="text-[10px] font-mono uppercase px-2 py-1 bg-fv-offwhite hover:bg-fv-lightgray text-fv-noir border border-fv-noir/10 transition-colors">
+          Новий діалог
+        </button>
+        <button @click="open = false" class="p-1 text-fv-slate hover:text-fv-noir transition-colors text-base font-mono">
+          ✕
+        </button>
+      </div>
     </div>
 
     <div class="px-4 py-2 bg-fv-offwhite border-b border-fv-noir/10 flex flex-wrap gap-1.5">
@@ -153,9 +206,9 @@
             <div
               :class="msg.role === 'user' ? 'text-white/50 text-right' : 'text-fv-slate text-left'"
               class="text-[9px] font-mono uppercase tracking-wider mb-1"
-              x-text="msg.role === 'user' ? 'Ви' : 'Double Bite Concierge'"
+              x-text="msg.role === 'user' ? 'Ви' : (isEscalated ? 'Адміністратор ресторану' : 'Double Bite Concierge')"
             ></div>
-            <div x-text="msg.content"></div>
+            <div class="whitespace-pre-wrap" x-text="msg.content"></div>
           </div>
         </div>
       </template>
