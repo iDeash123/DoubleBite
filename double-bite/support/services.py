@@ -227,3 +227,10 @@ def get_faq_answers(query: str) -> list[dict[str, Any]]:
         }
         for faq in faqs
     ]
+
+
+from support.vector_search import (
+    generate_mock_embedding,
+    get_embedding,
+    search_dishes_semantic,
+)

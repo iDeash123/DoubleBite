@@ -6,6 +6,7 @@ from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models.fields.files import ImageFieldFile
 from django.utils.text import slugify
+from pgvector.django import HnswIndex, VectorField
 
 
 class DishImageFieldFile(ImageFieldFile):
@@ -90,6 +91,12 @@ class Dish(models.Model):
     is_vegetarian = models.BooleanField('Вегетаріанська', default=False)
     is_spicy = models.BooleanField('Гостра', default=False)
     is_available = models.BooleanField('В наявності', default=True, db_index=True)
+    embedding = VectorField(
+        'Векторний ембедінг',
+        dimensions=1024,
+        null=True,
+        blank=True,
+    )
     created_at = models.DateTimeField('Створено', auto_now_add=True)
     updated_at = models.DateTimeField('Оновлено', auto_now=True)
 
@@ -97,6 +104,15 @@ class Dish(models.Model):
         verbose_name = 'Страва'
         verbose_name_plural = 'Страви'
         ordering = ('title',)
+        indexes = [
+            HnswIndex(
+                name='dish_embedding_hnsw_idx',
+                fields=['embedding'],
+                m=16,
+                ef_construction=64,
+                opclasses=['vector_cosine_ops'],
+            ),
+        ]
 
     def clean(self) -> None:
         super().clean()
