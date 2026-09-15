@@ -4,12 +4,31 @@
     isEscalated: false,
     input: '',
     loading: false,
-    messages: [
-      {
+    messages: [],
+    async init() {
+      const welcomeMsg = {
         role: 'assistant',
         content: 'Вітаю! Я інтелектуальний помічник Double Bite на базі Mistral AI. Допоможу обрати авторські ресторанні страви, врахувати індивідуальні вподобання чи алергени, або дізнатися деталі щодо доставки.'
+      };
+      try {
+        const res = await fetch('/support/chat/history/');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.messages && data.messages.length > 0) {
+            this.messages = data.messages.map(m => ({ role: m.role, content: m.content }));
+          } else {
+            this.messages = [welcomeMsg];
+          }
+          if (data.is_escalated) {
+            this.isEscalated = true;
+          }
+        } else {
+          this.messages = [welcomeMsg];
+        }
+      } catch (e) {
+        this.messages = [welcomeMsg];
       }
-    ],
+    },
     sendQuick(text) {
       this.input = text;
       this.sendMessage();
