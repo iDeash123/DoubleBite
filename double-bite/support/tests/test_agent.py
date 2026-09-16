@@ -54,6 +54,9 @@ class MockAsyncStream:
 
 class MistralSupportAgentTest(TestCase):
     def setUp(self):
+        self._env_patch = patch.dict(os.environ, {'GEMINI_API_KEY': ''})
+        self._env_patch.start()
+        self.addCleanup(self._env_patch.stop)
         self.factory = RequestFactory()
         self.user = User.objects.create_user(
             email='agent_test@example.com',

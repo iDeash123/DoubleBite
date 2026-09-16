@@ -53,6 +53,8 @@ class MistralSupportAgent:
         model: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        gemini_api_key: str | None = None,
+        gemini_model: str | None = None,
     ):
         if api_key is not None:
             self.api_key = api_key
@@ -75,13 +77,15 @@ class MistralSupportAgent:
             else os.getenv('MISTRAL_MAX_TOKENS', '1024')
         )
 
-        # Gemini fallback config
-        self.gemini_api_key = (
-            os.getenv('GEMINI_API_KEY')
-            or getattr(settings, 'GEMINI_API_KEY', '')
-            or ''
-        )
-        self.gemini_model = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
+        if gemini_api_key is not None:
+            self.gemini_api_key = gemini_api_key
+        else:
+            self.gemini_api_key = (
+                os.getenv('GEMINI_API_KEY')
+                or getattr(settings, 'GEMINI_API_KEY', '')
+                or ''
+            )
+        self.gemini_model = gemini_model or os.getenv('GEMINI_MODEL', 'gemini-3.6-flash')
 
     async def stream_chat_response(
         self,
@@ -114,19 +118,19 @@ class MistralSupportAgent:
                     yield chunk
                 return
             except Exception:
-                logger.warning(
-                    'Mistral API unavailable, falling back to Gemini…',
-                    exc_info=True,
-                )
+                logger.warning('Mistral API unavailable or rate limited, falling back to Gemini…')
 
-        # --- Fallback: Gemini ---
         if self.gemini_api_key:
+            yielded_any = False
             try:
                 async for chunk in self._stream_gemini(messages, request, session):
+                    yielded_any = True
                     yield chunk
                 return
             except Exception:
                 logger.exception('Gemini API error')
+                if yielded_any:
+                    return
 
         yield {
             'error': (
@@ -277,7 +281,7 @@ class MistralSupportAgent:
             system_instruction=SYSTEM_PROMPT,
             tools=gemini_tools,
             temperature=self.temperature,
-            max_output_tokens=self.max_tokens,
+            thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
         )
 
         response = await client.aio.models.generate_content(
@@ -286,15 +290,14 @@ class MistralSupportAgent:
             config=config,
         )
 
-        # Handle tool calls from Gemini
         candidate = response.candidates[0]
+        parts = candidate.content.parts if candidate.content and candidate.content.parts else []
         function_calls = [
-            part for part in candidate.content.parts
-            if part.function_call is not None
+            part for part in parts
+            if getattr(part, 'function_call', None) is not None
         ]
 
         if function_calls:
-            # Append assistant message with function calls
             gemini_contents.append(candidate.content)
 
             function_responses: list[genai_types.Part] = []
@@ -336,22 +339,21 @@ class MistralSupportAgent:
                 parts=function_responses,
             ))
 
-            # Second call — stream the final answer
             final_config = genai_types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
                 temperature=self.temperature,
-                max_output_tokens=self.max_tokens,
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
             )
-            async for chunk in client.aio.models.generate_content_stream(
+            stream = await client.aio.models.generate_content_stream(
                 model=self.gemini_model,
                 contents=gemini_contents,
                 config=final_config,
-            ):
+            )
+            async for chunk in stream:
                 if chunk.text:
                     yield {'token': chunk.text}
         else:
-            # No tool calls — just yield the text
-            text = candidate.content.parts[0].text if candidate.content.parts else ''
+            text = ''.join(getattr(part, 'text', '') or '' for part in parts)
             if text:
                 yield {'token': text}
 
