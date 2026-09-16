@@ -87,6 +87,28 @@ class MistralSupportAgent:
             )
         self.gemini_model = gemini_model or os.getenv('GEMINI_MODEL', 'gemini-3.6-flash')
 
+    @staticmethod
+    def _get_cart_context(request: HttpRequest | None) -> str:
+        if not request:
+            return ""
+        try:
+            from orders.services import CartService
+            cart = CartService.get_cart(request)
+            if not cart or cart.items.count() == 0:
+                return "\n\nПОТОЧНИЙ СТАН КОШИКА КЛІЄНТА: кошик наразі порожній."
+            items_desc = [
+                f"- {item.dish.title} ({item.quantity} шт.)"
+                for item in cart.items.select_related('dish').all()
+                if item.dish
+            ]
+            return (
+                "\n\nПОТОЧНИЙ СТАН КОШИКА КЛІЄНТА:\n"
+                + "\n".join(items_desc)
+                + f"\nЗагальна сума: {cart.total_amount} грн"
+            )
+        except Exception:
+            return ""
+
     async def stream_chat_response(
         self,
         chat_history: list[dict[str, Any]],
@@ -103,8 +125,11 @@ class MistralSupportAgent:
             }
             return
 
+        cart_context = await sync_to_async(self._get_cart_context, thread_sensitive=True)(request)
+        system_content = SYSTEM_PROMPT + cart_context
+
         messages: list[dict[str, Any]] = [
-            {'role': 'system', 'content': SYSTEM_PROMPT}
+            {'role': 'system', 'content': system_content}
         ]
         for msg in chat_history:
             role = msg.get('role', 'user')
@@ -204,7 +229,7 @@ class MistralSupportAgent:
                             'support_phone': tool_res.get('support_phone', '+380 44 123 45 67'),
                         }
 
-                    if fn_name in ('add_to_cart', 'remove_from_cart') and tool_res.get('success'):
+                    if fn_name in ('add_to_cart', 'remove_from_cart', 'update_cart_quantity') and tool_res.get('success'):
                         yield {
                             'cart_mutation': True,
                             'cart_items_count': tool_res.get('cart_items_count', 0),
@@ -319,7 +344,7 @@ class MistralSupportAgent:
                         'support_phone': tool_res.get('support_phone', '+380 44 123 45 67'),
                     }
 
-                if fn_name in ('add_to_cart', 'remove_from_cart') and tool_res.get('success'):
+                if fn_name in ('add_to_cart', 'remove_from_cart', 'update_cart_quantity') and tool_res.get('success'):
                     yield {
                         'cart_mutation': True,
                         'cart_items_count': tool_res.get('cart_items_count', 0),

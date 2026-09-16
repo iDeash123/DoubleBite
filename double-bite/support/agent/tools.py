@@ -1,6 +1,7 @@
 from typing import Any
 
 from django.http import HttpRequest
+from menu.models import Dish
 from menu.selectors import search_dishes_for_agent
 from orders.exceptions import DishUnavailableError
 from orders.services import CartService
@@ -11,6 +12,34 @@ from support.services import (
     check_order_status_for_request,
     get_faq_answers,
 )
+
+
+def _find_dish(dish_id: int | None = None, dish_name: str | None = None) -> Dish | None:
+    if dish_id:
+        d = Dish.objects.filter(id=int(dish_id)).first()
+        if d:
+            return d
+    if dish_name and isinstance(dish_name, str):
+        name = dish_name.strip()
+        if not name:
+            return None
+        # 1. Exact match
+        d = Dish.objects.filter(title__iexact=name).first()
+        if d:
+            return d
+        # 2. Contains match
+        d = Dish.objects.filter(title__icontains=name).first()
+        if d:
+            return d
+        # 3. Keyword match (skip generic category words)
+        stop_words = {'піца', 'рол', 'бургер', 'салат', 'боул', 'сет', 'десерт', 'та', 'і', 'з', 'в', 'для', 'на'}
+        keywords = [w for w in name.split() if len(w) > 2 and w.lower() not in stop_words]
+        for kw in keywords:
+            d = Dish.objects.filter(title__icontains=kw).first()
+            if d:
+                return d
+    return None
+
 
 SUPPORT_AGENT_TOOLS: list[dict[str, Any]] = [
     {
@@ -34,17 +63,17 @@ SUPPORT_AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "search_dishes",
-            "description": "Пошук страв у меню за назвою, категорією, максимальною ціною, калорійністю або дієтичними параметрами.",
+            "description": "Пошук та перегляд страв і напоїв у меню за назвою, категорією (наприклад 'drinks' для напоїв, 'pizza', 'sushi', 'burgers', 'desserts', 'bowls-salads', 'sets'), максимальною ціною або дієтичними параметрами. Обов'язково викликай цей інструмент, коли клієнт просить порадити або порекомендувати страви чи напої!",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Ключове слово для пошуку (наприклад: 'піца', 'суші', 'бургер', 'салат')"
+                        "description": "Ключове слово для пошуку (наприклад: 'піца', 'суші', 'бургер', 'салат', 'лимонад')"
                     },
                     "category_slug": {
                         "type": "string",
-                        "description": "Слаг категорії (наприклад: 'pizza', 'sushi', 'burgers', 'desserts', 'drinks')"
+                        "description": "Слаг категорії: 'drinks' (для напоїв, фрешів, чаю, кави), 'pizza', 'sushi', 'burgers', 'desserts', 'bowls-salads', 'sets'"
                     },
                     "max_price": {
                         "type": "number",
@@ -83,13 +112,17 @@ SUPPORT_AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "add_to_cart",
-            "description": "Автономно додати страву та обраний модифікатор до кошика клієнта.",
+            "description": "Автономно додати страву та обраний модифікатор до кошика клієнта. Обов'язково викликай цей інструмент, коли клієнт просить додати будь-яку страву! Можна вказувати dish_id АБО назву страви dish_name.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "dish_id": {
                         "type": "integer",
-                        "description": "Числовий ID страви"
+                        "description": "Числовий ID страви (якщо відомий)"
+                    },
+                    "dish_name": {
+                        "type": "string",
+                        "description": "Назва або частина назви страви для додавання (наприклад: 'Піца Буррата', 'Пепероні')"
                     },
                     "quantity": {
                         "type": "integer",
@@ -99,8 +132,36 @@ SUPPORT_AGENT_TOOLS: list[dict[str, Any]] = [
                         "type": "integer",
                         "description": "ID опції чи розміру страви (необов'язково)"
                     }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_cart_quantity",
+            "description": "Змінити кількість порцій існуючої страви у кошику клієнта (наприклад, зменшити до 2 або збільшити). Обов'язково викликай цей інструмент, коли клієнт просить змінити/зменшити кількість! Якщо quantity=0, страва видаляється.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "quantity": {
+                        "type": "integer",
+                        "description": "Нова підсумкова кількість порцій (якщо 0 — страва видаляється)"
+                    },
+                    "dish_id": {
+                        "type": "integer",
+                        "description": "ID страви у кошику"
+                    },
+                    "dish_name": {
+                        "type": "string",
+                        "description": "Назва страви у кошику (наприклад: 'Піца Веганська з Артишоками')"
+                    },
+                    "item_id": {
+                        "type": "integer",
+                        "description": "ID позиції у кошику (якщо відомий)"
+                    }
                 },
-                "required": ["dish_id"]
+                "required": ["quantity"]
             }
         }
     },
@@ -108,17 +169,21 @@ SUPPORT_AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "remove_from_cart",
-            "description": "Видалити позицію або страву з кошика клієнта.",
+            "description": "Видалити позицію або страву з кошика клієнта за назвою dish_name, dish_id або item_id.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "item_id": {
-                        "type": "integer",
-                        "description": "ID позиції CartItem у кошику"
+                    "dish_name": {
+                        "type": "string",
+                        "description": "Назва страви для видалення з кошика (наприклад: 'Піца Веганська')"
                     },
                     "dish_id": {
                         "type": "integer",
-                        "description": "ID страви для видалення, якщо item_id невідомий"
+                        "description": "ID страви для видалення, якщо відомий"
+                    },
+                    "item_id": {
+                        "type": "integer",
+                        "description": "ID позиції CartItem у кошику"
                     }
                 }
             }
@@ -256,19 +321,25 @@ def execute_agent_tool(
             return {"error": "Неможливо оновити кошик: сесія не знайдена."}
 
         dish_id = arguments.get("dish_id")
+        dish_name = arguments.get("dish_name")
         quantity = int(arguments.get("quantity") or 1)
         option_id = arguments.get("option_id")
 
-        if not dish_id:
-            return {"error": "Не вказано ID страви для додавання."}
+        dish = _find_dish(dish_id=dish_id, dish_name=dish_name)
+        if not dish:
+            identifier = dish_name or dish_id or "невідома страва"
+            return {"error": f"Страву «{identifier}» не знайдено в меню. Будь ласка, перевірте назву або скористайтеся пошуком."}
 
         try:
             item = CartService.add_dish(
                 request=request,
-                dish_id=dish_id,
+                dish_id=dish.id,
                 quantity=quantity,
                 option_id=option_id,
             )
+            if hasattr(request, "session"):
+                request.session.save()
+
             cart = CartService.get_cart(request)
             total_amount = float(cart.total_amount) if cart else 0.0
             items_count = CartService.get_items_count(request)
@@ -276,18 +347,84 @@ def execute_agent_tool(
             return {
                 "success": True,
                 "action": "add_to_cart",
-                "dish_id": dish_id,
+                "dish_id": dish.id,
                 "dish_title": item.dish.title,
                 "quantity": item.quantity,
+                "added_quantity": quantity,
                 "unit_price": float(item.unit_price),
                 "total_amount": total_amount,
                 "cart_items_count": items_count,
-                "message": f"Страву «{item.dish.title}» ({item.quantity} шт.) успішно додано до кошика."
+                "message": f"Страву «{item.dish.title}» ({quantity} шт.) успішно додано до кошика."
             }
         except DishUnavailableError as e:
             return {"error": str(e)}
         except (ValueError, KeyError, TypeError) as e:
             return {"error": f"Помилка при додаванні до кошика: {e!s}"}
+
+    elif tool_name == "update_cart_quantity":
+        if request is None:
+            return {"error": "Неможливо оновити кошик: сесія не знайдена."}
+
+        cart = CartService.get_cart(request)
+        if not cart or cart.items.count() == 0:
+            return {"error": "Ваш кошик наразі порожній, немає страв для зміни кількості."}
+
+        item_id = arguments.get("item_id")
+        dish_id = arguments.get("dish_id")
+        dish_name = arguments.get("dish_name")
+        try:
+            quantity = int(arguments.get("quantity", 0))
+        except (ValueError, TypeError):
+            quantity = 0
+
+        target_item = None
+        if item_id:
+            target_item = cart.items.filter(id=int(item_id)).first()
+        if not target_item and dish_id:
+            target_item = cart.items.filter(dish_id=int(dish_id)).first()
+        if not target_item and dish_name:
+            name = str(dish_name).strip()
+            target_item = cart.items.filter(dish__title__iexact=name).first()
+            if not target_item:
+                target_item = cart.items.filter(dish__title__icontains=name).first()
+            if not target_item:
+                stop_words = {'піца', 'рол', 'бургер', 'салат', 'боул', 'сет', 'десерт', 'та', 'і', 'з', 'в'}
+                keywords = [w for w in name.split() if len(w) > 2 and w.lower() not in stop_words]
+                for kw in keywords:
+                    target_item = cart.items.filter(dish__title__icontains=kw).first()
+                    if target_item:
+                        break
+
+        if not target_item:
+            identifier = dish_name or dish_id or item_id or "вказану страву"
+            return {"error": f"Позицію «{identifier}» не знайдено у вашому кошику."}
+
+        dish_title = target_item.dish.title
+        dish_id_val = target_item.dish_id
+        if quantity <= 0:
+            CartService.remove_item(request, target_item.id)
+            action_desc = f"Позицію «{dish_title}» видалено з кошика."
+        else:
+            CartService.update_item_quantity(request, target_item.id, quantity)
+            action_desc = f"Кількість страви «{dish_title}» успішно оновлено до {quantity} шт."
+
+        if hasattr(request, "session"):
+            request.session.save()
+
+        cart = CartService.get_cart(request)
+        total_amount = float(cart.total_amount) if cart else 0.0
+        items_count = CartService.get_items_count(request)
+
+        return {
+            "success": True,
+            "action": "update_cart_quantity",
+            "dish_id": dish_id_val,
+            "dish_title": dish_title,
+            "quantity": quantity,
+            "total_amount": total_amount,
+            "cart_items_count": items_count,
+            "message": action_desc,
+        }
 
     elif tool_name == "remove_from_cart":
         if request is None:
@@ -295,34 +432,53 @@ def execute_agent_tool(
 
         item_id = arguments.get("item_id")
         dish_id = arguments.get("dish_id")
+        dish_name = arguments.get("dish_name")
 
         cart = CartService.get_cart(request)
-        if not cart:
+        if not cart or cart.items.count() == 0:
             return {"success": False, "message": "Кошик порожній."}
 
-        removed = False
+        target_item = None
         if item_id:
-            removed = CartService.remove_item(request, int(item_id))
-        elif dish_id:
-            item = cart.items.filter(dish_id=int(dish_id)).first()
-            if item:
-                removed = CartService.remove_item(request, item.id)
+            target_item = cart.items.filter(id=int(item_id)).first()
+        if not target_item and dish_id:
+            target_item = cart.items.filter(dish_id=int(dish_id)).first()
+        if not target_item and dish_name:
+            name = str(dish_name).strip()
+            target_item = cart.items.filter(dish__title__iexact=name).first() or cart.items.filter(dish__title__icontains=name).first()
+            if not target_item:
+                stop_words = {'піца', 'рол', 'бургер', 'салат', 'боул', 'сет', 'десерт', 'та', 'і', 'з', 'в'}
+                keywords = [w for w in name.split() if len(w) > 2 and w.lower() not in stop_words]
+                for kw in keywords:
+                    target_item = cart.items.filter(dish__title__icontains=kw).first()
+                    if target_item:
+                        break
 
-        cart = CartService.get_cart(request)
-        total_amount = float(cart.total_amount) if cart else 0.0
-        items_count = CartService.get_items_count(request)
+        if target_item:
+            dish_title = target_item.dish.title
+            dish_id_val = target_item.dish_id
+            CartService.remove_item(request, target_item.id)
+            if hasattr(request, "session"):
+                request.session.save()
 
-        if removed:
+            cart = CartService.get_cart(request)
+            total_amount = float(cart.total_amount) if cart else 0.0
+            items_count = CartService.get_items_count(request)
+
             return {
                 "success": True,
                 "action": "remove_from_cart",
+                "dish_id": dish_id_val,
+                "dish_title": dish_title,
                 "total_amount": total_amount,
                 "cart_items_count": items_count,
-                "message": "Позицію успішно видалено з кошика."
+                "message": f"Позицію «{dish_title}» успішно видалено з кошика."
             }
+
+        identifier = dish_name or dish_id or item_id or "позицію"
         return {
             "success": False,
-            "message": "Позицію не знайдено у вашому кошику."
+            "message": f"Позицію «{identifier}» не знайдено у вашому кошику."
         }
 
     elif tool_name == "view_cart":

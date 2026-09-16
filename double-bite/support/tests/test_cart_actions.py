@@ -149,6 +149,64 @@ class AutonomousCartActionsTest(TestCase):
         cart = Cart.objects.filter(user=self.user).first()
         self.assertEqual(cart.items.count(), 0)
 
+    def test_autonomous_add_to_cart_by_name(self):
+        req = self._get_request()
+        result = execute_agent_tool(
+            'add_to_cart',
+            {'dish_name': 'Пепероні', 'quantity': 2},
+            request=req,
+            session=self.session,
+        )
+        self.assertTrue(result['success'])
+        self.assertEqual(result['dish_title'], 'Пепероні')
+        self.assertEqual(result['cart_items_count'], 2)
+        self.assertEqual(result['total_amount'], 560.0)
+
+    def test_autonomous_update_cart_quantity_by_name(self):
+        req = self._get_request()
+        CartService.add_dish(req, self.dish_pepperoni.id, quantity=4)
+
+        result = execute_agent_tool(
+            'update_cart_quantity',
+            {'dish_name': 'Пепероні', 'quantity': 2},
+            request=req,
+            session=self.session,
+        )
+        self.assertTrue(result['success'])
+        self.assertEqual(result['action'], 'update_cart_quantity')
+        self.assertEqual(result['quantity'], 2)
+        self.assertEqual(result['cart_items_count'], 2)
+        self.assertEqual(result['total_amount'], 560.0)
+
+    def test_autonomous_update_cart_quantity_to_zero_removes(self):
+        req = self._get_request()
+        CartService.add_dish(req, self.dish_pepperoni.id, quantity=2)
+
+        result = execute_agent_tool(
+            'update_cart_quantity',
+            {'dish_name': 'Пепероні', 'quantity': 0},
+            request=req,
+            session=self.session,
+        )
+        self.assertTrue(result['success'])
+        self.assertEqual(result['cart_items_count'], 0)
+        self.assertEqual(result['total_amount'], 0.0)
+
+    def test_autonomous_remove_from_cart_by_name(self):
+        req = self._get_request()
+        CartService.add_dish(req, self.dish_pepperoni.id, quantity=1)
+
+        result = execute_agent_tool(
+            'remove_from_cart',
+            {'dish_name': 'Пепероні'},
+            request=req,
+            session=self.session,
+        )
+        self.assertTrue(result['success'])
+        self.assertEqual(result['cart_items_count'], 0)
+        cart = Cart.objects.filter(user=self.user).first()
+        self.assertEqual(cart.items.count(), 0)
+
     @patch('support.agent.client.MistralSupportAgent.stream_chat_response', side_effect=mock_stream_with_cart_tool)
     async def test_sse_stream_cart_mutation_event(self, mock_stream):
         await self.async_client.aforce_login(self.user)
