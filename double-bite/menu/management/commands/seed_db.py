@@ -1,14 +1,26 @@
 import os
+import shutil
 import urllib.request
 from decimal import Decimal
 from pathlib import Path
+
+from accounts.models import DeliveryAddress, Role, User
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
-from accounts.models import User
-from menu.models import Category, Dish, DishOption
-from orders.models import Cart, CartItem, Order, OrderItem
+from orders.models import (
+    Cart,
+    CartItem,
+    Order,
+    OrderItem,
+    OrderStatus,
+    PaymentMethod,
+    PaymentStatus,
+)
+from support.models import ChatMessage, ChatSession, FAQKnowledge, SupportTicket
+from support.vector_search import generate_mock_embedding
 
+from menu.models import Category, Dish, DishOption
 
 CATEGORIES_DATA = [
     {
@@ -1740,7 +1752,7 @@ CATEGORIES_DATA = [
 
 
 class Command(BaseCommand):
-    help = 'Повне очищення БД та заповнення мінімум 15 позиціями для кожної категорії з фотографіями'
+    help = 'Повне очищення БД та заповнення меню з фотографіями, векторними ембедінгами, користувачами та FAQ'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -1748,27 +1760,48 @@ class Command(BaseCommand):
             action='store_true',
             help='Тільки очистити базу даних без створення нових записів',
         )
+        parser.add_argument(
+            '--clear',
+            action='store_true',
+            help='Очистити базу даних перед заповненням',
+        )
+        parser.add_argument(
+            '--reset',
+            action='store_true',
+            help='Повний перезапуск (скидання та повторне заповнення)',
+        )
+        parser.add_argument(
+            '--skip-images',
+            action='store_true',
+            help='Пропустити завантаження зовнішніх зображень',
+        )
 
     def handle(self, *args, **options):
         self.stdout.write(self.style.WARNING('Початок процесу очищення та заповнення бази даних...'))
 
         with transaction.atomic():
-            self.stdout.write('Видалення старих замовлень та кошиків...')
+            self.stdout.write('Видалення старих тікетів, чатів та FAQ...')
+            SupportTicket.objects.all().delete()
+            ChatMessage.objects.all().delete()
+            ChatSession.objects.all().delete()
+            FAQKnowledge.objects.all().delete()
+
+            self.stdout.write('Видалення старих замовлень, кошиків та адрес...')
             OrderItem.objects.all().delete()
             Order.objects.all().delete()
             CartItem.objects.all().delete()
             Cart.objects.all().delete()
+            DeliveryAddress.objects.all().delete()
 
             self.stdout.write('Видалення старих опцій, страв та категорій...')
             DishOption.objects.all().delete()
             Dish.objects.all().delete()
             Category.objects.all().delete()
 
-            # Створення або перевірка адміністратора
             admin_email = os.getenv('admin_mail', 'admin@doublebite.com')
             admin_password = os.getenv('admin_password', 'admin12345')
             if not User.objects.filter(email=admin_email).exists():
-                admin_user = User.objects.create_superuser(
+                User.objects.create_superuser(
                     email=admin_email,
                     password=admin_password,
                     first_name='Admin',
@@ -1782,14 +1815,89 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS('Базу даних успішно очищено!'))
                 return
 
-            self.stdout.write(self.style.MIGRATE_HEADING('Створення нових категорій та страв...'))
+            customer_email = 'customer@doublebite.com'
+            customer_user = User.objects.filter(email=customer_email).first()
+            if not customer_user:
+                customer_user = User.objects.create_user(
+                    email=customer_email,
+                    password='customer12345',
+                    first_name='Олена',
+                    last_name='Коваленко',
+                    phone='+380501234567',
+                    role=Role.CUSTOMER,
+                )
+                self.stdout.write(self.style.SUCCESS(f'Створено клієнта: {customer_email}'))
+
+            courier_email = 'courier@doublebite.com'
+            if not User.objects.filter(email=courier_email).exists():
+                User.objects.create_user(
+                    email=courier_email,
+                    password='courier12345',
+                    first_name='Богдан',
+                    last_name='Шевченко',
+                    phone='+380671234567',
+                    role=Role.COURIER,
+                )
+                self.stdout.write(self.style.SUCCESS(f'Створено кур\'єра: {courier_email}'))
+
+            DeliveryAddress.objects.create(
+                user=customer_user,
+                title='Дім',
+                city='Київ',
+                street='вул. Хрещатик',
+                building='24',
+                apartment='15',
+                floor='4',
+                intercom='15',
+                is_default=True,
+            )
+            DeliveryAddress.objects.create(
+                user=customer_user,
+                title='Робота',
+                city='Київ',
+                street='вул. Володимирська',
+                building='42',
+                apartment='Офіс 301',
+                floor='3',
+                intercom='301',
+                is_default=False,
+            )
+            DeliveryAddress.objects.create(
+                user=customer_user,
+                title='Батьки',
+                city='Київ',
+                street='просп. Берестейський',
+                building='18',
+                apartment='50',
+                floor='7',
+                intercom='50',
+                is_default=False,
+            )
+
+            faq_entries = [
+                ('Які години роботи ресторану?', 'Ми приймаємо та доставляємо замовлення щодня з 10:00 до 22:00 без вихідних.', 'Графік роботи'),
+                ('Яка мінімальна сума замовлення?', 'Мінімальна сума замовлення для оформлення доставки становить 200 грн.', 'Доставка'),
+                ('Скільки коштує доставка?', 'Вартість доставки становить 50 грн. При замовленні на суму від 800 грн доставка безкоштовна.', 'Доставка'),
+                ('Які способи оплати доступні?', 'Ви можете оплатити замовлення онлайн карткою через Stripe (Apple Pay, Google Pay) або готівкою / терміналом кур\'єру при отриманні.', 'Оплата'),
+                ('Як дізнатися статус мого замовлення?', 'Ви можете переглянути актуальний статус замовлення на сторінці трекінгу або запитати нашого розумного асистента підтримки у чаті, вказавши номер замовлення (наприклад, DB-0001).', 'Замовлення'),
+                ('Чи можна змінити або скасувати замовлення?', 'Скасувати замовлення можна, поки воно знаходиться у статусі «Очікує оплати» або «Оплачено», звернувшись до нашого асистента або за телефоном гарячої лінії ресторану.', 'Повернення та скасування'),
+            ]
+            for q, a, c in faq_entries:
+                FAQKnowledge.objects.create(question=q, answer=a, category=c, is_active=True)
+
+            self.stdout.write(self.style.MIGRATE_HEADING('Створення нових категорій та страв із векторними ембедінгами...'))
 
             total_categories = 0
             total_dishes = 0
             total_options = 0
 
+            media_dishes_dir = Path(settings.MEDIA_ROOT) / 'dishes'
+            media_dishes_dir.mkdir(parents=True, exist_ok=True)
+            parent_media_dishes_dir = Path(settings.BASE_DIR).parent / 'media' / 'dishes'
+            candidate_exts = ('.jpg', '.jpeg', '.png', '.webp')
+
             for cat_data in CATEGORIES_DATA:
-                dishes_data = cat_data.pop('dishes', [])
+                dishes_data = cat_data.get('dishes', [])
                 category = Category.objects.create(
                     name=cat_data['name'],
                     slug=cat_data['slug'],
@@ -1800,28 +1908,62 @@ class Command(BaseCommand):
                 total_categories += 1
                 self.stdout.write(f' -> Категорія [{category.name}] ({len(dishes_data)} позицій)')
 
-                media_dishes_dir = Path(settings.MEDIA_ROOT) / 'dishes'
-                media_dishes_dir.mkdir(parents=True, exist_ok=True)
-
                 for d_data in dishes_data:
-                    options_list = d_data.pop('options', [])
-                    img_src = d_data['image']
-                    local_rel_path = f"dishes/{d_data['slug']}.jpg"
-                    local_full_path = media_dishes_dir / f"{d_data['slug']}.jpg"
+                    options_list = d_data.get('options', [])
+                    slug = d_data['slug']
+                    img_src = d_data.get('image', '')
 
-                    if not local_full_path.exists() or local_full_path.stat().st_size == 0:
-                        if img_src and img_src.startswith(('http://', 'https://')):
+                    local_file = None
+                    for ext in candidate_exts:
+                        candidate = media_dishes_dir / f"{slug}{ext}"
+                        if candidate.exists() and candidate.stat().st_size > 0:
+                            local_file = candidate
+                            break
+
+                    if not local_file and parent_media_dishes_dir.exists():
+                        for ext in candidate_exts:
+                            candidate = parent_media_dishes_dir / f"{slug}{ext}"
+                            if candidate.exists() and candidate.stat().st_size > 0:
+                                target = media_dishes_dir / candidate.name
+                                shutil.copyfile(candidate, target)
+                                local_file = target
+                                break
+
+                    if not local_file:
+                        target_file = media_dishes_dir / f"{slug}.jpg"
+                        if not options.get('skip_images') and img_src and str(img_src).startswith(('http://', 'https://')):
                             try:
-                                req = urllib.request.Request(img_src, headers={'User-Agent': 'Mozilla/5.0'})
+                                req = urllib.request.Request(
+                                    img_src,
+                                    headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'},
+                                )
                                 with urllib.request.urlopen(req, timeout=10) as resp:
                                     data = resp.read()
                                     if data:
-                                        with open(local_full_path, 'wb') as f:
+                                        with open(target_file, 'wb') as f:
                                             f.write(data)
+                                        local_file = target_file
                             except Exception:
                                 pass
 
-                    final_image = local_rel_path if (local_full_path.exists() and local_full_path.stat().st_size > 0) else img_src
+                        if not local_file or not target_file.exists() or target_file.stat().st_size == 0:
+                            existing_samples = [
+                                f for f in media_dishes_dir.iterdir()
+                                if f.is_file() and f.suffix.lower() in candidate_exts and f.stat().st_size > 0 and f != target_file
+                            ]
+                            if existing_samples:
+                                shutil.copyfile(existing_samples[0], target_file)
+                                local_file = target_file
+                            else:
+                                from PIL import Image
+                                img = Image.new('RGB', (600, 600), color=(240, 240, 240))
+                                img.save(target_file, format='JPEG')
+                                local_file = target_file
+
+                    final_image = f"dishes/{local_file.name}"
+
+                    embed_text = f"{d_data['title']} {category.name} {d_data['description']} {d_data.get('allergens', '')}"
+                    embedding = generate_mock_embedding(embed_text)
 
                     dish = Dish.objects.create(
                         category=category,
@@ -1836,6 +1978,7 @@ class Command(BaseCommand):
                         is_spicy=d_data.get('is_spicy', False),
                         is_available=True,
                         image=final_image,
+                        embedding=embedding,
                     )
                     total_dishes += 1
 
@@ -1847,11 +1990,59 @@ class Command(BaseCommand):
                         )
                         total_options += 1
 
+            dish_margherita = Dish.objects.filter(slug__contains='margherita').first() or Dish.objects.first()
+            dish_pepperoni = Dish.objects.filter(slug__contains='pepperoni').first() or Dish.objects.last()
+
+            if dish_margherita:
+                order1 = Order.objects.create(
+                    order_number='DB-0001',
+                    user=customer_user,
+                    customer_name='Олена Коваленко',
+                    customer_phone='+380501234567',
+                    delivery_address='м. Київ, вул. Хрещатик, 24, кв. 15',
+                    status=OrderStatus.DELIVERED,
+                    payment_method=PaymentMethod.CARD,
+                    payment_status=PaymentStatus.PAID,
+                    total_amount=Decimal(str(dish_margherita.price * 2)),
+                    eta_minutes=0,
+                )
+                OrderItem.objects.create(
+                    order=order1,
+                    dish=dish_margherita,
+                    dish_title=dish_margherita.title,
+                    price=dish_margherita.price,
+                    quantity=2,
+                )
+
+            if dish_pepperoni:
+                order2 = Order.objects.create(
+                    order_number='DB-0002',
+                    user=customer_user,
+                    customer_name='Олена Коваленко',
+                    customer_phone='+380501234567',
+                    delivery_address='м. Київ, вул. Володимирська, 42, офіс 301',
+                    status=OrderStatus.ON_WAY,
+                    payment_method=PaymentMethod.CARD,
+                    payment_status=PaymentStatus.PAID,
+                    total_amount=Decimal(str(dish_pepperoni.price)),
+                    eta_minutes=25,
+                )
+                OrderItem.objects.create(
+                    order=order2,
+                    dish=dish_pepperoni,
+                    dish_title=dish_pepperoni.title,
+                    price=dish_pepperoni.price,
+                    quantity=1,
+                )
+
         self.stdout.write(
             self.style.SUCCESS(
                 f'\nУспішно заповнено базу даних!\n'
                 f'  • Категорій створено: {total_categories}\n'
-                f'  • Страв створено: {total_dishes} (по 15+ у кожній категорії)\n'
+                f'  • Страв з ембедінгами створено: {total_dishes}\n'
                 f'  • Опцій/модифікаторів створено: {total_options}\n'
+                f'  • FAQ статей створено: {len(faq_entries)}\n'
+                f'  • Демо-замовлень створено: 2\n'
+                f'  • Демо-адрес створено: 3\n'
             )
         )

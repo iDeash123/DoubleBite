@@ -3,11 +3,11 @@ from decimal import Decimal
 import pytest
 from menu.models import Category, Dish
 from menu.selectors import search_dishes_for_agent
+
 from support.vector_search import (
     EMBEDDING_DIM,
     cosine_similarity,
     generate_mock_embedding,
-    get_embedding,
     search_dishes_semantic,
 )
 
@@ -105,7 +105,7 @@ def test_dish_model_embedding_field(sample_dishes_with_embeddings):
 
 @pytest.mark.django_db
 def test_search_dishes_semantic_success(sample_dishes_with_embeddings):
-    dish1, dish2, dish3 = sample_dishes_with_embeddings
+    dish1, _, _ = sample_dishes_with_embeddings
     results = search_dishes_semantic('маргарита моцарела', limit=2)
     assert len(results) > 0
     assert results[0].pk == dish1.pk

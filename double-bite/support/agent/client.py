@@ -369,10 +369,7 @@ class MistralSupportAgent:
         raw = getattr(exc, 'raw_response', None) or getattr(exc, 'http_res', None)
         if raw is not None and getattr(raw, 'status_code', None) == 429:
             return True
-        # Fallback: check the string representation
-        if '429' in str(exc) and 'rate' in str(exc).lower():
-            return True
-        return False
+        return bool('429' in str(exc) and 'rate' in str(exc).lower())
 
     async def _call_with_retry(self, func, *args, **kwargs):
         """Call *func* with retry + exponential backoff on rate-limit errors."""

@@ -1,7 +1,6 @@
 import hashlib
 import math
 import os
-from typing import Any
 
 from django.db import connection
 from django.db.models import Q
@@ -31,7 +30,7 @@ def generate_mock_embedding(text: str, dim: int = EMBEDDING_DIM) -> list[float]:
 
 def get_embedding(text: str, dim: int = EMBEDDING_DIM) -> list[float]:
     api_key = os.getenv('MISTRAL_API_KEY')
-    if api_key and not os.getenv('TEST_USE_MOCK_EMBEDDING', '1') == '1':
+    if api_key and os.getenv('TEST_USE_MOCK_EMBEDDING', '1') != '1':
         try:
             from mistralai import Mistral
             client = Mistral(api_key=api_key)

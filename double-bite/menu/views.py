@@ -1,10 +1,10 @@
 from decimal import Decimal, InvalidOperation
 
+from config.partials import render_partial_or_full
 from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
 
-from config.partials import render_partial_or_full
 from .models import Category
 from .selectors import (
     SORT_OPTIONS,
@@ -49,8 +49,7 @@ def catalog_view(request: HttpRequest, category_slug: str | None = None) -> Http
 
     try:
         page_number = int(request.GET.get('page', 1))
-        if page_number < 1:
-            page_number = 1
+        page_number = max(page_number, 1)
     except (ValueError, TypeError):
         page_number = 1
 
