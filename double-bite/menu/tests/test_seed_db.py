@@ -7,6 +7,7 @@ from accounts.models import DeliveryAddress, Role, User
 from django.conf import settings
 from django.core.management import call_command
 from orders.models import Order, OrderItem
+from PIL import Image
 from support.models import FAQKnowledge
 
 from menu.models import Category, Dish, DishOption
@@ -38,6 +39,8 @@ def test_seed_db_creates_expected_data_and_local_media_images():
         assert not dish.image.name.startswith('http')
         assert os.path.exists(dish.image.path)
         assert os.path.getsize(dish.image.path) > 0
+        with Image.open(dish.image.path) as img:
+            img.verify()
 
 
 @pytest.mark.django_db
@@ -56,12 +59,39 @@ def test_seed_db_downloads_missing_image(tmp_path, monkeypatch):
     with patch('urllib.request.urlopen', return_value=mock_resp):
         call_command('seed_db')
 
+    assert mock_resp.read.called
     dishes = list(Dish.objects.all())
     assert len(dishes) >= 105
     for dish in dishes:
         assert dish.image.name.startswith('dishes/')
         assert os.path.exists(dish.image.path)
         assert os.path.getsize(dish.image.path) > 0
+        with Image.open(dish.image.path) as img:
+            img.verify()
+
+
+@pytest.mark.django_db
+def test_seed_db_handles_corrupted_download_with_fallback(tmp_path, monkeypatch):
+    mock_media = tmp_path / 'media'
+    mock_dishes = mock_media / 'dishes'
+    mock_dishes.mkdir(parents=True)
+    monkeypatch.setattr(settings, 'MEDIA_ROOT', mock_media)
+
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = b'<html>500 Internal Server Error</html>'
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch('urllib.request.urlopen', return_value=mock_resp):
+        call_command('seed_db')
+
+    dishes = list(Dish.objects.all())
+    assert len(dishes) >= 105
+    for dish in dishes:
+        assert dish.image.name.startswith('dishes/')
+        assert os.path.exists(dish.image.path)
+        assert os.path.getsize(dish.image.path) > 0
+        with Image.open(dish.image.path) as img:
+            img.verify()
 
 
 @pytest.mark.django_db
@@ -80,3 +110,26 @@ def test_seed_db_fallback_when_download_fails(tmp_path, monkeypatch):
         assert dish.image.name.startswith('dishes/')
         assert os.path.exists(dish.image.path)
         assert os.path.getsize(dish.image.path) > 0
+        with Image.open(dish.image.path) as img:
+            img.verify()
+
+
+@pytest.mark.django_db
+def test_seed_db_finds_image_in_media_root(tmp_path, monkeypatch):
+    mock_media = tmp_path / 'media'
+    mock_dishes = mock_media / 'dishes'
+    mock_dishes.mkdir(parents=True)
+    monkeypatch.setattr(settings, 'MEDIA_ROOT', mock_media)
+
+    sample_img = Image.new('RGB', (200, 200), color=(100, 150, 200))
+    sample_path = mock_media / 'pizza-margherita-dop.jpg'
+    sample_img.save(sample_path, format='JPEG')
+
+    call_command('seed_db', skip_images=True)
+
+    margherita = Dish.objects.get(slug='pizza-margherita-dop')
+    assert margherita.image.name == 'dishes/pizza-margherita-dop.jpg'
+    assert os.path.exists(margherita.image.path)
+    assert os.path.getsize(margherita.image.path) > 0
+    with Image.open(margherita.image.path) as img:
+        img.verify()

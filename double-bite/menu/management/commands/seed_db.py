@@ -1,3 +1,4 @@
+import io
 import os
 import shutil
 import urllib.request
@@ -17,6 +18,7 @@ from orders.models import (
     PaymentMethod,
     PaymentStatus,
 )
+from PIL import Image, ImageDraw
 from support.models import ChatMessage, ChatSession, FAQKnowledge, SupportTicket
 from support.vector_search import generate_mock_embedding
 
@@ -1891,10 +1893,22 @@ class Command(BaseCommand):
             total_dishes = 0
             total_options = 0
 
-            media_dishes_dir = Path(settings.MEDIA_ROOT) / 'dishes'
+            media_root_dir = Path(settings.MEDIA_ROOT)
+            media_dishes_dir = media_root_dir / 'dishes'
             media_dishes_dir.mkdir(parents=True, exist_ok=True)
-            parent_media_dishes_dir = Path(settings.BASE_DIR).parent / 'media' / 'dishes'
+            parent_media_dir = Path(settings.BASE_DIR).parent / 'media'
+            parent_media_dishes_dir = parent_media_dir / 'dishes'
             candidate_exts = ('.jpg', '.jpeg', '.png', '.webp')
+            color_palette = [
+                (230, 81, 0),
+                (194, 24, 91),
+                (0, 121, 107),
+                (211, 47, 47),
+                (81, 45, 168),
+                (48, 63, 159),
+                (2, 136, 209),
+                (56, 142, 60),
+            ]
 
             for cat_data in CATEGORIES_DATA:
                 dishes_data = cat_data.get('dishes', [])
@@ -1920,6 +1934,15 @@ class Command(BaseCommand):
                             local_file = candidate
                             break
 
+                    if not local_file:
+                        for ext in candidate_exts:
+                            candidate = media_root_dir / f"{slug}{ext}"
+                            if candidate.exists() and candidate.stat().st_size > 0:
+                                target = media_dishes_dir / candidate.name
+                                shutil.copyfile(candidate, target)
+                                local_file = target
+                                break
+
                     if not local_file and parent_media_dishes_dir.exists():
                         for ext in candidate_exts:
                             candidate = parent_media_dishes_dir / f"{slug}{ext}"
@@ -1928,6 +1951,26 @@ class Command(BaseCommand):
                                 shutil.copyfile(candidate, target)
                                 local_file = target
                                 break
+
+                    if not local_file and parent_media_dir.exists():
+                        for ext in candidate_exts:
+                            candidate = parent_media_dir / f"{slug}{ext}"
+                            if candidate.exists() and candidate.stat().st_size > 0:
+                                target = media_dishes_dir / candidate.name
+                                shutil.copyfile(candidate, target)
+                                local_file = target
+                                break
+
+                    if not local_file and img_src and not str(img_src).startswith(('http://', 'https://')):
+                        src_name = Path(img_src).name
+                        candidate1 = media_dishes_dir / src_name
+                        candidate2 = media_root_dir / src_name
+                        if candidate1.exists() and candidate1.stat().st_size > 0:
+                            local_file = candidate1
+                        elif candidate2.exists() and candidate2.stat().st_size > 0:
+                            target = media_dishes_dir / candidate2.name
+                            shutil.copyfile(candidate2, target)
+                            local_file = target
 
                     if not local_file:
                         target_file = media_dishes_dir / f"{slug}.jpg"
@@ -1940,24 +1983,31 @@ class Command(BaseCommand):
                                 with urllib.request.urlopen(req, timeout=10) as resp:
                                     data = resp.read()
                                     if data:
+                                        img_check = Image.open(io.BytesIO(data))
+                                        img_check.verify()
                                         with open(target_file, 'wb') as f:
                                             f.write(data)
                                         local_file = target_file
                             except Exception:
-                                pass
+                                if target_file.exists():
+                                    target_file.unlink(missing_ok=True)
 
                         if not local_file or not target_file.exists() or target_file.stat().st_size == 0:
                             existing_samples = [
                                 f for f in media_dishes_dir.iterdir()
-                                if f.is_file() and f.suffix.lower() in candidate_exts and f.stat().st_size > 0 and f != target_file
+                                if f.is_file() and f.suffix.lower() in candidate_exts and f.stat().st_size > 0 and f != target_file and not f.name.startswith('.')
                             ]
                             if existing_samples:
-                                shutil.copyfile(existing_samples[0], target_file)
+                                sample_idx = abs(hash(slug)) % len(existing_samples)
+                                shutil.copyfile(existing_samples[sample_idx], target_file)
                                 local_file = target_file
                             else:
-                                from PIL import Image
-                                img = Image.new('RGB', (600, 600), color=(240, 240, 240))
-                                img.save(target_file, format='JPEG')
+                                bg_color = color_palette[abs(hash(slug)) % len(color_palette)]
+                                img = Image.new('RGB', (800, 600), color=bg_color)
+                                draw = ImageDraw.Draw(img)
+                                draw.ellipse([200, 100, 600, 500], fill=(255, 255, 255), outline=(220, 220, 220), width=4)
+                                draw.ellipse([250, 150, 550, 450], fill=(245, 245, 240))
+                                img.save(target_file, format='JPEG', quality=85)
                                 local_file = target_file
 
                     final_image = f"dishes/{local_file.name}"
