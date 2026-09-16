@@ -3,9 +3,12 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
+from django.contrib.staticfiles.urls import staticfiles_urlpatterns
+from django.views.static import serve
 from orders import views as orders_views
 
 urlpatterns = [
+    path('favicon.ico', serve, {'document_root': settings.BASE_DIR / 'static' / 'favicon', 'path': 'favicon.ico'}),
     path('admin/', admin.site.urls),
     path('', HomeView.as_view(), name='home'),
     path('accounts/', include('accounts.urls')),
@@ -21,6 +24,7 @@ urlpatterns = [
 ]
 
 if settings.DEBUG:
+    urlpatterns += staticfiles_urlpatterns()
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
     try:
         import debug_toolbar

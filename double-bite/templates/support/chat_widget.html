@@ -1,3 +1,21 @@
+<script>
+window.__formatMarkdown = function(text) {
+  if (!text) return '';
+  var s = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  s = s.split('\n').map(function(line) {
+    line = line.replace(/^#{1,3}\s*(.+)$/, '<strong>$1</strong>');
+    line = line.replace(/^-\s+(.+)$/, '&bull; $1');
+    return line;
+  }).join('\n');
+  s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="underline">$1</a>');
+  return s;
+};
+</script>
 <div id="ai-chat-widget" x-data="{
     open: false,
     hiddenByModal: false,
@@ -82,6 +100,7 @@
           const decoder = new TextDecoder();
           let assistantMsg = { role: 'assistant', content: '' };
           this.messages.push(assistantMsg);
+          assistantMsg = this.messages[this.messages.length - 1];
           this.loading = false;
 
           let buffer = '';
@@ -227,7 +246,7 @@
               class="text-[9px] font-mono uppercase tracking-wider mb-1"
               x-text="msg.role === 'user' ? 'Ви' : (isEscalated ? 'Адміністратор ресторану' : 'Double Bite Concierge')"
             ></div>
-            <div class="whitespace-pre-wrap" x-text="msg.content"></div>
+            <div class="whitespace-pre-wrap" x-effect="$el.innerHTML = window.__formatMarkdown(msg.content)"></div>
           </div>
         </div>
       </template>

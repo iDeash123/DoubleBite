@@ -280,6 +280,7 @@ class MistralSupportAgent:
         config = genai_types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
             tools=gemini_tools,
+            automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
             temperature=self.temperature,
             thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
         )
