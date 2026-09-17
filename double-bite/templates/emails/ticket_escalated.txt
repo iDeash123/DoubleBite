@@ -1,0 +1,26 @@
+Double Bite — [ТЕРМІНОВО] Ескалація звернення до адміністратора
+
+AI-асистент Double Bite зареєстрував звернення, що потребує негайного втручання чергового адміністратора ресторану.
+
+Деталі звернення:
+- Номер тікету: #{{ ticket.id }}
+- Причина: {{ ticket.get_reason_display }}
+- Клієнт: {{ customer_name }} ({{ customer_email }})
+- Контактний телефон: {{ ticket.customer_phone|default:"Не вказано" }}
+{% if ticket.order %}- Замовлення: #{{ ticket.order.order_number }} ({{ ticket.order.total_amount }} грн){% endif %}
+
+Опис проблеми:
+{{ ticket.details }}
+{% if recent_messages %}
+Витяг з діалогу:
+{% for msg in recent_messages %}
+[{{ msg.get_role_display|default:msg.role|upper }}]: {{ msg.content }}
+{% endfor %}{% endif %}
+Посилання на тікет в панелі адміністратора:
+{{ admin_ticket_url }}
+
+—
+Double Bite
+вул. Володимирська, 42, Київ · Щодня 10:00–22:00
+Телефон турботи про гостей: +380 44 123 45 67
+Це автоматичне системне повідомлення, будь ласка, не відповідайте на цей лист.

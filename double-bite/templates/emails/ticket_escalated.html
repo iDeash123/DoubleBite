@@ -1,0 +1,66 @@
+{% extends "emails/base_email.html" %}
+
+{% block title %}[ТЕРМІНОВО] Ескалація тікету #{{ ticket.id }} — Double Bite{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 24px;">
+  <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #DC2626; margin-bottom: 8px;">Термінове звернення клієнта</div>
+  <h2 style="font-size: 20px; font-weight: 700; color: #262626; margin: 0 0 16px 0; letter-spacing: -0.5px;">Потрібна допомога чергового адміністратора!</h2>
+  <p style="font-size: 14px; line-height: 1.6; color: #262626; margin: 0 0 20px 0;">
+    AI-асистент Double Bite зафіксував необхідність втручання людини та ескалував звернення клієнта.
+  </p>
+
+  <div style="background-color: #F6F6F6; border: 1px solid #E5E5E5; padding: 20px; margin: 24px 0;">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Номер тікету:</span>
+      <span class="mono" style="font-size: 12px; font-weight: 700; color: #262626;">#{{ ticket.id }}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Причина звернення:</span>
+      <span class="mono" style="background-color: #F4F1EB; border: 1px solid #E8E3DA; color: #262626; font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 3px 8px;">{{ ticket.get_reason_display }}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Клієнт:</span>
+      <span style="font-size: 12px; color: #262626;">{{ customer_name }} ({{ customer_email }})</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Телефон клієнта:</span>
+      <span class="mono" style="font-size: 12px; font-weight: 700; color: #262626;">{{ ticket.customer_phone|default:"Не вказано" }}</span>
+    </div>
+    {% if ticket.order %}
+    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Пов'язане замовлення:</span>
+      <span class="mono" style="font-size: 12px; font-weight: 700; color: #262626;">#{{ ticket.order.order_number }} ({{ ticket.order.total_amount }} грн)</span>
+    </div>
+    {% endif %}
+    <div style="border-top: 1px solid #E5E5E5; padding-top: 12px; margin-top: 12px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; text-transform: uppercase; color: #8C8C8C; margin-bottom: 4px;">Коментар / опис проблеми:</div>
+      <div style="font-size: 13px; line-height: 1.5; color: #262626; background: #FFFFFF; padding: 10px; border: 1px solid #E5E5E5;">
+        {{ ticket.details }}
+      </div>
+    </div>
+    {% if recent_messages %}
+    <div style="border-top: 1px solid #E5E5E5; padding-top: 12px; margin-top: 12px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; text-transform: uppercase; color: #8C8C8C; margin-bottom: 6px;">Витяг з діалогу (останні репліки):</div>
+      <div style="background: #FFFFFF; border: 1px solid #E5E5E5; padding: 10px;">
+        {% for msg in recent_messages %}
+        <div style="font-size: 12px; line-height: 1.4; margin-bottom: 6px;">
+          <strong class="mono" style="color: #8C8C8C; font-size: 10px;">[{{ msg.get_role_display|default:msg.role|upper }}]:</strong> {{ msg.content }}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div style="text-align: center; margin: 32px 0;">
+    <a href="{{ admin_ticket_url }}" class="btn-primary" style="display: inline-block; padding: 14px 28px; background-color: #262626; color: #FFFFFF !important; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;">
+      Переглянути тікет в адмінці →
+    </a>
+  </div>
+
+  <p style="font-size: 11px; line-height: 1.5; color: #8C8C8C; margin: 16px 0 0 0; text-align: center;">
+    Будь ласка, терміново зв'яжіться з клієнтом за вказаним номером телефону.
+  </p>
+</div>
+{% endblock %}

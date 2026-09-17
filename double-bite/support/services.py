@@ -1,3 +1,4 @@
+import logging
 import re
 import uuid
 from typing import Any
@@ -15,6 +16,8 @@ from support.models import (
     TicketReason,
     TicketStatus,
 )
+
+logger = logging.getLogger('support')
 
 
 class ChatSessionService:
@@ -153,6 +156,12 @@ class ChatSessionService:
                 details=details,
                 status=TicketStatus.OPEN,
             )
+            try:
+                from support.emails import send_ticket_escalated_email
+
+                send_ticket_escalated_email(ticket)
+            except Exception as e:
+                logger.warning("Failed to send escalation email for ticket %s: %s", ticket.id, e)
             return ticket
 
 
