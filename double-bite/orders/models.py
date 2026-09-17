@@ -266,6 +266,19 @@ class Order(models.Model):
             self.payment_status = PaymentStatus.COMPLETED
         self.save(update_fields=['status', 'payment_status', 'updated_at'])
 
+        if target_status in (
+            OrderStatus.PREPARING,
+            OrderStatus.ON_WAY,
+            OrderStatus.DELIVERED,
+            OrderStatus.CANCELLED,
+        ):
+            try:
+                from orders.emails import send_order_status_update_email
+
+                send_order_status_update_email(self)
+            except Exception:
+                pass
+
     def save(self, *args: Any, **kwargs: Any) -> None:
         is_new = self.pk is None
         super().save(*args, **kwargs)

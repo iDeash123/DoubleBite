@@ -539,6 +539,15 @@ class OrderService:
 
             cart.items.filter(id__in=[item.id for item in available_items]).delete()
 
+        try:
+            from orders.emails import send_order_confirmation_email
+
+            host = request.get_host() if request else None
+            proto = 'https' if request and request.is_secure() else 'http'
+            send_order_confirmation_email(order, domain=host, protocol=proto)
+        except Exception as e:
+            logger.warning("Failed to send order confirmation email for %s: %s", order.order_number, e)
+
         if (
             payment_method in (PaymentMethod.ONLINE, PaymentMethod.STRIPE, 'ONLINE', 'STRIPE')
             and create_stripe_session
