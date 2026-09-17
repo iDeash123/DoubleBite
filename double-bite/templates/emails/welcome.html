@@ -1,0 +1,26 @@
+{% extends "emails/base_email.html" %}
+
+{% block title %}Ласкаво просимо до Double Bite!{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 24px;">
+  <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #8C8C8C; margin-bottom: 8px;">Реєстрація успішна</div>
+  <h2 style="font-size: 20px; font-weight: 700; color: #262626; margin: 0 0 16px 0; letter-spacing: -0.5px;">Вітаємо в сім'ї Double Bite!</h2>
+  <p style="font-size: 14px; line-height: 1.6; color: #262626; margin: 0 0 16px 0;">
+    {% if customer_name %}Шановний(-а) {{ customer_name }},{% else %}Вітаємо!{% endif %} Дякуємо за реєстрацію в Double Bite.
+  </p>
+  <p style="font-size: 14px; line-height: 1.6; color: #262626; margin: 0 0 16px 0;">
+    Тепер ви маєте доступ до повного меню вишуканого швидкого харчування, збереження улюблених адрес доставки, відстеження замовлень у реальному часі та допомоги нашого інтелектуального AI-асистента.
+  </p>
+  <div style="background-color: #F6F6F6; border: 1px solid #E5E5E5; padding: 20px; margin: 24px 0;">
+    <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; color: #262626; margin-bottom: 8px; text-transform: uppercase;">Ваш акаунт:</div>
+    <div style="font-size: 13px; color: #262626; margin-bottom: 4px;"><strong>Email:</strong> {{ user.email }}</div>
+    <div style="font-size: 13px; color: #8C8C8C;">Швидкий вхід за цим email у будь-який час.</div>
+  </div>
+  <div style="text-align: center; margin: 32px 0;">
+    <a href="{{ protocol }}://{{ domain }}{% url 'menu:catalog' %}" class="btn-primary" style="display: inline-block; padding: 14px 28px; background-color: #262626; color: #FFFFFF !important; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;">
+      Переглянути меню →
+    </a>
+  </div>
+</div>
+{% endblock %}

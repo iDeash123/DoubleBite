@@ -47,6 +47,9 @@
               <label for="{{ form.password.id_for_label }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir font-medium">
                 Пароль
               </label>
+              <a href="{% url 'accounts:password_reset' %}" class="text-xs font-mono text-fv-slate hover:text-fv-noir hover:underline">
+                Забули пароль?
+              </a>
             </div>
             {{ form.password }}
             {% if form.password.errors %}

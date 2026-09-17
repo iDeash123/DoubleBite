@@ -1,13 +1,28 @@
 
+from config.emails import send_templated_email
 from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.views import (
+    PasswordResetCompleteView,
+    PasswordResetConfirmView,
+    PasswordResetDoneView,
+    PasswordResetView,
+)
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse_lazy
 from django.views import View
 from django.views.generic import TemplateView
 
-from .forms import DeliveryAddressForm, UserLoginForm, UserProfileForm, UserRegistrationForm
+from .forms import (
+    CustomPasswordResetForm,
+    CustomSetPasswordForm,
+    DeliveryAddressForm,
+    UserLoginForm,
+    UserProfileForm,
+    UserRegistrationForm,
+)
 from .models import DeliveryAddress
 
 
@@ -31,6 +46,17 @@ class RegisterView(View):
             if request.session.session_key:
                 request.session['_pre_login_session_key'] = request.session.session_key
             login(request, user)
+            send_templated_email(
+                subject='Ласкаво просимо до Double Bite!',
+                template_prefix='emails/welcome',
+                context={
+                    'user': user,
+                    'customer_name': user.get_full_name() or user.email,
+                    'protocol': 'https' if request.is_secure() else 'http',
+                    'domain': request.get_host(),
+                },
+                recipient_list=[user.email],
+            )
             messages.success(request, 'Реєстрація успішна! Ласкаво просимо до Double Bite.')
             return redirect(request.GET.get('next', 'accounts:profile'))
         return render(request, 'accounts/register.html', {'form': form})
@@ -133,3 +159,26 @@ class AddressDeleteView(LoginRequiredMixin, View):
         address.delete()
         messages.success(request, 'Адресу видалено.')
         return redirect('accounts:profile')
+
+
+class CustomPasswordResetView(PasswordResetView):
+    template_name = 'accounts/password_reset.html'
+    email_template_name = 'emails/password_reset_email.txt'
+    html_email_template_name = 'emails/password_reset_email.html'
+    subject_template_name = 'emails/password_reset_subject.txt'
+    success_url = reverse_lazy('accounts:password_reset_done')
+    form_class = CustomPasswordResetForm
+
+
+class CustomPasswordResetDoneView(PasswordResetDoneView):
+    template_name = 'accounts/password_reset_done.html'
+
+
+class CustomPasswordResetConfirmView(PasswordResetConfirmView):
+    template_name = 'accounts/password_reset_confirm.html'
+    success_url = reverse_lazy('accounts:password_reset_complete')
+    form_class = CustomSetPasswordForm
+
+
+class CustomPasswordResetCompleteView(PasswordResetCompleteView):
+    template_name = 'accounts/password_reset_complete.html'

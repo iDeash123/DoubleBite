@@ -2,6 +2,7 @@ from typing import Any
 
 from django import forms
 from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.forms import PasswordResetForm, SetPasswordForm
 
 from .models import DeliveryAddress
 
@@ -142,3 +143,21 @@ class DeliveryAddressForm(forms.ModelForm):
                 attrs={'class': 'h-4 w-4 text-fv-noir border-fv-noir/30 rounded-none focus:ring-0'}
             ),
         }
+
+
+class CustomPasswordResetForm(PasswordResetForm):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields['email'].widget.attrs.update({
+            'class': 'w-full px-4 py-2.5 border border-fv-noir/20 bg-white text-xs font-mono text-fv-noir focus:border-fv-noir outline-none rounded-none transition-colors',
+            'placeholder': 'name@example.com',
+        })
+
+
+class CustomSetPasswordForm(SetPasswordForm):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.update({
+                'class': 'w-full px-4 py-2.5 border border-fv-noir/20 bg-white text-xs font-mono text-fv-noir focus:border-fv-noir outline-none rounded-none transition-colors',
+            })
