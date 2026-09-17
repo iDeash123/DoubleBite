@@ -404,6 +404,12 @@ class StripeService:
             order.status,
             order.payment_status,
         )
+        try:
+            from orders.emails import send_stripe_receipt_email
+
+            send_stripe_receipt_email(order, session=session)
+        except Exception as e:
+            logger.warning("Failed to send Stripe receipt email for %s: %s", order.order_number, e)
         return order
 
     @classmethod
@@ -454,6 +460,12 @@ class StripeService:
             order.payment_status = PaymentStatus.REFUNDED
             order.save(update_fields=['payment_status', 'updated_at'])
             logger.info("Order %s marked as refunded via Stripe webhook", order.order_number)
+            try:
+                from orders.emails import send_refund_notice_email
+
+                send_refund_notice_email(order, charge=charge)
+            except Exception as e:
+                logger.warning("Failed to send refund notice email for %s: %s", order.order_number, e)
             return order
 
         logger.warning("Order not found for refunded charge: payment_intent=%s", pi_id)

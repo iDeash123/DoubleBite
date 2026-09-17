@@ -1,0 +1,70 @@
+{% extends "emails/base_email.html" %}
+
+{% block title %}Квитанція про оплату #{{ order.order_number }} — Double Bite{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 24px;">
+  <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #8C8C8C; margin-bottom: 8px;">Електронний чек Stripe</div>
+  <h2 style="font-size: 20px; font-weight: 700; color: #262626; margin: 0 0 16px 0; letter-spacing: -0.5px;">Оплату успішно здійснено</h2>
+  <p style="font-size: 14px; line-height: 1.6; color: #262626; margin: 0 0 20px 0;">
+    Шановний(-а) {{ order.customer_name }}, ваша онлайн-оплата замовлення <strong class="mono">#{{ order.order_number }}</strong> була успішно підтверджена через платіжну систему Stripe.
+  </p>
+
+  <div style="background-color: #F6F6F6; border: 1px solid #E5E5E5; padding: 20px; margin: 24px 0;">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Номер замовлення:</span>
+      <span class="mono" style="font-size: 12px; font-weight: 700; color: #262626;">#{{ order.order_number }}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Сума оплати:</span>
+      <span class="mono" style="font-size: 14px; font-weight: 700; color: #262626;">{{ order.total_amount }} грн</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Статус платежу:</span>
+      <span class="mono" style="background-color: #F4F1EB; border: 1px solid #E8E3DA; color: #262626; font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 3px 8px;">СПЛАЧЕНО</span>
+    </div>
+    {% if order.stripe_payment_intent_id %}
+    <div style="display: flex; justify-content: space-between;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">ID транзакції:</span>
+      <span class="mono" style="font-size: 11px; color: #262626;">{{ order.stripe_payment_intent_id }}</span>
+    </div>
+    {% endif %}
+  </div>
+
+  <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #262626; margin: 24px 0 12px 0;">Оплачені позиції:</div>
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; margin-bottom: 24px;">
+    <thead>
+      <tr style="border-bottom: 1px solid #E5E5E5; text-align: left;">
+        <th style="padding: 10px 0; font-family: 'JetBrains Mono', monospace; font-size: 10px; text-transform: uppercase; color: #8C8C8C;">Страва</th>
+        <th style="padding: 10px 0; font-family: 'JetBrains Mono', monospace; font-size: 10px; text-transform: uppercase; color: #8C8C8C; text-align: center;">К-сть</th>
+        <th style="padding: 10px 0; font-family: 'JetBrains Mono', monospace; font-size: 10px; text-transform: uppercase; color: #8C8C8C; text-align: right;">Ціна</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in order.items.all %}
+      <tr style="border-bottom: 1px solid #F6F6F6;">
+        <td style="padding: 12px 0; font-size: 13px; color: #262626; font-weight: 600;">{{ item.dish_title }}</td>
+        <td style="padding: 12px 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #262626; text-align: center;">{{ item.quantity }}</td>
+        <td style="padding: 12px 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #262626; text-align: right;">{{ item.price }} грн</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr style="border-top: 2px solid #262626;">
+        <td colspan="2" style="padding: 16px 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; text-transform: uppercase; color: #262626;">Сплачено в повному обсязі:</td>
+        <td style="padding: 16px 0; font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 700; color: #262626; text-align: right;">{{ order.total_amount }} грн</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div style="text-align: center; margin: 32px 0;">
+    <a href="{{ tracking_url }}" class="btn-primary" style="display: inline-block; padding: 14px 28px; background-color: #262626; color: #FFFFFF !important; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;">
+      Відстежити замовлення →
+    </a>
+  </div>
+
+  <p style="font-size: 11px; line-height: 1.5; color: #8C8C8C; margin: 16px 0 0 0; text-align: center;">
+    Електронний чек згенеровано автоматично на основі даних Stripe.
+  </p>
+</div>
+{% endblock %}

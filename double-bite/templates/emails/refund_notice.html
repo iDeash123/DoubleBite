@@ -1,0 +1,44 @@
+{% extends "emails/base_email.html" %}
+
+{% block title %}Повернення коштів за замовлення #{{ order.order_number }} — Double Bite{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 24px;">
+  <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #8C8C8C; margin-bottom: 8px;">Фінансове сповіщення</div>
+  <h2 style="font-size: 20px; font-weight: 700; color: #262626; margin: 0 0 16px 0; letter-spacing: -0.5px;">Кошти повернено на ваш рахунок</h2>
+  <p style="font-size: 14px; line-height: 1.6; color: #262626; margin: 0 0 20px 0;">
+    Шановний(-а) {{ order.customer_name }}, повідомляємо, що за замовленням <strong class="mono">#{{ order.order_number }}</strong> було ініційовано та успішно проведено повернення коштів.
+  </p>
+
+  <div style="background-color: #F6F6F6; border: 1px solid #E5E5E5; padding: 20px; margin: 24px 0;">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Номер замовлення:</span>
+      <span class="mono" style="font-size: 12px; font-weight: 700; color: #262626;">#{{ order.order_number }}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Сума повернення:</span>
+      <span class="mono" style="font-size: 16px; font-weight: 700; color: #262626;">{{ refund_amount|default:order.total_amount }} грн</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Статус операції:</span>
+      <span class="mono" style="background-color: #F4F1EB; border: 1px solid #E8E3DA; color: #262626; font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 3px 8px;">ПОВЕРНЕНО</span>
+    </div>
+    {% if order.stripe_payment_intent_id %}
+    <div style="display: flex; justify-content: space-between;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">ID транзакції Stripe:</span>
+      <span class="mono" style="font-size: 11px; color: #262626;">{{ order.stripe_payment_intent_id }}</span>
+    </div>
+    {% endif %}
+  </div>
+
+  <p style="font-size: 13px; line-height: 1.6; color: #262626; margin: 0 0 20px 0;">
+    Кошти повертаються на ту ж саму банківську карту або рахунок, з якого здійснювалась оплата. Зазвичай зарахування відбувається протягом 1–5 банківських днів залежно від правил вашого банку.
+  </p>
+
+  <div style="text-align: center; margin: 32px 0;">
+    <a href="{{ tracking_url }}" class="btn-primary" style="display: inline-block; padding: 14px 28px; background-color: #262626; color: #FFFFFF !important; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;">
+      Деталі замовлення →
+    </a>
+  </div>
+</div>
+{% endblock %}

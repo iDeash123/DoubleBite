@@ -6,8 +6,8 @@ from django.test import RequestFactory, TestCase
 from menu.models import Category, Dish
 
 from orders.emails import send_order_confirmation_email
-from orders.models import Cart, CartItem, Order, OrderStatus, PaymentMethod
-from orders.services import OrderService
+from orders.models import Cart, CartItem, Order, OrderItem, OrderStatus, PaymentMethod
+from orders.services import OrderService, StripeService
 
 User = get_user_model()
 
@@ -171,3 +171,125 @@ class OrderEmailNotificationTests(TestCase):
 
         order.transition_to(OrderStatus.CANCELLED)
         self.assertEqual(len(mail.outbox), 0)
+
+    def test_stripe_checkout_session_completed_sends_receipt_email(self):
+        order = Order.objects.create(
+            user=self.user,
+            customer_name='Тарас Шевченко',
+            customer_phone='+380501234567',
+            delivery_address='Київ, вул. Франка, 10',
+            status=OrderStatus.PENDING,
+            total_amount=Decimal('500.00'),
+            stripe_session_id='cs_test_session_123',
+        )
+        OrderItem.objects.create(
+            order=order,
+            dish=self.dish,
+            dish_title=self.dish.title,
+            price=self.dish.price,
+            quantity=2,
+        )
+        mail.outbox.clear()
+
+        session_payload = {
+            'id': 'cs_test_session_123',
+            'client_reference_id': order.order_number,
+            'payment_intent': 'pi_test_receipt_789',
+            'customer_details': {'email': self.user.email},
+            'metadata': {'order_number': order.order_number},
+        }
+        StripeService.handle_checkout_session_completed(session_payload)
+
+        receipt_emails = [m for m in mail.outbox if 'Квитанція' in m.subject]
+        self.assertEqual(len(receipt_emails), 1)
+        receipt = receipt_emails[0]
+        self.assertEqual(receipt.to, [self.user.email])
+        self.assertIn(order.order_number, receipt.subject)
+        self.assertIn('500', receipt.body)
+        self.assertIn('pi_test_receipt_789', receipt.body)
+        self.assertEqual(len(receipt.alternatives), 1)
+        self.assertIn('#F6F6F6', receipt.alternatives[0][0])
+        self.assertIn('#262626', receipt.alternatives[0][0])
+
+    def test_stripe_charge_refunded_sends_refund_notice_email(self):
+        order = Order.objects.create(
+            user=self.user,
+            customer_name='Тарас Шевченко',
+            customer_phone='+380501234567',
+            delivery_address='Київ, вул. Франка, 10',
+            status=OrderStatus.PAID,
+            total_amount=Decimal('500.00'),
+            stripe_payment_intent_id='pi_test_refund_456',
+        )
+        mail.outbox.clear()
+
+        charge_payload = {
+            'id': 'ch_test_123',
+            'payment_intent': 'pi_test_refund_456',
+            'metadata': {'order_number': order.order_number},
+        }
+        StripeService.handle_charge_refunded(charge_payload)
+
+        self.assertEqual(len(mail.outbox), 1)
+        refund_email = mail.outbox[0]
+        self.assertEqual(refund_email.to, [self.user.email])
+        self.assertIn('Повернення коштів', refund_email.subject)
+        self.assertIn(order.order_number, refund_email.subject)
+        self.assertIn('500', refund_email.body)
+        self.assertIn('pi_test_refund_456', refund_email.body)
+        self.assertEqual(len(refund_email.alternatives), 1)
+        self.assertIn('#F6F6F6', refund_email.alternatives[0][0])
+        self.assertIn('#262626', refund_email.alternatives[0][0])
+
+    def test_stripe_receipt_email_guest_order_uses_customer_details_email(self):
+        order = Order.objects.create(
+            user=None,
+            customer_name='Гість Стріп',
+            customer_phone='+380501234567',
+            delivery_address='Київ, вул. Франка, 10',
+            status=OrderStatus.PENDING,
+            total_amount=Decimal('300.00'),
+            stripe_session_id='cs_test_guest_session',
+        )
+        mail.outbox.clear()
+
+        session_payload = {
+            'id': 'cs_test_guest_session',
+            'client_reference_id': order.order_number,
+            'payment_intent': 'pi_test_guest_pi',
+            'customer_details': {'email': 'guest_stripe_user@example.com'},
+            'metadata': {'order_number': order.order_number},
+        }
+        StripeService.handle_checkout_session_completed(session_payload)
+
+        receipt_emails = [m for m in mail.outbox if 'Квитанція' in m.subject]
+        self.assertEqual(len(receipt_emails), 1)
+        receipt = receipt_emails[0]
+        self.assertEqual(receipt.to, ['guest_stripe_user@example.com'])
+
+    def test_stripe_charge_refunded_partial_refund_notice_email(self):
+        order = Order.objects.create(
+            user=self.user,
+            customer_name='Тарас Шевченко',
+            customer_phone='+380501234567',
+            delivery_address='Київ, вул. Франка, 10',
+            status=OrderStatus.PAID,
+            total_amount=Decimal('500.00'),
+            stripe_payment_intent_id='pi_test_partial_456',
+        )
+        mail.outbox.clear()
+
+        charge_payload = {
+            'id': 'ch_test_part_123',
+            'payment_intent': 'pi_test_partial_456',
+            'amount_refunded': 25000,
+            'metadata': {'order_number': order.order_number},
+        }
+        StripeService.handle_charge_refunded(charge_payload)
+
+        self.assertEqual(len(mail.outbox), 1)
+        refund_email = mail.outbox[0]
+        self.assertEqual(refund_email.to, [self.user.email])
+        self.assertIn('Повернення коштів', refund_email.subject)
+        self.assertIn('250', refund_email.body)
+        self.assertIn('#F4F1EB', refund_email.alternatives[0][0])
