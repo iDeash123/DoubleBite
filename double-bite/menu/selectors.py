@@ -1,6 +1,7 @@
 from decimal import Decimal
 from typing import Any
 
+from django.db import connection
 from django.db.models import Q, QuerySet
 
 from .models import Category, Dish
@@ -89,22 +90,24 @@ def filter_dishes(
     if query:
         cleaned_query = query.strip()
         if cleaned_query:
-            variants = {
-                cleaned_query,
-                cleaned_query.lower(),
-                cleaned_query.capitalize(),
-                cleaned_query.upper(),
-                cleaned_query.title(),
-            }
-            q_filter = Q()
-            for v in variants:
-                q_filter |= (
-                    Q(title__icontains=v)
-                    | Q(description__icontains=v)
-                    | Q(allergens__icontains=v)
-                    | Q(category__name__icontains=v)
+            if connection.vendor == 'sqlite' and not cleaned_query.isascii():
+                variants = {cleaned_query, cleaned_query.lower(), cleaned_query.capitalize()}
+                q_filter = Q()
+                for v in variants:
+                    q_filter |= (
+                        Q(title__icontains=v)
+                        | Q(description__icontains=v)
+                        | Q(allergens__icontains=v)
+                        | Q(category__name__icontains=v)
+                    )
+                queryset = queryset.filter(q_filter)
+            else:
+                queryset = queryset.filter(
+                    Q(title__icontains=cleaned_query)
+                    | Q(description__icontains=cleaned_query)
+                    | Q(allergens__icontains=cleaned_query)
+                    | Q(category__name__icontains=cleaned_query)
                 )
-            queryset = queryset.filter(q_filter)
 
     if max_price is not None:
         queryset = queryset.filter(price__lte=Decimal(str(max_price)))

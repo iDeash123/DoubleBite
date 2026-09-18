@@ -1,8 +1,10 @@
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.test import Client, TestCase
 from django.urls import reverse
 
+from menu import views
 from menu.models import Category, Dish, DishOption
 
 
@@ -208,4 +210,13 @@ class MenuViewsTest(TestCase):
         self.assertIn(self.dish_margarita, dishes)
         self.assertIn(self.dish_diavola, dishes)
         self.assertNotIn(self.dish_burger, dishes)
+
+    def test_menu_slug_dispatch_reuses_fetched_dish(self):
+        with patch('menu.views.dish_detail_view', wraps=views.dish_detail_view) as mock_detail:
+            url = reverse('menu:dish_detail', kwargs={'dish_slug': self.dish_margarita.slug})
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            mock_detail.assert_called_once()
+            _, kwargs = mock_detail.call_args
+            self.assertEqual(kwargs.get('dish'), self.dish_margarita)
 

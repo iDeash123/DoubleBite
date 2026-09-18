@@ -5,7 +5,7 @@ from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
 
-from .models import Category
+from .models import Category, Dish
 from .selectors import (
     SORT_OPTIONS,
     filter_dishes,
@@ -90,7 +90,7 @@ def catalog_view(request: HttpRequest, category_slug: str | None = None) -> Http
 def menu_slug_dispatch_view(request: HttpRequest, dish_slug: str) -> HttpResponse:
     dish = get_available_dish_by_slug(dish_slug=dish_slug)
     if dish:
-        return dish_detail_view(request, dish_slug=dish_slug)
+        return dish_detail_view(request, dish_slug=dish_slug, dish=dish)
 
     category = Category.objects.filter(slug=dish_slug, is_active=True).first()
     if category:
@@ -103,8 +103,10 @@ def dish_detail_view(
     request: HttpRequest,
     dish_slug: str,
     category_slug: str | None = None,
+    dish: Dish | None = None,
 ) -> HttpResponse:
-    dish = get_available_dish_by_slug(dish_slug=dish_slug, category_slug=category_slug)
+    if dish is None:
+        dish = get_available_dish_by_slug(dish_slug=dish_slug, category_slug=category_slug)
     if not dish:
         raise Http404('Страву не знайдено або вона тимчасово недоступна')
 

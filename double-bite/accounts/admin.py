@@ -51,3 +51,4 @@ class DeliveryAddressAdmin(admin.ModelAdmin):
     )
     list_filter = ('city', 'is_default', 'created_at')
     search_fields = ('user__email', 'street', 'city', 'title')
+    list_select_related = ('user',)

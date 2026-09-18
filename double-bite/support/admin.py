@@ -30,6 +30,7 @@ class ChatSessionAdmin(admin.ModelAdmin):
     )
     list_filter = ('status', 'is_escalated', 'created_at')
     search_fields = ('session_uuid', 'user__email', 'session_key', 'escalation_reason')
+    list_select_related = ('user',)
     readonly_fields = ('session_uuid', 'created_at', 'updated_at')
     inlines = (ChatMessageInline,)
 
@@ -59,6 +60,7 @@ class SupportTicketAdmin(admin.ModelAdmin):
         'resolved_at',
     )
     list_filter = ('status', 'reason', 'created_at')
+    list_select_related = ('session', 'order')
     search_fields = (
         'details',
         'customer_phone',

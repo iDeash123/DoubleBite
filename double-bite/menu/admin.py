@@ -30,6 +30,7 @@ class DishAdmin(admin.ModelAdmin):
     )
     list_filter = ('category', 'is_available', 'is_vegetarian', 'is_spicy')
     search_fields = ('title', 'description', 'allergens')
+    list_select_related = ('category',)
     prepopulated_fields = {'slug': ('title',)}
     inlines = [DishOptionInline]
 
@@ -39,3 +40,4 @@ class DishOptionAdmin(admin.ModelAdmin):
     list_display = ('name', 'dish', 'price_delta')
     list_filter = ('dish__category',)
     search_fields = ('name', 'dish__title')
+    list_select_related = ('dish',)
