@@ -372,9 +372,17 @@ def stripe_webhook_view(request: HttpRequest) -> HttpResponse:
 
 def stripe_checkout_view(request: HttpRequest, order_number: str) -> HttpResponse:
     order = get_object_or_404(Order, order_number=order_number)
-    if order.user and request.user.is_authenticated and order.user != request.user and not request.user.is_superuser:
-        return HttpResponseForbidden('У вас немає доступу до цього замовлення.')
-    if order.session_key and not request.user.is_authenticated and order.session_key != request.session.session_key:
+    has_access = False
+    if request.user.is_authenticated:
+        has_access = bool(
+            request.user.is_superuser
+            or getattr(request.user, 'role', None) == Role.RESTAURANT_ADMIN
+            or (order.user_id and order.user_id == request.user.id)
+        )
+    elif order.user_id is None and order.session_key and request.session.session_key:
+        has_access = bool(order.session_key == request.session.session_key)
+
+    if not has_access:
         return HttpResponseForbidden('У вас немає доступу до цього замовлення.')
 
     if order.payment_status in (PaymentStatus.PAID, PaymentStatus.COMPLETED):

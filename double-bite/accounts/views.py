@@ -12,6 +12,7 @@ from django.contrib.auth.views import (
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views import View
 from django.views.generic import TemplateView
 
@@ -58,7 +59,12 @@ class RegisterView(View):
                 recipient_list=[user.email],
             )
             messages.success(request, 'Реєстрація успішна! Ласкаво просимо до Double Bite.')
-            return redirect(request.GET.get('next', 'accounts:profile'))
+            next_url = request.POST.get('next') or request.GET.get('next')
+            if next_url and url_has_allowed_host_and_scheme(
+                next_url, allowed_hosts={request.get_host()}
+            ):
+                return redirect(next_url)
+            return redirect('accounts:profile')
         return render(request, 'accounts/register.html', {'form': form})
 
 
@@ -80,16 +86,16 @@ class LoginView(View):
                     request.session['_pre_login_session_key'] = request.session.session_key
                 login(request, user)
                 messages.success(request, 'Ви успішно увійшли в систему.')
-                return redirect(request.GET.get('next', 'accounts:profile'))
+                next_url = request.POST.get('next') or request.GET.get('next')
+                if next_url and url_has_allowed_host_and_scheme(
+                    next_url, allowed_hosts={request.get_host()}
+                ):
+                    return redirect(next_url)
+                return redirect('accounts:profile')
         return render(request, 'accounts/login.html', {'form': form})
 
 
 class LogoutView(View):
-    def get(self, request: HttpRequest) -> HttpResponse:
-        logout(request)
-        messages.info(request, 'Ви вийшли з облікового запису.')
-        return redirect('home')
-
     def post(self, request: HttpRequest) -> HttpResponse:
         logout(request)
         messages.info(request, 'Ви вийшли з облікового запису.')

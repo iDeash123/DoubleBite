@@ -361,6 +361,56 @@ class StripeCheckoutFlowTest(TestCase):
         response = self.client.get(reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number}))
         self.assertEqual(response.status_code, 403)
 
+    def test_direct_stripe_checkout_forbidden_for_anonymous_when_order_has_user(self):
+        order = Order.objects.create(
+            user=self.user,
+            customer_name='Михайло',
+            customer_phone='+380503332211',
+            delivery_address='Київ',
+            payment_method=PaymentMethod.ONLINE,
+            total_amount=Decimal('220.00'),
+        )
+        # Anonymous client without login
+        response = self.client.get(reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number}))
+        self.assertEqual(response.status_code, 403)
+
+    def test_direct_stripe_checkout_forbidden_for_anonymous_when_session_mismatch(self):
+        order = Order.objects.create(
+            user=None,
+            session_key='session_abc_123',
+            customer_name='Гість',
+            customer_phone='+380503332211',
+            delivery_address='Київ',
+            payment_method=PaymentMethod.ONLINE,
+            total_amount=Decimal('220.00'),
+        )
+        response = self.client.get(reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number}))
+        self.assertEqual(response.status_code, 403)
+
+    @override_settings(STRIPE_SECRET_KEY='sk_test_fake_secret_key')
+    @patch('orders.services.StripeService.create_checkout_session')
+    def test_direct_stripe_checkout_allowed_for_guest_with_matching_session(self, mock_create_session):
+        session = self.client.session
+        session.save()
+        session_key = session.session_key
+
+        order = Order.objects.create(
+            user=None,
+            session_key=session_key,
+            customer_name='Гість',
+            customer_phone='+380503332211',
+            delivery_address='Київ',
+            payment_method=PaymentMethod.ONLINE,
+            total_amount=Decimal('220.00'),
+        )
+        mock_session = MagicMock()
+        mock_session.url = 'https://checkout.stripe.com/pay/guest_link'
+        mock_create_session.return_value = mock_session
+
+        response = self.client.get(reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number}))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, 'https://checkout.stripe.com/pay/guest_link')
+
 
 class StripeWebhookTest(TestCase):
     def setUp(self):

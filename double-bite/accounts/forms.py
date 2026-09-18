@@ -3,6 +3,7 @@ from typing import Any
 from django import forms
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.forms import PasswordResetForm, SetPasswordForm
+from django.contrib.auth.password_validation import validate_password
 
 from .models import DeliveryAddress
 
@@ -47,6 +48,11 @@ class UserRegistrationForm(forms.ModelForm):
         password_confirm = cleaned_data.get('password_confirm')
         if password and password_confirm and password != password_confirm:
             self.add_error('password_confirm', 'Паролі не співпадають.')
+        if password:
+            try:
+                validate_password(password, self.instance)
+            except forms.ValidationError as error:
+                self.add_error('password', error)
         return cleaned_data
 
     def save(self, commit: bool = True) -> User:

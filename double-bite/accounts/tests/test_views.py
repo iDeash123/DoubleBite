@@ -80,6 +80,44 @@ class RegisterViewTest(TestCase):
         response = self.client.get(reverse('accounts:register'))
         self.assertRedirects(response, reverse('accounts:profile'))
 
+    def test_register_open_redirect_prevented(self):
+        payload = {
+            'email': 'openredirect@doublebite.ua',
+            'first_name': 'Тест',
+            'last_name': 'Юзер',
+            'phone': '+380671112244',
+            'password': 'SecurePassword123!',
+            'password_confirm': 'SecurePassword123!',
+        }
+        response = self.client.post(reverse('accounts:register') + '?next=https://evil.com/phishing', payload)
+        self.assertRedirects(response, reverse('accounts:profile'))
+
+    def test_register_safe_redirect_allowed(self):
+        payload = {
+            'email': 'safenext@doublebite.ua',
+            'first_name': 'Тест',
+            'last_name': 'Юзер',
+            'phone': '+380671112255',
+            'password': 'SecurePassword123!',
+            'password_confirm': 'SecurePassword123!',
+        }
+        response = self.client.post(reverse('accounts:register') + '?next=/menu/', payload)
+        self.assertRedirects(response, '/menu/')
+
+    def test_register_weak_password_rejected(self):
+        payload = {
+            'email': 'weakpass@doublebite.ua',
+            'first_name': 'Тест',
+            'last_name': 'Юзер',
+            'phone': '+380671112266',
+            'password': '123',
+            'password_confirm': '123',
+        }
+        response = self.client.post(reverse('accounts:register'), payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('password', response.context['form'].errors)
+        self.assertFalse(User.objects.filter(email='weakpass@doublebite.ua').exists())
+
 
 class LoginViewTest(TestCase):
     def setUp(self):
@@ -100,6 +138,20 @@ class LoginViewTest(TestCase):
             {'email': 'user@doublebite.ua', 'password': 'TestPassword123!'},
         )
         self.assertRedirects(response, reverse('accounts:profile'))
+
+    def test_login_open_redirect_prevented(self):
+        response = self.client.post(
+            reverse('accounts:login') + '?next=https://evil.com/phishing',
+            {'email': 'user@doublebite.ua', 'password': 'TestPassword123!'},
+        )
+        self.assertRedirects(response, reverse('accounts:profile'))
+
+    def test_login_safe_redirect_allowed(self):
+        response = self.client.post(
+            reverse('accounts:login') + '?next=/menu/',
+            {'email': 'user@doublebite.ua', 'password': 'TestPassword123!'},
+        )
+        self.assertRedirects(response, '/menu/')
 
     def test_login_invalid_password(self):
         response = self.client.post(
@@ -128,10 +180,10 @@ class LogoutViewTest(TestCase):
         response = self.client.post(reverse('accounts:logout'))
         self.assertRedirects(response, reverse('home'))
 
-    def test_logout_get(self):
+    def test_logout_get_not_allowed(self):
         self.client.force_login(self.user)
         response = self.client.get(reverse('accounts:logout'))
-        self.assertRedirects(response, reverse('home'))
+        self.assertEqual(response.status_code, 405)
 
 
 class ProfileViewTest(TestCase):
