@@ -280,3 +280,16 @@ class MistralSupportAgentTest(TestCase):
         _, call_kwargs = mock_client.aio.models.generate_content.call_args
         self.assertEqual(call_kwargs['config'].system_instruction, 'SYSTEM_PROMPT_CUSTOM_CART_CONTEXT')
         self.assertEqual(call_kwargs['model'], 'gemini-2.5-flash')
+
+    @patch('support.agent.client.genai.Client')
+    async def test_stream_gemini_handles_empty_candidates(self, mock_genai_client_cls):
+        mock_client = MagicMock()
+        mock_genai_client_cls.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.candidates = []
+        mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+        agent = MistralSupportAgent(gemini_api_key='fake-gemini-key')
+        messages = [{'role': 'user', 'content': 'Привіт'}]
+        events = [e async for e in agent._stream_gemini(messages, request=None, session=None)]
+        self.assertEqual(events, [])

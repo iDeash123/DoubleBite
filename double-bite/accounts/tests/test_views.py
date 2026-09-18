@@ -118,6 +118,20 @@ class RegisterViewTest(TestCase):
         self.assertIn('password', response.context['form'].errors)
         self.assertFalse(User.objects.filter(email='weakpass@doublebite.ua').exists())
 
+    def test_register_password_similar_to_attributes_rejected(self):
+        payload = {
+            'email': 'alexander@doublebite.ua',
+            'first_name': 'Alexander',
+            'last_name': 'Superchef',
+            'phone': '+380671112277',
+            'password': 'Alexander123!',
+            'password_confirm': 'Alexander123!',
+        }
+        response = self.client.post(reverse('accounts:register'), payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('password', response.context['form'].errors)
+        self.assertFalse(User.objects.filter(email='alexander@doublebite.ua').exists())
+
 
 class LoginViewTest(TestCase):
     def setUp(self):

@@ -85,7 +85,11 @@ class MistralSupportAgent:
                 or getattr(settings, 'GEMINI_API_KEY', '')
                 or ''
             )
-        self.gemini_model = gemini_model or os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
+        self.gemini_model = (
+            gemini_model
+            or getattr(settings, 'GEMINI_MODEL', '')
+            or os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
+        )
 
     @staticmethod
     def _get_cart_context(request: HttpRequest | None) -> str:
@@ -320,6 +324,9 @@ class MistralSupportAgent:
             contents=gemini_contents,
             config=config,
         )
+
+        if not getattr(response, 'candidates', None):
+            return
 
         candidate = response.candidates[0]
         parts = candidate.content.parts if candidate.content and candidate.content.parts else []

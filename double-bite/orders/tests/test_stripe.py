@@ -411,6 +411,45 @@ class StripeCheckoutFlowTest(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, 'https://checkout.stripe.com/pay/guest_link')
 
+    def test_direct_stripe_checkout_redirects_when_order_cancelled(self):
+        self.client.force_login(self.user)
+        order = Order.objects.create(
+            user=self.user,
+            customer_name='Михайло',
+            customer_phone='+380503332211',
+            delivery_address='Київ',
+            status=OrderStatus.CANCELLED,
+            payment_method=PaymentMethod.ONLINE,
+            total_amount=Decimal('220.00'),
+        )
+        response = self.client.get(reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number}))
+        self.assertRedirects(response, reverse('orders:tracking', kwargs={'order_number': order.order_number}))
+
+    @override_settings(STRIPE_SECRET_KEY='sk_test_fake_secret_key')
+    @patch('orders.services.StripeService.create_checkout_session')
+    def test_direct_stripe_checkout_allowed_for_authenticated_user_with_pre_login_session(self, mock_create_session):
+        self.client.force_login(self.user)
+        session = self.client.session
+        session['_pre_login_session_key'] = 'guest_prior_session_123'
+        session.save()
+
+        order = Order.objects.create(
+            user=None,
+            session_key='guest_prior_session_123',
+            customer_name='Гість-Михайло',
+            customer_phone='+380503332211',
+            delivery_address='Київ',
+            payment_method=PaymentMethod.ONLINE,
+            total_amount=Decimal('220.00'),
+        )
+        mock_session = MagicMock()
+        mock_session.url = 'https://checkout.stripe.com/pay/guest_prelogin_link'
+        mock_create_session.return_value = mock_session
+
+        response = self.client.get(reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number}))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, 'https://checkout.stripe.com/pay/guest_prelogin_link')
+
 
 class StripeWebhookTest(TestCase):
     def setUp(self):

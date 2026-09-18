@@ -49,6 +49,9 @@ class UserRegistrationForm(forms.ModelForm):
         if password and password_confirm and password != password_confirm:
             self.add_error('password_confirm', 'Паролі не співпадають.')
         if password:
+            for field in ('email', 'first_name', 'last_name', 'phone'):
+                if field in cleaned_data:
+                    setattr(self.instance, field, cleaned_data[field])
             try:
                 validate_password(password, self.instance)
             except forms.ValidationError as error:
