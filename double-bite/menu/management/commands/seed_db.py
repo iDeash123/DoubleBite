@@ -1763,16 +1763,6 @@ class Command(BaseCommand):
             help='Тільки очистити базу даних без створення нових записів',
         )
         parser.add_argument(
-            '--clear',
-            action='store_true',
-            help='Очистити базу даних перед заповненням',
-        )
-        parser.add_argument(
-            '--reset',
-            action='store_true',
-            help='Повний перезапуск (скидання та повторне заповнення)',
-        )
-        parser.add_argument(
             '--skip-images',
             action='store_true',
             help='Пропустити завантаження зовнішніх зображень',

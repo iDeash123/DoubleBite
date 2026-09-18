@@ -66,9 +66,6 @@ class User(AbstractUser):
         return self.email
 
 
-CustomUser = User
-
-
 class DeliveryAddress(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

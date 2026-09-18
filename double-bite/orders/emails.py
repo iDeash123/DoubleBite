@@ -1,12 +1,9 @@
-import logging
 from decimal import Decimal
 from typing import Any
 
 from config.emails import send_templated_email
 from django.conf import settings
 from django.urls import reverse
-
-logger = logging.getLogger('orders')
 
 
 def get_tracking_url(order: Any, domain: str | None = None, protocol: str = 'https') -> str:

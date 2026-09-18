@@ -5,7 +5,6 @@ from typing import Any
 
 import stripe
 from django.conf import settings
-from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Sum
 from django.http import HttpRequest
@@ -25,7 +24,6 @@ from .models import (
 )
 
 logger = logging.getLogger('orders')
-User = get_user_model()
 
 
 def _get_val(obj: Any, key: str, default: Any = None) -> Any:
@@ -242,14 +240,6 @@ class StripeService:
     @classmethod
     def get_stripe_secret_key(cls) -> str:
         return getattr(settings, 'STRIPE_SECRET_KEY', '') or os.getenv('STRIPE_SECRET_KEY', '')
-
-    @classmethod
-    def get_stripe_public_key(cls) -> str:
-        return getattr(settings, 'STRIPE_PUBLIC_KEY', '') or os.getenv('STRIPE_PUBLIC_KEY', '')
-
-    @classmethod
-    def get_webhook_secret(cls) -> str:
-        return getattr(settings, 'STRIPE_WEBHOOK_SECRET', '') or os.getenv('STRIPE_WEBHOOK_SECRET', '')
 
     @classmethod
     def create_checkout_session(
@@ -487,7 +477,6 @@ class OrderService:
         from django.core.exceptions import ValidationError
 
         from .exceptions import CartEmptyError, OrderMinimumAmountError
-        from .models import Order, OrderStatus, PaymentStatus
 
         cart = CartService.get_cart(request)
         if not cart or not cart.items.exists():
@@ -572,34 +561,6 @@ class OrderService:
         return order
 
     @classmethod
-    def create_stripe_checkout_session(
-        cls,
-        order: Order,
-        request: HttpRequest | None = None,
-        success_url: str | None = None,
-        cancel_url: str | None = None,
-    ) -> Any:
-        return StripeService.create_checkout_session(
-            order=order,
-            request=request,
-            success_url=success_url,
-            cancel_url=cancel_url,
-        )
-
-    @classmethod
-    def handle_stripe_checkout_completed(
-        cls,
-        session: Any,
-        target_status: str | None = None,
-    ) -> Order | None:
-        return StripeService.handle_checkout_session_completed(
-            session=session,
-            target_status=target_status,
-        )
-
-    @classmethod
     def cancel_order(cls, order: Order) -> None:
-        from .models import OrderStatus
-
         order.transition_to(OrderStatus.CANCELLED)
 

@@ -1,6 +1,6 @@
 from django.contrib.admin.sites import site
 from django.contrib.auth import get_user_model
-from django.test import RequestFactory, TestCase
+from django.test import TestCase
 
 from support.admin import (
     ChatMessageAdmin,
@@ -21,7 +21,6 @@ User = get_user_model()
 
 class SupportAdminTest(TestCase):
     def setUp(self):
-        self.factory = RequestFactory()
         self.admin_user = User.objects.create_superuser(
             email='admin@example.com',
             password='adminpassword123',
@@ -37,11 +36,6 @@ class SupportAdminTest(TestCase):
             session=self.session,
             role=MessageRole.USER,
             content='Чи є у вас безлактозні десерти?',
-        )
-        self.faq = FAQKnowledge.objects.create(
-            question='Чи є безлактозні позиції?',
-            answer='Так, у нас є чіа-пудинг та фруктовий сорбет.',
-            category='Алергени',
         )
 
     def test_admin_models_registered(self):

@@ -49,14 +49,6 @@ class CheckoutAndTrackingTest(TestCase):
             weight_grams=450,
             is_available=True,
         )
-        self.dish2 = Dish.objects.create(
-            category=self.category,
-            title='Кватро Формаджі',
-            slug='quattro-formaggi',
-            price=Decimal('340.00'),
-            weight_grams=480,
-            is_available=True,
-        )
         self.dish_unavailable = Dish.objects.create(
             category=self.category,
             title='Тимчасово відсутня',

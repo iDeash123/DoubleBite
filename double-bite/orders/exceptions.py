@@ -13,6 +13,3 @@ class OrderMinimumAmountError(Exception):
 class DishUnavailableError(Exception):
     pass
 
-
-class CartLimitExceededError(Exception):
-    pass

@@ -15,7 +15,7 @@ from orders.models import (
     PaymentMethod,
     PaymentStatus,
 )
-from orders.services import CartService, StripeService
+from orders.services import StripeService
 
 User = get_user_model()
 
@@ -238,19 +238,6 @@ class StripeCheckoutFlowTest(TestCase):
             weight_grams=350,
             is_available=True,
         )
-
-    def _setup_cart_with_dish(self):
-        req = self.factory.get('/')
-        req.user = self.user
-
-        class FakeSession(dict):
-            session_key = 'cart_test_session_key'
-
-            def create(self):
-                pass
-
-        req.session = FakeSession()
-        CartService.add_dish(req, dish_id=self.dish.id, quantity=1)
 
     @override_settings(STRIPE_SECRET_KEY='sk_test_fake_secret_key')
     @patch('orders.services.StripeService.create_checkout_session')

@@ -1,11 +1,8 @@
-import logging
 from typing import Any
 
 from config.emails import send_templated_email
 from django.conf import settings
 from django.urls import reverse
-
-logger = logging.getLogger('support')
 
 
 def get_admin_ticket_url(ticket: Any, domain: str | None = None, protocol: str = 'https') -> str:

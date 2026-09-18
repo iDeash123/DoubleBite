@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase
-from menu.models import Category, Dish, DishOption
+from menu.models import Category, Dish
 from orders.models import Order, OrderStatus
 from orders.services import CartService
 
@@ -31,13 +31,6 @@ class AgentToolsTest(TestCase):
             display_order=1,
             is_active=True,
         )
-        self.category_drinks = Category.objects.create(
-            name='Напої',
-            slug='drinks',
-            display_order=2,
-            is_active=True,
-        )
-
         self.dish_margarita = Dish.objects.create(
             category=self.category_pizza,
             title='Піца Маргарита',
@@ -59,11 +52,6 @@ class AgentToolsTest(TestCase):
             weight_grams=500,
             calories=750,
             is_available=False,
-        )
-        self.option_cheese = DishOption.objects.create(
-            dish=self.dish_margarita,
-            name='Подвійний сир',
-            price_delta=Decimal('45.00'),
         )
 
         self.order = Order.objects.create(

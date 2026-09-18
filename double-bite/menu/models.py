@@ -128,15 +128,6 @@ class Dish(models.Model):
         self.clean()
         super().save(*args, **kwargs)
 
-    @property
-    def image_url(self) -> str:
-        if not self.image:
-            return ''
-        try:
-            return self.image.url
-        except (AttributeError, ValueError):
-            return str(self.image)
-
     def __str__(self) -> str:
         return f"{self.title} ({self.price} грн)"
 
