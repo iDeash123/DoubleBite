@@ -85,7 +85,7 @@ class MistralSupportAgent:
                 or getattr(settings, 'GEMINI_API_KEY', '')
                 or ''
             )
-        self.gemini_model = gemini_model or os.getenv('GEMINI_MODEL', 'gemini-3.6-flash')
+        self.gemini_model = gemini_model or os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
 
     @staticmethod
     def _get_cart_context(request: HttpRequest | None) -> str:
@@ -288,6 +288,11 @@ class MistralSupportAgent:
     ) -> AsyncGenerator[dict[str, Any], None]:
         client = genai.Client(api_key=self.gemini_api_key)
 
+        system_content = next(
+            (msg['content'] for msg in messages if msg.get('role') == 'system'),
+            SYSTEM_PROMPT,
+        )
+
         # Build Gemini contents list (system instruction is separate)
         gemini_contents: list[genai_types.Content] = []
         for msg in messages:
@@ -303,7 +308,7 @@ class MistralSupportAgent:
         gemini_tools = _mistral_tools_to_gemini()
 
         config = genai_types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
+            system_instruction=system_content,
             tools=gemini_tools,
             automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
             temperature=self.temperature,
@@ -366,7 +371,7 @@ class MistralSupportAgent:
             ))
 
             final_config = genai_types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
+                system_instruction=system_content,
                 temperature=self.temperature,
                 thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
             )

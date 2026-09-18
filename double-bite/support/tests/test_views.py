@@ -198,3 +198,18 @@ class SupportViewsTest(TestCase):
         data_b = res_b.json()
         self.assertEqual(len(data_b['messages']), 1)
         self.assertEqual(data_b['messages'][0]['content'], 'Питання від Б')
+
+    def test_get_history_returns_latest_20_messages_chronologically(self):
+        from support.views import _get_history
+        session = ChatSession.objects.create(user=self.user, status=ChatSessionStatus.ACTIVE)
+        for i in range(25):
+            ChatMessage.objects.create(
+                session=session,
+                role=MessageRole.USER if i % 2 == 0 else MessageRole.ASSISTANT,
+                content=f'Message {i}',
+            )
+
+        history = _get_history(session.session_uuid)
+        self.assertEqual(len(history), 20)
+        self.assertEqual(history[0]['content'], 'Message 5')
+        self.assertEqual(history[-1]['content'], 'Message 24')

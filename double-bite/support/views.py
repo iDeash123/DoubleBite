@@ -31,7 +31,8 @@ def _save_message(session_uuid: Any, role: str, content: str) -> ChatMessage:
 
 def _get_history(session_uuid: Any) -> list[dict[str, Any]]:
     session = ChatSession.objects.get(session_uuid=session_uuid)
-    msgs = session.messages.order_by('created_at')[:20]
+    msgs = list(session.messages.order_by('-created_at', '-id')[:20])
+    msgs.reverse()
     return [{'role': m.role, 'content': m.content} for m in msgs]
 
 

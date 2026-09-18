@@ -99,6 +99,7 @@ class MistralSupportAgentTest(TestCase):
         self.assertEqual(agent.model, 'mistral-large-latest')
         self.assertEqual(agent.temperature, 0.5)
         self.assertEqual(agent.max_tokens, 512)
+        self.assertEqual(agent.gemini_model, 'gemini-2.5-flash')
 
     def test_system_prompt_language_rules(self):
         self.assertIn('українська', SYSTEM_PROMPT.lower())
@@ -253,3 +254,29 @@ class MistralSupportAgentTest(TestCase):
         self.assertEqual(len(events), 1)
         self.assertIn('error', events[0])
         self.assertIn('+380 44 123 45 67', events[0]['error'])
+
+    @patch('support.agent.client.genai.Client')
+    async def test_stream_gemini_passes_system_content_with_cart(self, mock_genai_client_cls):
+        mock_client = MagicMock()
+        mock_genai_client_cls.return_value = mock_client
+        mock_response = MagicMock()
+        mock_candidate = MagicMock()
+        mock_candidate.content.parts = [MagicMock(text='Ось ваша відповідь', function_call=None)]
+        mock_response.candidates = [mock_candidate]
+        mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+        agent = MistralSupportAgent(gemini_api_key='fake-gemini-key')
+        messages = [
+            {'role': 'system', 'content': 'SYSTEM_PROMPT_CUSTOM_CART_CONTEXT'},
+            {'role': 'user', 'content': 'Привіт'},
+        ]
+        tokens = []
+        async for event in agent._stream_gemini(messages, request=None, session=None):
+            if 'token' in event:
+                tokens.append(event['token'])
+
+        self.assertEqual(tokens, ['Ось ваша відповідь'])
+        mock_client.aio.models.generate_content.assert_called_once()
+        _, call_kwargs = mock_client.aio.models.generate_content.call_args
+        self.assertEqual(call_kwargs['config'].system_instruction, 'SYSTEM_PROMPT_CUSTOM_CART_CONTEXT')
+        self.assertEqual(call_kwargs['model'], 'gemini-2.5-flash')
