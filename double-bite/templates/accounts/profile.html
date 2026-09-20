@@ -12,13 +12,24 @@
       <span>/</span>
       <span class="uppercase tracking-widest">Особистий кабінет клієнта</span>
     </div>
-    <div class="flex flex-col sm:flex-row sm:items-baseline justify-between gap-4">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <h1 class="text-3xl sm:text-4xl font-bold tracking-tight text-fv-noir font-sans">
         Персональні дані та адреси
       </h1>
-      <span class="text-xs font-mono text-fv-slate">
-        Користувач: <strong class="text-fv-noir">{{ user.email }}</strong>
-      </span>
+      <div class="flex flex-wrap items-center gap-4">
+        <span class="text-xs font-mono text-fv-slate">
+          Користувач: <strong class="text-fv-noir">{{ user.email }}</strong>
+        </span>
+        <form method="post" action="{% url 'accounts:logout' %}">
+          {% csrf_token %}
+          <button
+            type="submit"
+            class="px-4 py-2 border border-fv-noir/30 text-fv-noir text-xs font-mono uppercase tracking-wider hover:border-fv-noir hover:bg-fv-noir hover:text-white transition-colors rounded-none"
+          >
+            Вийти з кабінету
+          </button>
+        </form>
+      </div>
     </div>
   </div>
 
@@ -92,6 +103,18 @@
           Зберегти зміни
         </button>
       </form>
+
+      <div class="pt-4 border-t border-fv-noir/10">
+        <form method="post" action="{% url 'accounts:logout' %}">
+          {% csrf_token %}
+          <button
+            type="submit"
+            class="w-full py-3.5 border border-fv-noir/30 text-fv-noir text-xs font-mono uppercase tracking-wider hover:border-fv-noir hover:bg-fv-offwhite transition-colors rounded-none"
+          >
+            Вийти з кабінету
+          </button>
+        </form>
+      </div>
     </div>
 
     <div class="lg:col-span-7 space-y-8">

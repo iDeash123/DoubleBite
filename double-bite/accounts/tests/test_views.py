@@ -221,6 +221,13 @@ class ProfileViewTest(TestCase):
         self.assertContains(response, 'profile@doublebite.ua')
         self.assertContains(response, 'Іван')
 
+    def test_profile_contains_logout_button(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('accounts:profile'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse('accounts:logout'))
+        self.assertContains(response, 'Вийти з кабінету')
+
     def test_update_profile(self):
         self.client.force_login(self.user)
         payload = {
