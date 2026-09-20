@@ -225,8 +225,19 @@ class ProfileViewTest(TestCase):
         self.client.force_login(self.user)
         response = self.client.get(reverse('accounts:profile'))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, reverse('accounts:logout'))
-        self.assertContains(response, 'Вийти з кабінету')
+        self.assertContains(response, f'action="{reverse("accounts:logout")}"', count=3)
+        self.assertContains(response, 'method="post"')
+        self.assertContains(response, 'name="csrfmiddlewaretoken"')
+        self.assertContains(response, 'Вийти з кабінету', count=2)
+
+    def test_profile_logout_post_terminates_session(self):
+        self.client.force_login(self.user)
+        response = self.client.post(reverse('accounts:logout'))
+        self.assertRedirects(response, reverse('home'))
+        self.assertNotIn('_auth_user_id', self.client.session)
+        profile_response = self.client.get(reverse('accounts:profile'))
+        self.assertEqual(profile_response.status_code, 302)
+        self.assertIn('/accounts/login/', profile_response.url)
 
     def test_update_profile(self):
         self.client.force_login(self.user)

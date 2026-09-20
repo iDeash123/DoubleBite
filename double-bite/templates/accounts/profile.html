@@ -16,15 +16,15 @@
       <h1 class="text-3xl sm:text-4xl font-bold tracking-tight text-fv-noir font-sans">
         Персональні дані та адреси
       </h1>
-      <div class="flex flex-wrap items-center gap-4">
-        <span class="text-xs font-mono text-fv-slate">
+      <div class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 w-full sm:w-auto">
+        <span class="text-xs font-mono text-fv-slate break-all">
           Користувач: <strong class="text-fv-noir">{{ user.email }}</strong>
         </span>
-        <form method="post" action="{% url 'accounts:logout' %}">
+        <form method="post" action="{% url 'accounts:logout' %}" class="w-full sm:w-auto">
           {% csrf_token %}
           <button
             type="submit"
-            class="px-4 py-2 border border-fv-noir/30 text-fv-noir text-xs font-mono uppercase tracking-wider hover:border-fv-noir hover:bg-fv-noir hover:text-white transition-colors rounded-none"
+            class="w-full sm:w-auto px-4 py-2 border border-fv-noir/30 text-fv-noir text-xs font-mono uppercase tracking-wider hover:border-fv-noir hover:bg-fv-noir hover:text-white transition-colors rounded-none text-center"
           >
             Вийти з кабінету
           </button>
