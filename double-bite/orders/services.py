@@ -235,6 +235,8 @@ class CartService:
             request.session.pop('_pre_login_session_key', None)
             request.session.modified = True
 
+    merge_guest_cart_to_user = merge_guest_cart
+
 
 class StripeService:
     @classmethod
