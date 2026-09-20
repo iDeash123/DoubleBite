@@ -46,7 +46,7 @@ class RegisterView(View):
             user = form.save()
             if request.session.session_key:
                 request.session['_pre_login_session_key'] = request.session.session_key
-            login(request, user)
+            login(request, user, backend='django.contrib.auth.backends.ModelBackend')
             send_templated_email(
                 subject='Ласкаво просимо до Double Bite!',
                 template_prefix='emails/welcome',
