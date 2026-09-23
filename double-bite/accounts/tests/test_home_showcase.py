@@ -1,7 +1,9 @@
 import json
+import os
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.contrib.staticfiles import finders
 from django.test import AsyncClient, Client, TestCase
 from django.urls import reverse
 from menu.models import Category, Dish
@@ -85,3 +87,49 @@ class HomeShowcaseTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'double bite')
         self.assertContains(response, 'hero-showcase')
+
+    def test_about_section_rendered_with_pillar_and_transparency_images(self):
+        response = self.client.get(reverse('home'))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'home/partials/about_section.html')
+        self.assertContains(response, 'pillar-forms.jpg')
+        self.assertContains(response, 'pillar-ingredients.jpg')
+        self.assertContains(response, 'pillar-proportions.jpg')
+        self.assertContains(response, 'origin-beef.jpg')
+        self.assertContains(response, 'origin-flour.jpg')
+        self.assertContains(response, 'origin-salmon.jpg')
+        self.assertContains(response, 'origin-cheese.jpg')
+        self.assertContains(response, 'group-hover:scale-105')
+        self.assertContains(response, 'ТРИ ФУНДАМЕНТАЛЬНИХ')
+        self.assertContains(response, 'INGREDIENT TRANSPARENCY MAP')
+        self.assertContains(response, 'ECO-PASTURE CERTIFIED')
+        self.assertContains(response, 'ITALIAN D.O.P. 100%')
+        self.assertContains(response, 'MSC WILD CHILLED')
+        self.assertContains(response, 'ARTISANAL WHOLE MILK')
+
+    def test_about_section_static_assets_exist_on_disk(self):
+        required_images = [
+            'images/about/pillar-forms.jpg',
+            'images/about/pillar-ingredients.jpg',
+            'images/about/pillar-proportions.jpg',
+            'images/about/origin-beef.jpg',
+            'images/about/origin-flour.jpg',
+            'images/about/origin-salmon.jpg',
+            'images/about/origin-cheese.jpg',
+        ]
+        for img_path in required_images:
+            resolved = finders.find(img_path)
+            self.assertIsNotNone(resolved, f'Static asset {img_path} not found by finders')
+            self.assertTrue(os.path.exists(resolved), f'File {resolved} does not exist on disk')
+            self.assertGreater(os.path.getsize(resolved), 10000, f'File {resolved} is too small')
+
+    def test_get_home_page_context_selector(self):
+        from accounts.selectors import get_home_page_context
+
+        ctx = get_home_page_context(total_amount=Decimal('600.00'))
+        self.assertTrue(ctx['meets_free_delivery'])
+        self.assertEqual(ctx['free_delivery_remaining'], Decimal('0.00'))
+        self.assertEqual(len(ctx['hero_dishes']), 4)
+        self.assertEqual(len(ctx['collections_data']), 5)
+
+

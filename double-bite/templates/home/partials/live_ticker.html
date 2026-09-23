@@ -1,23 +1,79 @@
-<section class="bg-fv-noir text-white font-mono text-[11px] uppercase tracking-widest py-3 border-y border-fv-noir select-none overflow-hidden">
-  <div class="max-w-[1440px] mx-auto px-4 sm:px-8">
-    <div class="flex items-center justify-between gap-6 overflow-x-auto no-scrollbar whitespace-nowrap">
-      <div class="flex items-center gap-2 shrink-0">
-        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-        <span class="font-bold text-emerald-400">ПРИЙМАЄМО ЗАМОВЛЕННЯ</span>
-        <span class="text-white/40">·</span>
-        <span class="text-white/80">ЧАС ОЧІКУВАННЯ: 25 ХВ</span>
+<style>
+@keyframes tickerTapeScroll {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+.ticker-tape-container {
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+.ticker-tape-track {
+  display: flex;
+  width: max-content;
+  will-change: transform;
+  animation: tickerTapeScroll 36s linear infinite;
+}
+.ticker-tape-track:hover {
+  animation-play-state: paused;
+}
+</style>
+<section class="relative bg-fv-noir text-white font-mono text-[11px] uppercase tracking-widest py-3 border-y border-fv-noir select-none overflow-hidden" aria-label="Live Status Ticker">
+  <div class="pointer-events-none absolute inset-y-0 left-0 w-12 sm:w-20 bg-gradient-to-r from-fv-noir to-transparent z-10"></div>
+  <div class="pointer-events-none absolute inset-y-0 right-0 w-12 sm:w-20 bg-gradient-to-l from-fv-noir to-transparent z-10"></div>
+  <div class="ticker-tape-container">
+    <div class="ticker-tape-track">
+      <div class="flex items-center gap-8 shrink-0 pr-8">
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span class="font-bold text-emerald-400">ПРИЙМАЄМО ЗАМОВЛЕННЯ</span>
+          <span class="text-white/40">·</span>
+          <span class="text-white/80">ЧАС ОЧІКУВАННЯ: 25 ХВ</span>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="text-white/40">✦</span>
+          <span class="text-white/80">ТЕРМОБОКСИ З СЕНСОРАМИ: ГАРЯЧЕ +68°C · ДЕСЕРТИ +4°C</span>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="text-white/40">✦</span>
+          <span class="text-white/90 font-medium">БЕЗКОШТОВНА ДОСТАВКА ВІД 500 ₴ ПО ВСЬОМУ КИЄВУ</span>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="text-white/40">✦</span>
+          <span class="text-white/80">MISTRAL AI CONCIERGE АКТИВНИЙ 24/7</span>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="text-white/40">✦</span>
+          <span class="text-white/70">HAUTE CUISINE · KYIV · ВЛАСНА БРІОШ · 48H FERMENTATION</span>
+        </div>
       </div>
-      <div class="hidden md:flex items-center gap-2 shrink-0">
-        <span class="text-white/40">✦</span>
-        <span class="text-white/80">ТЕРМОБОКСИ З СЕНСОРАМИ: ГАРЯЧЕ +68°C · ДЕСЕРТИ +4°C</span>
-      </div>
-      <div class="flex items-center gap-2 shrink-0">
-        <span class="text-white/40">✦</span>
-        <span class="text-white/90">БЕЗКОШТОВНА ДОСТАВКА ВІД 500 ₴ ПО ВСЬОМУ КИЄВУ</span>
-      </div>
-      <div class="hidden lg:flex items-center gap-2 shrink-0">
-        <span class="text-white/40">✦</span>
-        <span class="text-white/80">MISTRAL AI CONCIERGE АКТИВНИЙ 24/7</span>
+      <div class="flex items-center gap-8 shrink-0 pr-8" aria-hidden="true">
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span class="font-bold text-emerald-400">ПРИЙМАЄМО ЗАМОВЛЕННЯ</span>
+          <span class="text-white/40">·</span>
+          <span class="text-white/80">ЧАС ОЧІКУВАННЯ: 25 ХВ</span>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="text-white/40">✦</span>
+          <span class="text-white/80">ТЕРМОБОКСИ З СЕНСОРАМИ: ГАРЯЧЕ +68°C · ДЕСЕРТИ +4°C</span>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="text-white/40">✦</span>
+          <span class="text-white/90 font-medium">БЕЗКОШТОВНА ДОСТАВКА ВІД 500 ₴ ПО ВСЬОМУ КИЄВУ</span>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="text-white/40">✦</span>
+          <span class="text-white/80">MISTRAL AI CONCIERGE АКТИВНИЙ 24/7</span>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="text-white/40">✦</span>
+          <span class="text-white/70">HAUTE CUISINE · KYIV · ВЛАСНА БРІОШ · 48H FERMENTATION</span>
+        </div>
       </div>
     </div>
   </div>

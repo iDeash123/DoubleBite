@@ -188,3 +188,10 @@ def search_dishes_for_agent(
             }
         )
     return results
+
+
+def get_home_page_context(total_amount: Decimal | None = None) -> dict[str, Any]:
+    from accounts.selectors import get_home_page_context as _get_ctx
+
+    return _get_ctx(total_amount=total_amount)
+

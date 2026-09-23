@@ -1,5 +1,67 @@
+{% load static %}
+<script>
+function transparencyMap() {
+  return {
+    selectedSupplierIndex: 0,
+    suppliers: [
+      {
+        tag: '01 · МАРМУРОВА ЯЛОВИЧИНА',
+        title: 'Фермерські господарства Волині та Полтавщини',
+        origin: 'Україна · Екологічні пасовища',
+        spec: 'Порода Абердин-ангус, сухе визрівання Dry-Aged 28 днів',
+        description: 'Використовується для авторських бургерів та біфштексів. Трав\'яна відгодівля та контрольована температура визрівання забезпечують глибокий насичений смак умамі.',
+        standard: 'Organic Certified · No Hormones',
+        badge: 'ECO-PASTURE CERTIFIED',
+        location: 'Волинь & Полтавщина',
+        image: "{% static 'images/about/origin-beef.jpg' %}"
+      },
+      {
+        tag: '02 · БОРОШНО ТВЕРДИХ СОРТІВ',
+        title: 'Італійський млин Molino Caputo',
+        origin: 'Неаполь, Італія · Засновано у 1924 році',
+        spec: 'Пшениця м\'яких і твердих сортів, помел Tipo 00',
+        description: 'Основа для неаполітанської піци та бріошів. 48-годинна холодна ферментація тіста гарантує легке травлення та характерний хрусткий бортик із великими порами.',
+        standard: 'D.O.P. Standard · 100% Non-GMO',
+        badge: 'ITALIAN D.O.P. 100%',
+        location: 'Campania, Napoli',
+        image: "{% static 'images/about/origin-flour.jpg' %}"
+      },
+      {
+        tag: '03 · ДИКИЙ ЛОСОСЬ',
+        title: 'Фіорди Олесунна та західного узбережжя',
+        origin: 'Норвегія · Атлантичний океан',
+        spec: 'Охолоджена риба Superior Quality, пряма авіадоставка',
+        description: 'Головний компонент фірмових боулів та ролів. Щотижнева поставка свіжої риби без заморожування зі збереженням природних омега-3 кислот та шовковистої текстури.',
+        standard: 'MSC Certified · Fresh Chilled',
+        badge: 'MSC WILD CHILLED',
+        location: 'Ålesund Fjords, Norway',
+        image: "{% static 'images/about/origin-salmon.jpg' %}"
+      },
+      {
+        tag: '04 · КРАФТОВІ СИРИ ТА БУРАТА',
+        title: 'Локальна сироварня та консорціум Парми',
+        origin: 'Київщина & Емілія-Романья, Італія',
+        spec: 'Свіжа моцарела Fior di Latte, бурата 120г, Parmigiano 24 міс.',
+        description: 'Використовується в піці, салатах та антипасті. Свіжа бурата готується щоранку за традиційною пулійською технологією з незбираного фермерського молока.',
+        standard: 'Artisanal Craft · 100% Whole Milk',
+        badge: 'ARTISANAL WHOLE MILK',
+        location: 'Київщина & Emilia-Romagna',
+        image: "{% static 'images/about/origin-cheese.jpg' %}"
+      }
+    ],
+    get currentSupplier() {
+      return this.suppliers[this.selectedSupplierIndex] || this.suppliers[0];
+    },
+    selectSupplier(index) {
+      this.selectedSupplierIndex = index;
+    }
+  };
+}
+</script>
+
 <section id="about" class="py-16 bg-white border-b border-fv-noir/10 select-none">
   <div class="max-w-[1440px] mx-auto px-4 sm:px-8">
+
     <div class="flex items-center gap-3 text-xs font-mono text-fv-slate mb-4">
       <span class="font-bold text-fv-noir">01</span>
       <span>/</span>
@@ -8,7 +70,7 @@
 
     <div class="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
       <div>
-        <h2 class="text-3xl sm:text-4xl font-bold tracking-tight text-fv-noir uppercase leading-none">
+        <h2 class="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-fv-noir uppercase leading-none">
           ТРИ ФУНДАМЕНТАЛЬНИХ<br>СТОВПИ СМАКУ
         </h2>
       </div>
@@ -17,51 +79,207 @@
       </p>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <div class="bg-fv-offwhite p-6 sm:p-8 border border-fv-noir/10 flex flex-col justify-between rounded-none">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-16">
+      <div class="group bg-fv-offwhite border border-fv-noir/10 flex flex-col justify-between rounded-none overflow-hidden transition-colors hover:border-fv-noir/25">
         <div>
-          <div class="w-10 h-10 bg-white flex items-center justify-center mb-6 text-fv-noir font-mono text-sm font-bold border border-fv-noir/10">
-            01
+          <div class="relative aspect-[16/10] overflow-hidden border-b border-fv-noir/10 bg-white">
+            <img
+              src="{% static 'images/about/pillar-forms.jpg' %}"
+              alt="Спокійні форми — лаконічна естетика ресторанної подачі"
+              class="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
+              loading="lazy"
+            >
+            <div class="absolute top-3 left-3 w-9 h-9 bg-white flex items-center justify-center text-fv-noir font-mono text-xs font-bold border border-fv-noir/10 shadow-xs">
+              01
+            </div>
           </div>
-          <h3 class="text-lg font-bold text-fv-noir mb-2 font-sans">Спокійні форми</h3>
-          <p class="text-xs sm:text-sm text-fv-slate leading-relaxed">
-            Лаконічна естетика ресторанної подачі, вивірені чисті лінії та відсутність штучного візуального нагромодження.
-          </p>
+          <div class="p-6 sm:p-8">
+            <div class="flex items-center gap-2 mb-2 text-[10px] font-mono uppercase tracking-widest text-fv-slate">
+              <span>АРХІТЕКТУРА СМАКУ</span>
+            </div>
+            <h3 class="text-lg font-bold text-fv-noir mb-2 font-sans">Спокійні форми</h3>
+            <p class="text-xs sm:text-sm text-fv-slate leading-relaxed">
+              Лаконічна естетика ресторанної подачі, вивірені чисті лінії та відсутність штучного візуального нагромодження.
+            </p>
+          </div>
         </div>
-        <div class="mt-6 pt-4 border-t border-fv-noir/10 text-[11px] font-mono text-fv-slate uppercase tracking-wider">
-          Visual Harmony · Pure Plating
+        <div class="px-6 pb-6 sm:px-8 sm:pb-8">
+          <div class="pt-4 border-t border-fv-noir/10 text-[11px] font-mono text-fv-slate uppercase tracking-wider flex items-center justify-between">
+            <span>Visual Harmony · Pure Plating</span>
+            <span class="opacity-0 group-hover:opacity-100 transition-opacity text-fv-noir">→</span>
+          </div>
         </div>
       </div>
 
-      <div class="bg-fv-offwhite p-6 sm:p-8 border border-fv-noir/10 flex flex-col justify-between rounded-none">
+      <div class="group bg-fv-offwhite border border-fv-noir/10 flex flex-col justify-between rounded-none overflow-hidden transition-colors hover:border-fv-noir/25">
         <div>
-          <div class="w-10 h-10 bg-white flex items-center justify-center mb-6 text-fv-noir font-mono text-sm font-bold border border-fv-noir/10">
-            02
+          <div class="relative aspect-[16/10] overflow-hidden border-b border-fv-noir/10 bg-white">
+            <img
+              src="{% static 'images/about/pillar-ingredients.jpg' %}"
+              alt="Натуральні інгредієнти — органічна якість"
+              class="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
+              loading="lazy"
+            >
+            <div class="absolute top-3 left-3 w-9 h-9 bg-white flex items-center justify-center text-fv-noir font-mono text-xs font-bold border border-fv-noir/10 shadow-xs">
+              02
+            </div>
           </div>
-          <h3 class="text-lg font-bold text-fv-noir mb-2 font-sans">Натуральні інгредієнти</h3>
-          <p class="text-xs sm:text-sm text-fv-slate leading-relaxed">
-            Органічні локальні фермерські продукти, витримані сири, свіжий дикий лосось, мармурова яловичина та ароматний трюфель.
-          </p>
+          <div class="p-6 sm:p-8">
+            <div class="flex items-center gap-2 mb-2 text-[10px] font-mono uppercase tracking-widest text-fv-slate">
+              <span>ЧИСТА СИРОВИНА</span>
+            </div>
+            <h3 class="text-lg font-bold text-fv-noir mb-2 font-sans">Натуральні інгредієнти</h3>
+            <p class="text-xs sm:text-sm text-fv-slate leading-relaxed">
+              Органічні локальні фермерські продукти, витримані сири, свіжий дикий лосось, мармурова яловичина та ароматний трюфель.
+            </p>
+          </div>
         </div>
-        <div class="mt-6 pt-4 border-t border-fv-noir/10 text-[11px] font-mono text-fv-slate uppercase tracking-wider">
-          Locally Sourced · Organic Quality
+        <div class="px-6 pb-6 sm:px-8 sm:pb-8">
+          <div class="pt-4 border-t border-fv-noir/10 text-[11px] font-mono text-fv-slate uppercase tracking-wider flex items-center justify-between">
+            <span>Locally Sourced · Organic Quality</span>
+            <span class="opacity-0 group-hover:opacity-100 transition-opacity text-fv-noir">→</span>
+          </div>
         </div>
       </div>
 
-      <div class="bg-fv-offwhite p-6 sm:p-8 border border-fv-noir/10 flex flex-col justify-between rounded-none">
+      <div class="group bg-fv-offwhite border border-fv-noir/10 flex flex-col justify-between rounded-none overflow-hidden transition-colors hover:border-fv-noir/25">
         <div>
-          <div class="w-10 h-10 bg-white flex items-center justify-center mb-6 text-fv-noir font-mono text-sm font-bold border border-fv-noir/10">
-            03
+          <div class="relative aspect-[16/10] overflow-hidden border-b border-fv-noir/10 bg-white">
+            <img
+              src="{% static 'images/about/pillar-proportions.jpg' %}"
+              alt="Продумані пропорції — кулінарний баланс"
+              class="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
+              loading="lazy"
+            >
+            <div class="absolute top-3 left-3 w-9 h-9 bg-white flex items-center justify-center text-fv-noir font-mono text-xs font-bold border border-fv-noir/10 shadow-xs">
+              03
+            </div>
           </div>
-          <h3 class="text-lg font-bold text-fv-noir mb-2 font-sans">Продумані пропорції</h3>
-          <p class="text-xs sm:text-sm text-fv-slate leading-relaxed">
-            Математична гармонія нутрієнтів, точна вага компонентів та бездоганний баланс насичених і свіжих смакових текстур.
-          </p>
+          <div class="p-6 sm:p-8">
+            <div class="flex items-center gap-2 mb-2 text-[10px] font-mono uppercase tracking-widest text-fv-slate">
+              <span>БАЛАНС ТА ТОЧНІСТЬ</span>
+            </div>
+            <h3 class="text-lg font-bold text-fv-noir mb-2 font-sans">Продумані пропорції</h3>
+            <p class="text-xs sm:text-sm text-fv-slate leading-relaxed">
+              Математична гармонія нутрієнтів, точна вага компонентів та бездоганний баланс насичених і свіжих смакових текстур.
+            </p>
+          </div>
         </div>
-        <div class="mt-6 pt-4 border-t border-fv-noir/10 text-[11px] font-mono text-fv-slate uppercase tracking-wider">
-          Nutrient Balance · Precision Taste
+        <div class="px-6 pb-6 sm:px-8 sm:pb-8">
+          <div class="pt-4 border-t border-fv-noir/10 text-[11px] font-mono text-fv-slate uppercase tracking-wider flex items-center justify-between">
+            <span>Nutrient Balance · Precision Taste</span>
+            <span class="opacity-0 group-hover:opacity-100 transition-opacity text-fv-noir">→</span>
+          </div>
         </div>
       </div>
     </div>
+
+    <div x-data="transparencyMap()" class="p-6 sm:p-10 bg-fv-offwhite border border-fv-noir/15 mb-12">
+      <div class="flex items-center justify-between mb-8 pb-4 border-b border-fv-noir/10">
+        <div>
+          <span class="text-[10px] font-mono uppercase tracking-widest text-fv-slate block mb-1">INGREDIENT TRANSPARENCY MAP</span>
+          <h3 class="text-xl sm:text-2xl font-bold font-sans text-fv-noir">Прозорість походження кожного інгредієнта</h3>
+        </div>
+        <div class="hidden sm:block text-xs font-mono text-fv-slate">
+          100% чистий склад без підсилювачів
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 mb-6">
+        <template x-for="(sup, idx) in suppliers" :key="idx">
+          <button
+            type="button"
+            @click="selectSupplier(idx)"
+            :class="selectedSupplierIndex === idx ? 'bg-fv-noir text-white border-fv-noir shadow-xs' : 'bg-white text-fv-noir border-fv-noir/15 hover:bg-fv-offwhite'"
+            class="p-3 text-left border transition-all cursor-pointer font-mono text-xs"
+          >
+            <span class="block text-[10px] opacity-60 uppercase truncate" x-text="sup.tag"></span>
+            <span class="block font-bold text-xs truncate mt-0.5" x-text="sup.title"></span>
+          </button>
+        </template>
+      </div>
+
+      <div class="bg-white border border-fv-noir/10 overflow-hidden grid grid-cols-1 lg:grid-cols-12 min-h-[380px]">
+        <div class="lg:col-span-5 relative overflow-hidden bg-fv-offwhite min-h-[260px] sm:min-h-[320px] lg:min-h-full border-b lg:border-b-0 lg:border-r border-fv-noir/10 group">
+          <img
+            src="{% static 'images/about/origin-beef.jpg' %}"
+            :src="currentSupplier.image"
+            alt="Фермерські господарства Волині та Полтавщини"
+            :alt="currentSupplier.title"
+            class="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+            loading="lazy"
+          >
+          <div class="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent"></div>
+          <div class="absolute top-4 left-4">
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 bg-white/95 backdrop-blur-xs text-[10px] font-mono font-bold uppercase tracking-wider text-fv-noir border border-fv-noir/10 shadow-xs">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+              <span x-text="currentSupplier.badge">ECO-PASTURE CERTIFIED</span>
+            </span>
+          </div>
+          <div class="absolute bottom-4 left-4 right-4 text-white">
+            <span class="block text-[10px] font-mono tracking-widest uppercase opacity-75 mb-1" x-text="currentSupplier.tag">01 · МАРМУРОВА ЯЛОВИЧИНА</span>
+            <div class="text-sm sm:text-base font-bold font-sans text-white leading-tight" x-text="currentSupplier.location">Волинь & Полтавщина</div>
+          </div>
+        </div>
+
+        <div class="lg:col-span-7 p-6 sm:p-8 lg:p-10 flex flex-col justify-between space-y-6">
+          <div class="space-y-4">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-xs font-mono bg-fv-offwhite px-3 py-1 text-fv-noir border border-fv-noir/10 font-medium" x-text="currentSupplier.origin">Україна · Екологічні пасовища</span>
+              <span class="text-xs font-mono px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold" x-text="currentSupplier.standard">Organic Certified · No Hormones</span>
+            </div>
+            <h4 class="text-xl sm:text-2xl font-bold text-fv-noir font-sans tracking-tight" x-text="currentSupplier.title">Фермерські господарства Волині та Полтавщини</h4>
+            <p class="text-xs sm:text-sm text-fv-slate font-sans leading-relaxed" x-text="currentSupplier.description">Використовується для авторських бургерів та біфштексів. Трав'яна відгодівля та контрольована температура визрівання забезпечують глибокий насичений смак умамі.</p>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 py-4 border-y border-fv-noir/10 text-xs font-mono">
+            <div class="p-3 bg-fv-offwhite/60 border border-fv-noir/10">
+              <div class="text-[10px] uppercase text-fv-slate mb-1">Специфікація сировини</div>
+              <div class="font-medium text-fv-noir text-xs leading-snug" x-text="currentSupplier.spec">Порода Абердин-ангус, сухе визрівання Dry-Aged 28 днів</div>
+            </div>
+            <div class="p-3 bg-fv-offwhite/60 border border-fv-noir/10">
+              <div class="text-[10px] uppercase text-fv-slate mb-1">Стандарт якості</div>
+              <div class="font-medium text-emerald-800 text-xs leading-snug" x-text="currentSupplier.standard">Organic Certified · No Hormones</div>
+            </div>
+          </div>
+
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono text-fv-slate pt-1">
+            <div class="flex items-center gap-2">
+              <svg class="w-4 h-4 text-fv-noir shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              </svg>
+              <span class="text-[11px] uppercase tracking-wider text-fv-noir">Контроль якості Double Bite Quality Lab</span>
+            </div>
+            <div class="text-[11px] text-fv-slate font-medium">
+              Аудит постачальника: <span class="text-fv-noir font-bold font-mono">2026-Q1 OK</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="p-8 sm:p-12 bg-white border border-fv-noir/15 flex flex-col md:flex-row md:items-center justify-between gap-8">
+      <div class="max-w-2xl">
+        <span class="text-[10px] font-mono uppercase tracking-widest text-fv-slate block mb-3">МАНІФЕСТ БРЕНД-ШЕФА</span>
+        <blockquote class="font-serif italic text-lg sm:text-2xl text-fv-noir leading-relaxed mb-4">
+          «Ми створили Double Bite як гастрономічну архітектуру, де немає випадкових елементів: кожен інгредієнт має призначення, кожна текстура продумана до міліметра, а доставка не компрометує якість ресторанної подачі.»
+        </blockquote>
+        <div class="text-xs font-mono uppercase tracking-wider text-fv-slate">
+          Олександр Воронов · Бренд-шеф Double Bite™ Kyiv
+        </div>
+      </div>
+      <div class="shrink-0 flex flex-col items-start md:items-end gap-3 font-mono text-xs">
+        <a href="/menu/" class="px-6 py-3 bg-fv-noir text-white uppercase tracking-wider hover:bg-black transition-colors rounded-none font-medium">
+          Відкрити меню
+        </a>
+        <button
+          onclick="document.getElementById('ai-chat-widget').querySelector('button').click()"
+          class="text-fv-noir underline underline-offset-4 hover:text-fv-slate cursor-pointer"
+        >
+          Запитати шеф-асистента →
+        </button>
+      </div>
+    </div>
+
   </div>
 </section>

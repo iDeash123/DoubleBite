@@ -47,6 +47,7 @@
 
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
+  <script src="https://unpkg.com/lenis@1.1.20/dist/lenis.min.js"></script>
 
   <style>
     [x-cloak] { display: none !important; }
@@ -109,7 +110,7 @@
           МЕНЮ СТРАВ
         </a>
 
-        <a href="/#collections" class="col-span-2 border-r border-fv-noir/20 py-3.5 px-4 flex items-center justify-center font-medium text-fv-noir hover:bg-fv-offwhite transition-colors">
+        <a href="/#collections" data-nav-hash="#collections" class="col-span-2 border-r border-fv-noir/20 py-3.5 px-4 flex items-center justify-center font-medium text-fv-noir hover:bg-fv-offwhite transition-colors">
           КОЛЕКЦІЇ
         </a>
 
@@ -120,11 +121,11 @@
           </div>
         </a>
 
-        <a href="/#about" class="col-span-1 border-r border-fv-noir/20 py-3.5 px-2 flex items-center justify-center font-medium text-fv-noir hover:bg-fv-offwhite transition-colors">
+        <a href="/#about" data-nav-hash="#about" class="col-span-1 border-r border-fv-noir/20 py-3.5 px-2 flex items-center justify-center font-medium text-fv-noir hover:bg-fv-offwhite transition-colors">
           ПРО НАС
         </a>
 
-        <a href="/#delivery" class="col-span-1 border-r border-fv-noir/20 py-3.5 px-2 flex items-center justify-center font-medium text-fv-noir hover:bg-fv-offwhite transition-colors">
+        <a href="/#delivery" data-nav-hash="#delivery" class="col-span-1 border-r border-fv-noir/20 py-3.5 px-2 flex items-center justify-center font-medium text-fv-noir hover:bg-fv-offwhite transition-colors">
           ДОСТАВКА
         </a>
 
@@ -225,9 +226,9 @@
 
         <div x-show="mobileOpen" @click.away="mobileOpen = false" class="absolute top-full left-4 right-4 mt-2 bg-white border border-fv-noir/20 shadow-2xl divide-y divide-fv-noir/10 z-50 text-xs font-mono">
           <a href="/menu/" class="block py-3 px-4 hover:bg-fv-offwhite text-fv-noir font-bold">МЕНЮ СТРАВ</a>
-          <a href="/#collections" class="block py-3 px-4 hover:bg-fv-offwhite text-fv-noir">КОЛЕКЦІЇ</a>
-          <a href="/#about" class="block py-3 px-4 hover:bg-fv-offwhite text-fv-noir">ПРО НАС</a>
-          <a href="/#delivery" class="block py-3 px-4 hover:bg-fv-offwhite text-fv-noir">ДОСТАВКА</a>
+          <a href="/#collections" data-nav-hash="#collections" class="block py-3 px-4 hover:bg-fv-offwhite text-fv-noir">КОЛЕКЦІЇ</a>
+          <a href="/#about" data-nav-hash="#about" class="block py-3 px-4 hover:bg-fv-offwhite text-fv-noir">ПРО НАС</a>
+          <a href="/#delivery" data-nav-hash="#delivery" class="block py-3 px-4 hover:bg-fv-offwhite text-fv-noir">ДОСТАВКА</a>
           {% if user.is_authenticated %}
             <a href="{% url 'accounts:profile' %}" class="block py-3 px-4 hover:bg-fv-offwhite text-fv-noir font-bold">ОСОБИСТИЙ КАБІНЕТ ({{ user.email }})</a>
             <form action="{% url 'accounts:logout' %}" method="post" class="p-4">
@@ -336,6 +337,89 @@
         overlay.classList.toggle('hidden');
       }
     }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      var lenisInstance = null;
+      if (typeof Lenis !== 'undefined') {
+        lenisInstance = new Lenis({
+          duration: 1.2,
+          easing: function(t) { return Math.min(1, 1.001 - Math.pow(2, -10 * t)); },
+          smoothWheel: true
+        });
+        window.__lenis = lenisInstance;
+        function raf(time) {
+          lenisInstance.raf(time);
+          requestAnimationFrame(raf);
+        }
+        requestAnimationFrame(raf);
+      }
+
+      function scrollToTarget(targetHash) {
+        if (!targetHash) return;
+        var el = document.querySelector(targetHash);
+        if (!el) return;
+        if (lenisInstance) {
+          lenisInstance.scrollTo(el, { offset: -80 });
+        } else {
+          el.scrollIntoView({ behavior: 'smooth' });
+        }
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState(null, null, targetHash);
+        }
+      }
+
+      if ((window.location.pathname === '/' || window.location.pathname === '') && window.location.hash) {
+        setTimeout(function() {
+          scrollToTarget(window.location.hash);
+        }, 150);
+      }
+
+      document.querySelectorAll('a[href*="#"]').forEach(function(anchor) {
+        anchor.addEventListener('click', function(e) {
+          var href = anchor.getAttribute('href');
+          if (!href) return;
+          var hashIdx = href.indexOf('#');
+          if (hashIdx === -1) return;
+          var path = href.slice(0, hashIdx);
+          var hash = href.slice(hashIdx);
+          if ((window.location.pathname === '/' || window.location.pathname === '') && (path === '' || path === '/')) {
+            var targetEl = document.querySelector(hash);
+            if (targetEl) {
+              e.preventDefault();
+              scrollToTarget(hash);
+            }
+          }
+        });
+      });
+
+      if ('IntersectionObserver' in window && (window.location.pathname === '/' || window.location.pathname === '')) {
+        var sections = ['#hero-showcase', '#collections', '#delivery', '#about'];
+        var observer = new IntersectionObserver(function(entries) {
+          entries.forEach(function(entry) {
+            if (entry.isIntersecting) {
+              var id = entry.target.id;
+              document.querySelectorAll('[data-nav-hash]').forEach(function(link) {
+                if (link.getAttribute('data-nav-hash') === '#' + id) {
+                  link.classList.add('bg-fv-noir', 'text-white');
+                  link.classList.remove('text-fv-noir', 'hover:bg-fv-offwhite');
+                } else {
+                  link.classList.remove('bg-fv-noir', 'text-white');
+                  link.classList.add('text-fv-noir', 'hover:bg-fv-offwhite');
+                }
+              });
+              if (window.history && window.history.replaceState && id !== 'hero-showcase') {
+                window.history.replaceState(null, null, '#' + id);
+              }
+            }
+          });
+        }, { rootMargin: '-20% 0px -65% 0px' });
+
+        sections.forEach(function(sel) {
+          var el = document.querySelector(sel);
+          if (el) observer.observe(el);
+        });
+      }
+    });
   </script>
 </body>
 </html>

@@ -1,11 +1,230 @@
-<section id="collections" class="py-16 bg-white border-b border-fv-noir/10 select-none">
+<script>
+function collectionsShowcase(initialCollections) {
+  return {
+    activeCollectionIndex: 0,
+    collections: initialCollections && initialCollections.length ? initialCollections : [
+      {
+        index: 1,
+        tag: '01 · HAUTE BURGERS',
+        slug: 'burgers',
+        title: 'Авторські Бургери',
+        subtitle: 'Булочки бріош власної випічки · Мармурова яловичина',
+        description: 'Фірмова серія бургерів з добірної витриманої мармурової яловичини, авторськими трюфельними соусами та хрусткими булочками бріош із власної пекарні.',
+        dishes: [
+          {
+            id: 1,
+            title: 'Truffle Wagyu Burger',
+            description: 'Котлета з мармурової яловичини, трюфельний крем-сир, карамелізована цибуля у бріоші.',
+            price: '485',
+            weight_grams: 380,
+            calories: 680,
+            image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=600&q=80'
+          },
+          {
+            id: 11,
+            title: 'Double Smoky Cheddar',
+            description: 'Подвійна яловича котлета, копчений сир чедер, бекон, соус BBQ з бурбоном.',
+            price: '440',
+            weight_grams: 410,
+            calories: 790,
+            image: 'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=600&q=80'
+          },
+          {
+            id: 12,
+            title: 'Crispy Truffle Chicken',
+            description: 'Хрустке куряче філе панко, трюфельний айолі, мариновані огірки та айсберг.',
+            price: '380',
+            weight_grams: 360,
+            calories: 610,
+            image: 'https://images.unsplash.com/photo-1625813506062-0aeb1d7a094b?auto=format&fit=crop&w=600&q=80'
+          }
+        ]
+      },
+      {
+        index: 2,
+        tag: '02 · NEAPOLITAN PIZZA',
+        slug: 'pizza',
+        title: 'Неаполітанська Піца',
+        subtitle: '48-годинна ферментація тіста · Томати San Marzano',
+        description: 'Традиційна піца за неаполітанським стандартом: італійське борошно Caputo, випікання за 450°C, солодкі томати пелаті та молода моцарела.',
+        dishes: [
+          {
+            id: 2,
+            title: 'Quattro Formaggi al Tartufo',
+            description: 'Горгонзола, fior di latte, фонтіна, пармезан 24 міс., білий трюфельний мед.',
+            price: '420',
+            weight_grams: 460,
+            calories: 820,
+            image: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=600&q=80'
+          },
+          {
+            id: 21,
+            title: 'Margherita D.O.P.',
+            description: 'Томати San Marzano, моцарела fior di latte, свіжий зелений базилік, оливкова олія.',
+            price: '290',
+            weight_grams: 420,
+            calories: 720,
+            image: 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?auto=format&fit=crop&w=600&q=80'
+          },
+          {
+            id: 22,
+            title: 'Pepperoni Hot Honey',
+            description: 'Пікантна салямі піканте, плавлена моцарела, томатний соус, пластівці чилі та гострий мед.',
+            price: '350',
+            weight_grams: 440,
+            calories: 880,
+            image: 'https://images.unsplash.com/photo-1628840042765-356cda07504e?auto=format&fit=crop&w=600&q=80'
+          }
+        ]
+      },
+      {
+        index: 3,
+        tag: '03 · FRESH BOWLS',
+        slug: 'bowls',
+        title: 'Свіжі Боули & Салати',
+        subtitle: 'Дикий лосось · Стигле авокадо Hass · Органічна кіноа',
+        description: 'Легкі та нутрієнтно насичені композиції зі свіжою рибою, суперфудами, бобами едамаме та авторськими цитрусовими дресингами.',
+        dishes: [
+          {
+            id: 3,
+            title: 'Wild Salmon & Avocado Bowl',
+            description: 'Норвезький лосось, авокадо Hass, кіноа, боби едамаме, огірок, кунжутний дресинг.',
+            price: '390',
+            weight_grams: 340,
+            calories: 420,
+            image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80'
+          },
+          {
+            id: 31,
+            title: 'Burrata Con Pomodorini',
+            description: 'Вершкова фермерська бурата, печені чері, базиліковий песто, хрустка фокача.',
+            price: '360',
+            weight_grams: 310,
+            calories: 380,
+            image: 'https://images.unsplash.com/photo-1592417817098-8f3d69109853?auto=format&fit=crop&w=600&q=80'
+          },
+          {
+            id: 32,
+            title: 'Tuna Tataki Poke Bowl',
+            description: 'Опалений тунець у кунжуті, чука, маринований імбир, соус понзу, рис Akita.',
+            price: '410',
+            weight_grams: 350,
+            calories: 440,
+            image: 'https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=600&q=80'
+          }
+        ]
+      },
+      {
+        index: 4,
+        tag: '04 · CRAFT PASTRY & DRINKS',
+        slug: 'desserts',
+        title: 'Десерти & Спешелті Напої',
+        subtitle: 'Баскський чізкейк · Церемоніальна матча з Кіото',
+        description: 'Витончений фінал гастрономічного досвіду: класичний сан-себастьянський чізкейк та автентична японська матча найвищого ґатунку.',
+        dishes: [
+          {
+            id: 4,
+            title: 'Basque Burnt Cheesecake',
+            description: 'Карамелізований баскський чізкейк з ніжною танучою серцевиною та мадагаскарською ваніллю.',
+            price: '220',
+            weight_grams: 190,
+            calories: 340,
+            image: 'https://images.unsplash.com/photo-1533134242443-d4fd215305ad?auto=format&fit=crop&w=600&q=80'
+          },
+          {
+            id: 41,
+            title: 'Ceremonial Matcha Latte',
+            description: 'Церемоніальний японський зелений чай з Кіото на рослинному вівсяному молоці.',
+            price: '160',
+            weight_grams: 250,
+            calories: 120,
+            image: 'https://images.unsplash.com/photo-1536256263959-770b48d82b0a?auto=format&fit=crop&w=600&q=80'
+          },
+          {
+            id: 42,
+            title: 'Almond Croissant & Espresso',
+            description: 'Листковий круасан з мигдалевим франжипаном та подвійний шот арабіки Ефіопія.',
+            price: '180',
+            weight_grams: 180,
+            calories: 390,
+            image: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=600&q=80'
+          }
+        ]
+      },
+      {
+        index: 5,
+        tag: '05 · CHEF\'S TASTING SETS',
+        slug: 'sets',
+        title: 'Дегустаційні Сети',
+        subtitle: 'Авторські гастро-сети для компаній та подій',
+        description: 'Вивірені сети страв від бренд-шефа, створені для бездоганного поєднання смаків та святкової атмосфери вдома чи в офісі.',
+        dishes: [
+          {
+            id: 51,
+            title: 'Double Bite Signature Duo',
+            description: 'Truffle Wagyu Burger, картопляні діпи з трюфельним айолі та крафтовий лимонад.',
+            price: '560',
+            weight_grams: 650,
+            calories: 980,
+            image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=600&q=80'
+          },
+          {
+            id: 52,
+            title: 'Italian Evening Tasting Set',
+            description: 'Піца Quattro Formaggi, бурата con pomodorini, фокача та два десерти на вибір.',
+            price: '890',
+            weight_grams: 990,
+            calories: 1520,
+            image: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=600&q=80'
+          },
+          {
+            id: 53,
+            title: 'Healthy Balance Gourmet Set',
+            description: 'Wild Salmon Bowl, зелений смузі суперфуд та чіа-пудинг на мигдалевому молоці.',
+            price: '520',
+            weight_grams: 580,
+            calories: 620,
+            image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80'
+          }
+        ]
+      }
+    ],
+    get currentCollection() {
+      return this.collections[this.activeCollectionIndex] || this.collections[0];
+    },
+    selectCollection(index) {
+      this.activeCollectionIndex = index;
+    },
+    addToCart(dish) {
+      if (!dish) return;
+      const dishId = dish.id;
+      if (dishId && dishId > 0) {
+        if (window.htmx) {
+          htmx.ajax('POST', '/cart/add/' + dishId + '/', {
+            target: '#cart-badge',
+            swap: 'outerHTML'
+          });
+        }
+      } else {
+        window.dispatchEvent(new CustomEvent('open-cart-drawer'));
+      }
+      if (window.showToast) {
+        window.showToast('«' + (dish.title || 'Страву') + '» додано до замовлення', 'success');
+      }
+    }
+  };
+}
+</script>
+
+<section id="collections" x-data="collectionsShowcase({{ collections_json|default:'[]' }})" class="py-16 bg-white border-b border-fv-noir/10 select-none">
   <div class="max-w-[1440px] mx-auto px-4 sm:px-8">
+
     <div class="flex items-center gap-6 text-xs font-mono text-fv-noir mb-8 pb-4 border-b border-fv-noir/10">
       <span class="font-bold">02:</span>
       <span class="uppercase tracking-widest text-fv-slate">Гастрономічні колекції страв</span>
     </div>
 
-    <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-12">
+    <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-10">
       <div>
         <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-fv-noir uppercase leading-none">
           ГАСТРОНОМІЧНІ<br>КОЛЕКЦІЇ
@@ -18,99 +237,73 @@
       </div>
       <div>
         <a href="/menu/" class="px-6 py-3.5 bg-fv-noir text-white text-xs font-mono tracking-wider uppercase hover:bg-black transition-colors rounded-none shadow-xs inline-block">
-          Переглянути всі колекції
+          Переглянути все меню →
         </a>
       </div>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-10">
-      <div class="group cursor-pointer flex flex-col justify-between">
-        <div class="relative aspect-4/3 sm:aspect-16/10 bg-fv-offwhite overflow-hidden mb-4">
-          <img
-            src="https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=900&q=80"
-            alt="Колекція авторських бургерів"
-            class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-          >
-          <div class="absolute top-3 left-3 bg-white text-fv-noir text-[10px] font-mono px-2 py-0.5 uppercase tracking-wider">
-            01 · HAUTE BURGERS
-          </div>
-        </div>
-        <div class="flex items-center justify-between pt-2 border-t border-fv-noir/10">
-          <div>
-            <span class="text-base font-bold text-fv-noir tracking-tight">Авторські Бургери</span>
-            <p class="text-xs text-fv-slate mt-0.5">Булочки бріош власної випічки · Мармурова яловичина</p>
-          </div>
-          <a href="/menu/" class="px-5 py-2 border border-fv-noir/20 bg-white text-fv-noir text-xs font-mono uppercase group-hover:border-fv-noir group-hover:bg-fv-noir group-hover:text-white transition-all rounded-none">
-            Обрати
-          </a>
-        </div>
-      </div>
+    <div class="flex flex-wrap gap-2 sm:gap-3 mb-8 border-b border-fv-noir/10 pb-6">
+      <template x-for="(col, idx) in collections" :key="idx">
+        <button
+          type="button"
+          @click="selectCollection(idx)"
+          :class="activeCollectionIndex === idx ? 'bg-fv-noir text-white border-fv-noir shadow-sm' : 'bg-fv-offwhite text-fv-noir border-fv-noir/10 hover:bg-[#EAEAEA]'"
+          class="px-4 py-2.5 text-xs font-mono uppercase tracking-wider border transition-all cursor-pointer flex items-center gap-2"
+        >
+          <span x-text="col.tag"></span>
+        </button>
+      </template>
+    </div>
 
-      <div class="group cursor-pointer flex flex-col justify-between">
-        <div class="relative aspect-4/3 sm:aspect-16/10 bg-fv-offwhite overflow-hidden mb-4">
-          <img
-            src="https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=900&q=80"
-            alt="Неаполітанська піца"
-            class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-          >
-          <div class="absolute top-3 left-3 bg-white text-fv-noir text-[10px] font-mono px-2 py-0.5 uppercase tracking-wider">
-            02 · NEAPOLITAN PIZZA
-          </div>
-        </div>
-        <div class="flex items-center justify-between pt-2 border-t border-fv-noir/10">
-          <div>
-            <span class="text-base font-bold text-fv-noir tracking-tight">Неаполітанська Піца</span>
-            <p class="text-xs text-fv-slate mt-0.5">48-годинна ферментація тіста · Томати San Marzano</p>
-          </div>
-          <a href="/menu/" class="px-5 py-2 border border-fv-noir/20 bg-white text-fv-noir text-xs font-mono uppercase group-hover:border-fv-noir group-hover:bg-fv-noir group-hover:text-white transition-all rounded-none">
-            Обрати
-          </a>
-        </div>
+    <div class="mb-8 p-6 bg-fv-offwhite border border-fv-noir/10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div>
+        <span class="text-[10px] font-mono uppercase tracking-widest text-fv-slate block mb-1" x-text="currentCollection.tag"></span>
+        <h3 class="text-xl font-bold text-fv-noir tracking-tight mb-1" x-text="currentCollection.title"></h3>
+        <p class="text-xs text-fv-slate mt-0.5" x-text="currentCollection.subtitle"></p>
+        <p class="text-xs text-fv-noir mt-2 leading-relaxed max-w-2xl" x-text="currentCollection.description"></p>
       </div>
-
-      <div class="group cursor-pointer flex flex-col justify-between">
-        <div class="relative aspect-4/3 sm:aspect-16/10 bg-fv-offwhite overflow-hidden mb-4">
-          <img
-            src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=900&q=80"
-            alt="Боули та свіжі салати"
-            class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-          >
-          <div class="absolute top-3 left-3 bg-white text-fv-noir text-[10px] font-mono px-2 py-0.5 uppercase tracking-wider">
-            03 · FRESH BOWLS
-          </div>
-        </div>
-        <div class="flex items-center justify-between pt-2 border-t border-fv-noir/10">
-          <div>
-            <span class="text-base font-bold text-fv-noir tracking-tight">Свіжі Боули &amp; Салати</span>
-            <p class="text-xs text-fv-slate mt-0.5">Фермерський лосось · Стигле авокадо Hass · Кіноа</p>
-          </div>
-          <a href="/menu/" class="px-5 py-2 border border-fv-noir/20 bg-white text-fv-noir text-xs font-mono uppercase group-hover:border-fv-noir group-hover:bg-fv-noir group-hover:text-white transition-all rounded-none">
-            Обрати
-          </a>
-        </div>
-      </div>
-
-      <div class="group cursor-pointer flex flex-col justify-between">
-        <div class="relative aspect-4/3 sm:aspect-16/10 bg-fv-offwhite overflow-hidden mb-4">
-          <img
-            src="https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=900&q=80"
-            alt="Авторські десерти"
-            class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-          >
-          <div class="absolute top-3 left-3 bg-white text-fv-noir text-[10px] font-mono px-2 py-0.5 uppercase tracking-wider">
-            04 · PASTRY &amp; MATCHA
-          </div>
-        </div>
-        <div class="flex items-center justify-between pt-2 border-t border-fv-noir/10">
-          <div>
-            <span class="text-base font-bold text-fv-noir tracking-tight">Десерти &amp; Special Drinks</span>
-            <p class="text-xs text-fv-slate mt-0.5">Баскський чізкейк · Церемоніальна матча Uji</p>
-          </div>
-          <a href="/menu/" class="px-5 py-2 border border-fv-noir/20 bg-white text-fv-noir text-xs font-mono uppercase group-hover:border-fv-noir group-hover:bg-fv-noir group-hover:text-white transition-all rounded-none">
-            Обрати
-          </a>
-        </div>
+      <div class="shrink-0">
+        <a
+          :href="'/menu/?category=' + currentCollection.slug"
+          class="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-fv-noir hover:underline underline-offset-4 py-2 font-bold"
+        >
+          <span>Дивитися всю колекцію в меню</span>
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </a>
       </div>
     </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <template x-for="(dish, dIdx) in currentCollection.dishes" :key="dIdx">
+        <div class="dish-card-stagger bg-white p-6 rounded-none border border-fv-noir/10 flex flex-col justify-between hover:border-fv-noir/30 transition-all shadow-xs">
+          <div>
+            <div class="bg-fv-offwhite aspect-square p-4 flex items-center justify-center overflow-hidden mix-blend-multiply mb-4">
+              <img :src="dish.image" :alt="dish.title" class="w-full h-full object-contain mix-blend-multiply hover:scale-105 transition-transform duration-500">
+            </div>
+            <div class="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-fv-slate mb-1">
+              <span x-text="currentCollection.title"></span>
+              <span x-text="dish.weight_grams + ' г · ' + dish.calories + ' ккал'"></span>
+            </div>
+            <h3 class="text-lg font-bold text-fv-noir tracking-tight mb-2" x-text="dish.title"></h3>
+            <p class="text-xs text-fv-slate leading-relaxed mb-4 line-clamp-2" x-text="dish.description"></p>
+          </div>
+          <div class="pt-4 border-t border-fv-noir/10">
+            <div class="flex items-center justify-between mb-3 font-mono">
+              <span class="text-xs text-fv-slate uppercase">Вартість</span>
+              <span class="text-2xl font-medium text-fv-noir" x-text="dish.price + ' ₴'"></span>
+            </div>
+            <button
+              type="button"
+              @click="addToCart(dish)"
+              class="w-full py-3 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors rounded-none flex items-center justify-center gap-2 cursor-pointer font-medium"
+            >
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+              <span>В кошик</span>
+            </button>
+          </div>
+        </div>
+      </template>
+    </div>
+
   </div>
 </section>
