@@ -244,19 +244,6 @@
     </div>
   </header>
 
-  {% if messages %}
-    <div class="max-w-[1440px] w-full mx-auto px-4 sm:px-8 pt-4">
-      <div class="space-y-2">
-        {% for message in messages %}
-          <div class="p-4 text-xs font-mono border flex items-center justify-between {% if message.tags == 'error' %}border-red-500 bg-red-50 text-red-700{% else %}border-fv-noir/20 bg-white text-fv-noir shadow-xs{% endif %}">
-            <span>{{ message }}</span>
-            <span class="text-[10px] uppercase font-bold tracking-widest text-fv-slate">DOUBLE BITE</span>
-          </div>
-        {% endfor %}
-      </div>
-    </div>
-  {% endif %}
-
   <main class="flex-1 w-full">
     {% block content %}
       <section class="relative bg-white pt-10 pb-16 overflow-hidden border-b border-fv-noir/10">
