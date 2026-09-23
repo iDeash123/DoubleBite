@@ -1,0 +1,177 @@
+<script>
+window.showToast = function(message, type, timeout) {
+  window.dispatchEvent(new CustomEvent('show-toast', {
+    detail: {
+      message: message,
+      type: type || 'info',
+      timeout: typeof timeout === 'number' ? timeout : 4500
+    }
+  }));
+};
+</script>
+<div
+  id="toast-notifications-container"
+  x-data="{
+    toasts: [
+      {% if messages %}
+        {% for message in messages %}
+          {
+            id: 'toast-srv-{{ forloop.counter }}-' + Math.random().toString(36).slice(2, 9),
+            message: '{{ message|escapejs }}',
+            type: '{{ message.tags|default:'info'|escapejs }}',
+            timeout: 4500,
+            remaining: 4500,
+            timer: null,
+            startedAt: null
+          }{% if not forloop.last %},{% endif %}
+        {% endfor %}
+      {% endif %}
+    ],
+    init() {
+      this.toasts.forEach(t => this.startTimer(t));
+    },
+    startTimer(toast) {
+      if (!toast || toast.timeout <= 0) return;
+      if (toast.timer) clearTimeout(toast.timer);
+      toast.startedAt = Date.now();
+      const delay = toast.remaining !== undefined ? toast.remaining : toast.timeout;
+      toast.timer = setTimeout(() => {
+        this.removeToast(toast.id);
+      }, delay);
+    },
+    pause(toast) {
+      if (!toast || !toast.timer) return;
+      clearTimeout(toast.timer);
+      toast.timer = null;
+      const elapsed = Date.now() - (toast.startedAt || Date.now());
+      const rem = toast.remaining !== undefined ? toast.remaining : toast.timeout;
+      toast.remaining = Math.max(500, rem - elapsed);
+    },
+    resume(toast) {
+      if (!toast || toast.timer || (toast.remaining !== undefined && toast.remaining <= 0)) return;
+      this.startTimer(toast);
+    },
+    pauseToast(toast) {
+      this.pause(toast);
+    },
+    resumeToast(toast) {
+      this.resume(toast);
+    },
+    addToast(detail) {
+      let message = '';
+      let type = 'info';
+      let timeout = 4500;
+      if (typeof detail === 'string') {
+        message = detail;
+      } else if (detail && typeof detail === 'object') {
+        message = detail.message || detail.text || '';
+        type = detail.type || detail.tags || detail.level || 'info';
+        if (detail.timeout !== undefined) {
+          timeout = Number(detail.timeout);
+        }
+      }
+      if (!message) return;
+      const id = 'toast-' + Date.now() + '-' + Math.random().toString(36).slice(2, 9);
+      const toast = {
+        id: id,
+        message: message,
+        type: type,
+        timeout: timeout,
+        remaining: timeout,
+        timer: null,
+        startedAt: null
+      };
+      this.toasts.push(toast);
+      this.startTimer(toast);
+    },
+    removeToast(id) {
+      const toast = this.toasts.find(t => t.id === id);
+      if (toast && toast.timer) {
+        clearTimeout(toast.timer);
+      }
+      this.toasts = this.toasts.filter(t => t.id !== id);
+    },
+    getToastClasses(type) {
+      const t = (type || '').toLowerCase();
+      if (t.includes('error')) {
+        return 'border-l-4 border-l-red-600';
+      }
+      if (t.includes('warning')) {
+        return 'border-l-4 border-l-amber-500';
+      }
+      if (t.includes('success')) {
+        return 'border-l-4 border-l-emerald-600';
+      }
+      return 'border-l-4 border-l-fv-noir';
+    },
+    getTypeBadge(type) {
+      const t = (type || '').toLowerCase();
+      if (t.includes('error')) {
+        return { label: 'ПОМИЛКА', dot: 'bg-red-500', badge: 'text-red-700 bg-red-50 border-red-200' };
+      }
+      if (t.includes('warning')) {
+        return { label: 'УВАГА', dot: 'bg-amber-500', badge: 'text-amber-800 bg-amber-50 border-amber-200' };
+      }
+      if (t.includes('success')) {
+        return { label: 'УСПІШНО', dot: 'bg-emerald-500', badge: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
+      }
+      return { label: 'ІНФО', dot: 'bg-fv-noir', badge: 'text-fv-noir bg-fv-offwhite border-fv-noir/20' };
+    }
+  }"
+  @show-toast.window="addToast($event.detail)"
+  @toast.window="addToast($event.detail)"
+  class="fixed bottom-6 right-6 z-50 flex flex-col gap-2.5 max-w-sm w-full pointer-events-none sm:bottom-8 sm:right-8"
+  aria-live="polite"
+>
+  <template x-for="toast in toasts" :key="toast.id">
+    <div
+      @mouseenter="pause(toast)"
+      @mouseleave="resume(toast)"
+      x-transition:enter="transition ease-out duration-300 transform"
+      x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:translate-x-4 scale-95"
+      x-transition:enter-end="opacity-100 translate-y-0 sm:translate-x-0 scale-100"
+      x-transition:leave="transition ease-in duration-200 transform"
+      x-transition:leave-start="opacity-100 translate-y-0 sm:translate-x-0 scale-100"
+      x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:translate-x-4 scale-95"
+      class="pointer-events-auto bg-white border border-fv-noir/20 p-4 shadow-xl transition-all duration-300 transform rounded-none"
+      :class="getToastClasses(toast.type)"
+      role="alert"
+    >
+      <div class="flex items-center justify-between pb-2 mb-2 border-b border-fv-noir/10 text-xs font-mono">
+        <div class="flex items-center gap-2">
+          <span :class="getTypeBadge(toast.type).dot" class="w-2 h-2 rounded-full inline-block shrink-0"></span>
+          <span :class="getTypeBadge(toast.type).badge" class="text-[10px] font-mono uppercase tracking-widest font-bold px-2 py-0.5 border rounded-none" x-text="getTypeBadge(toast.type).label"></span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-[9px] uppercase font-bold tracking-widest text-fv-slate hidden sm:inline">DOUBLE BITE</span>
+          <button
+            type="button"
+            @click="removeToast(toast.id)"
+            class="p-1 -mr-1 text-fv-slate hover:text-fv-noir transition-colors text-sm font-mono leading-none cursor-pointer rounded-none"
+            aria-label="Закрити"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+      <div class="text-xs font-mono text-fv-noir leading-relaxed break-words" x-text="toast.message"></div>
+    </div>
+  </template>
+  <noscript>
+    {% if messages %}
+      <div class="space-y-2 pointer-events-auto">
+        {% for message in messages %}
+          <div class="pointer-events-auto bg-white border border-fv-noir/20 p-4 shadow-xl rounded-none text-fv-noir {% if 'error' in message.tags %}border-l-4 border-l-red-600{% elif 'warning' in message.tags %}border-l-4 border-l-amber-500{% elif 'success' in message.tags %}border-l-4 border-l-emerald-600{% else %}border-l-4 border-l-fv-noir{% endif %}" role="alert">
+            <div class="flex items-center justify-between pb-2 mb-2 border-b border-fv-noir/10 text-xs font-mono">
+              <span class="text-[10px] font-mono uppercase tracking-widest font-bold px-2 py-0.5 border rounded-none {% if 'error' in message.tags %}text-red-700 bg-red-50 border-red-200{% elif 'warning' in message.tags %}text-amber-800 bg-amber-50 border-amber-200{% elif 'success' in message.tags %}text-emerald-700 bg-emerald-50 border-emerald-200{% else %}text-fv-noir bg-fv-offwhite border-fv-noir/20{% endif %}">
+                {% if 'error' in message.tags %}ПОМИЛКА{% elif 'warning' in message.tags %}УВАГА{% elif 'success' in message.tags %}УСПІШНО{% else %}ІНФО{% endif %}
+              </span>
+              <span class="text-[9px] uppercase font-bold tracking-widest text-fv-slate">DOUBLE BITE</span>
+            </div>
+            <div class="text-xs font-mono text-fv-noir leading-relaxed break-words">{{ message }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </noscript>
+</div>
