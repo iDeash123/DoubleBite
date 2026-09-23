@@ -32,6 +32,9 @@ secrets/
 
 staticfiles/
 media/
+static/images/
+double-bite/static/images/
+
 
 .DS_Store
 Thumbs.db
