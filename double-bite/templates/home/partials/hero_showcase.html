@@ -1,0 +1,261 @@
+<script>
+function heroShowcase(initialDishes) {
+  return {
+    currentIndex: 0,
+    dishes: initialDishes && initialDishes.length ? initialDishes : [
+      {
+        id: 1,
+        title: 'Truffle Wagyu Burger',
+        subtitle: 'Бріош · Мармурова яловичина · Трюфельний айолі',
+        tag: '01 · HAUTE BURGER',
+        badge: 'ФЛАГМАНСЬКА СТРАВА',
+        description: 'Фірмовий бургер з витриманою мармуровою яловичиною сухого визрівання, соусом з чорного трюфеля, карамелізованою цибулею та вершковим чедером у свіжоспеченій булочці бріош.',
+        taste_notes: 'Насичений умамі, земляні ноти чорного трюфеля, соковита мармурова текстура',
+        price: '485',
+        weight_grams: 380,
+        calories: 680,
+        prep_time: '15 хв',
+        image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=1000&q=85',
+        bg_watermark: 'HAUTE BURGER'
+      },
+      {
+        id: 2,
+        title: 'Quattro Formaggi al Tartufo',
+        subtitle: 'Горгонзола · Fior di Latte · Пармезан 24 міс. · Трюфельний мед',
+        tag: '02 · NEAPOLITAN PIZZA',
+        badge: '48H FERMENTATION',
+        description: 'Біла неаполітанська піца на повітряному тісті 48-годинної холодної ферментації з чотирма витриманими сирами та акацієвим медом з білим трюфелем.',
+        taste_notes: 'Вершково-пікантний контраст, медово-трюфельний посмак, хрусткий бортик',
+        price: '420',
+        weight_grams: 460,
+        calories: 820,
+        prep_time: '12 хв',
+        image: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1000&q=85',
+        bg_watermark: 'NEAPOLITAN PIZZA'
+      },
+      {
+        id: 3,
+        title: 'Wild Salmon & Avocado Bowl',
+        subtitle: 'Норвезький лосось · Авокадо Hass · Кіноа · Едамаме',
+        tag: '03 · FRESH BOWL',
+        badge: 'HEALTHY FLOW',
+        description: 'Збалансований боул з охолодженим норвезьким лососем, стиглим кремовим авокадо Hass, органічною кіноа, бобами едамаме та цитрусово-кунжутною заправкою.',
+        taste_notes: 'Свіжий океанічний смак, оксамитова ніжність авокадо, хрусткі нутрієнти',
+        price: '390',
+        weight_grams: 340,
+        calories: 420,
+        prep_time: '10 хв',
+        image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=1000&q=85',
+        bg_watermark: 'FRESH BOWL'
+      },
+      {
+        id: 4,
+        title: 'Basque Burnt Cheesecake',
+        subtitle: 'Карамелізована скоринка · Ваніль Bourbon · Тануча серцевина',
+        tag: '04 · CRAFT PASTRY',
+        badge: 'CHEF SIGNATURE',
+        description: 'Легендарний сан-себастьянський чізкейк з випаленою до гірко-солодкого карамельного відтінку поверхнею та оксамитовою рідкою текстурою в середині.',
+        taste_notes: 'Карамелізована скоринка, тануча вершкова ніжність, бурбонська мадагаскарська ваніль',
+        price: '220',
+        weight_grams: 190,
+        calories: 340,
+        prep_time: '5 хв',
+        image: 'https://images.unsplash.com/photo-1533134242443-d4fd215305ad?auto=format&fit=crop&w=1000&q=85',
+        bg_watermark: 'BURNT CHEESECAKE'
+      }
+    ],
+    tiltTransform: '',
+    get currentDish() {
+      return this.dishes[this.currentIndex] || this.dishes[0];
+    },
+    selectDish(index) {
+      this.currentIndex = index;
+    },
+    onMouseMove(event) {
+      const card = event.currentTarget;
+      const rect = card.getBoundingClientRect();
+      const x = event.clientX - rect.left - rect.width / 2;
+      const y = event.clientY - rect.top - rect.height / 2;
+      const rotateX = -(y / (rect.height / 2)) * 8;
+      const rotateY = (x / (rect.width / 2)) * 8;
+      this.tiltTransform = 'perspective(1000px) rotateX(' + rotateX.toFixed(2) + 'deg) rotateY(' + rotateY.toFixed(2) + 'deg)';
+    },
+    resetTilt() {
+      this.tiltTransform = 'perspective(1000px) rotateX(0deg) rotateY(0deg)';
+    },
+    addToCart(dish) {
+      if (!dish) return;
+      const dishId = dish.id;
+      if (dishId && dishId > 0) {
+        if (window.htmx) {
+          htmx.ajax('POST', '/cart/add/' + dishId + '/', {
+            target: '#cart-badge',
+            swap: 'outerHTML'
+          });
+        }
+      } else {
+        window.dispatchEvent(new CustomEvent('open-cart-drawer'));
+      }
+      if (window.showToast) {
+        window.showToast('«' + (dish.title || 'Страву') + '» додано до замовлення', 'success');
+      }
+    },
+    askAiConcierge(dish) {
+      const title = dish && dish.title ? dish.title : 'фірмові страви';
+      const query = 'Розкажи про особливості приготування ' + title + ' та що до неї пасує?';
+      window.dispatchEvent(new CustomEvent('open-ai-chat', {
+        detail: { query: query }
+      }));
+    }
+  };
+}
+</script>
+
+<section id="hero-showcase" x-data="heroShowcase({{ hero_dishes_json|default:'[]' }})" class="relative bg-white pt-8 pb-16 overflow-hidden border-b border-fv-noir/10 select-none">
+  <div class="max-w-[1440px] mx-auto px-4 sm:px-8">
+
+    <div class="text-center mb-6">
+      <span class="font-serif italic text-sm sm:text-base tracking-widest text-fv-noir uppercase">
+        АВТОРСЬКА ГАСТРОНОМІЯ ТА АРХІТЕКТУРНА ТОЧНІСТЬ СМАКУ
+      </span>
+    </div>
+
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4 mb-8">
+      <template x-for="(dish, idx) in dishes" :key="idx">
+        <button
+          type="button"
+          @click="selectDish(idx)"
+          :class="currentIndex === idx ? 'bg-fv-noir text-white border-fv-noir shadow-md' : 'bg-fv-offwhite text-fv-noir border-fv-noir/10 hover:bg-[#EAEAEA]'"
+          class="p-3 sm:p-4 text-left border transition-all duration-200 cursor-pointer flex flex-col justify-between"
+        >
+          <div>
+            <span class="block text-[10px] font-mono uppercase tracking-widest opacity-60 mb-1" x-text="dish.tag"></span>
+            <span class="block text-xs sm:text-sm font-bold font-sans tracking-tight truncate" x-text="dish.title"></span>
+          </div>
+          <div class="mt-3 flex items-center justify-between text-xs font-mono">
+            <span class="font-bold" x-text="dish.price + ' ₴'"></span>
+            <span class="text-[10px] opacity-70" x-text="dish.prep_time"></span>
+          </div>
+        </button>
+      </template>
+    </div>
+
+    <div class="relative min-h-[460px] sm:min-h-[560px] lg:min-h-[620px] flex items-center justify-center my-2">
+
+      <div class="absolute inset-0 flex items-center justify-center select-none pointer-events-none z-0">
+        <h1 class="text-[11vw] sm:text-[13vw] font-black tracking-tighter text-fv-noir/[0.04] uppercase whitespace-nowrap leading-none w-full text-center transition-all duration-500" x-text="currentDish.bg_watermark">
+          DOUBLE BITE
+        </h1>
+      </div>
+
+      <div
+        class="relative z-10 max-w-xs sm:max-w-md lg:max-w-lg mx-auto cursor-pointer"
+        @mousemove="onMouseMove($event)"
+        @mouseleave="resetTilt()"
+      >
+        <img
+          :src="currentDish.image"
+          :alt="currentDish.title"
+          :style="{ transform: tiltTransform }"
+          class="w-full h-auto max-h-[380px] sm:max-h-[460px] object-contain drop-shadow-2xl mx-auto mix-blend-multiply transition-transform duration-300 ease-out"
+        >
+      </div>
+
+      <div class="hidden lg:block absolute left-0 bottom-8 max-w-sm z-20">
+        <div class="mb-4">
+          <span class="text-[10px] font-mono uppercase tracking-widest text-fv-slate block mb-1" x-text="currentDish.tag"></span>
+          <div class="p-3 bg-fv-offwhite border-l-2 border-fv-noir text-xs font-sans mb-3">
+            <span class="font-mono text-[10px] uppercase tracking-wider text-fv-slate block mb-1">Смаковий профіль</span>
+            <p class="text-fv-noir font-medium leading-relaxed" x-text="currentDish.taste_notes"></p>
+          </div>
+        </div>
+        <p class="text-xs sm:text-sm text-fv-noir leading-relaxed mb-6 font-normal" x-text="currentDish.description"></p>
+        <div class="flex flex-col items-start gap-3">
+          <div class="flex items-center gap-3">
+            <button
+              type="button"
+              id="hero-quick-add-btn"
+              @click="addToCart(currentDish)"
+              class="px-6 py-3.5 bg-fv-noir text-white text-xs font-mono tracking-wider hover:bg-black transition-colors rounded-none shadow-xs uppercase font-medium flex items-center gap-2 cursor-pointer"
+            >
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+              <span>Додати до замовлення</span>
+              <span class="font-bold ml-1" x-text="currentDish.price + ' ₴'"></span>
+            </button>
+            <a
+              href="/menu/"
+              class="px-5 py-3.5 border border-fv-noir/20 bg-white text-fv-noir text-xs font-mono tracking-wider hover:bg-fv-offwhite transition-colors uppercase"
+            >
+              Меню
+            </a>
+          </div>
+          <button
+            type="button"
+            id="hero-ai-consult-btn"
+            @click="askAiConcierge(currentDish)"
+            class="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-fv-noir hover:underline underline-offset-4 transition-all cursor-pointer"
+          >
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span>Запитати AI-консьєржа про страву</span>
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="hidden lg:block absolute right-0 bottom-8 max-w-xs text-left z-20 bg-white/90 backdrop-blur-xs p-5 border border-fv-noir/10 shadow-sm">
+        <div class="mb-4">
+          <span class="text-[10px] font-mono uppercase tracking-widest text-fv-slate block mb-1" x-text="currentDish.badge"></span>
+          <h3 class="text-sm font-bold tracking-wider uppercase text-fv-noir" x-text="currentDish.title"></h3>
+          <p class="text-xs text-fv-slate mt-0.5" x-text="currentDish.subtitle"></p>
+        </div>
+        <div class="w-full h-px bg-fv-noir/20 mb-4"></div>
+        <div class="space-y-3 text-xs font-mono">
+          <div class="flex items-center justify-between">
+            <span class="text-fv-slate uppercase text-[10px]">Вартість</span>
+            <strong class="text-fv-noir font-bold text-lg" x-text="currentDish.price + ' ₴'"></strong>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-fv-slate uppercase text-[10px]">Вага / Енергія</span>
+            <span class="text-fv-noir font-medium" x-text="currentDish.weight_grams + ' г · ' + currentDish.calories + ' ккал'"></span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-fv-slate uppercase text-[10px]">Час подачі</span>
+            <span class="text-fv-noir font-medium" x-text="currentDish.prep_time"></span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="lg:hidden mt-6 pt-6 border-t border-fv-noir/10 space-y-4">
+      <div class="p-4 bg-fv-offwhite border border-fv-noir/10">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-[10px] font-mono uppercase tracking-widest text-fv-slate" x-text="currentDish.badge"></span>
+          <strong class="text-fv-noir font-bold font-mono text-base" x-text="currentDish.price + ' ₴'"></strong>
+        </div>
+        <h3 class="text-sm font-bold tracking-wider uppercase text-fv-noir mb-1" x-text="currentDish.title"></h3>
+        <p class="text-xs text-fv-slate mb-3" x-text="currentDish.subtitle"></p>
+        <div class="text-[11px] font-mono text-fv-slate mb-4" x-text="currentDish.weight_grams + ' г · ' + currentDish.calories + ' ккал · ' + currentDish.prep_time"></div>
+        <div class="flex flex-col gap-2">
+          <button
+            type="button"
+            @click="addToCart(currentDish)"
+            class="w-full py-3 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+            <span>Додати до замовлення</span>
+          </button>
+          <button
+            type="button"
+            @click="askAiConcierge(currentDish)"
+            class="w-full py-2.5 border border-fv-noir/20 bg-white text-fv-noir text-xs font-mono uppercase tracking-wider hover:bg-fv-offwhite transition-colors flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span>Запитати AI-консьєржа</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>

@@ -169,7 +169,7 @@ window.__formatMarkdown = function(text) {
   @open-dish-modal.window="hiddenByModal = true; open = false"
   @modal-opened.window="hiddenByModal = true; open = false"
   @modal-closed.window="hiddenByModal = false"
-  @open-ai-chat.window="hiddenByModal = false; open = true"
+  @open-ai-chat.window="hiddenByModal = false; open = true; if ($event.detail) { const q = typeof $event.detail === 'string' ? $event.detail : ($event.detail.query || $event.detail.message || ''); if (q) { input = q; } }"
   class="select-none">
 
   <button
