@@ -16,9 +16,9 @@ class HomeViewTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'double bite')
         self.assertContains(response, 'fv-noir')
-        self.assertContains(response, 'Plus Jakarta Sans')
-        self.assertContains(response, 'htmx.org')
-        self.assertContains(response, 'alpinejs')
+        self.assertContains(response, 'fonts.css')
+        self.assertContains(response, 'htmx.min.js')
+        self.assertContains(response, 'alpine.min.js')
 
     async def test_home_page_renders_200_async(self):
         async_client = AsyncClient()

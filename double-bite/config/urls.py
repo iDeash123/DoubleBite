@@ -26,7 +26,17 @@ urlpatterns = [
 
 if settings.DEBUG:
     urlpatterns += staticfiles_urlpatterns()
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+    def cached_media_serve(request, path, document_root=None, show_indexes=False):
+        response = serve(request, path, document_root=document_root, show_indexes=show_indexes)
+        if getattr(response, 'status_code', None) == 200:
+            response['Cache-Control'] = 'public, max-age=86400'
+        return response
+
+    media_prefix = settings.MEDIA_URL.strip('/')
+    urlpatterns += [
+        path(f"{media_prefix}/<path:path>", cached_media_serve, {'document_root': settings.MEDIA_ROOT}),
+    ]
     try:
         import debug_toolbar
         urlpatterns = [

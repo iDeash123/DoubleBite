@@ -15,54 +15,12 @@
   <link rel="manifest" href="{% static 'favicon/site.webmanifest' %}">
   <meta name="theme-color" content="#262626">
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,400;1,500;1,600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'css/fonts.css' %}">
+  <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
 
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            'fv-noir': '#262626',
-            'fv-slate': '#8C8C8C',
-            'fv-lightgray': '#E5E5E5',
-            'fv-offwhite': '#F6F6F6',
-            'fv-white': '#FFFFFF',
-            'fv-boucle': '#F4F1EB',
-            'fv-linen': '#E8E3DA',
-            'fv-oak': '#D5C2AB',
-            'fv-stone': '#DDD7CF',
-          },
-          fontFamily: {
-            sans: ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
-            serif: ['"Cormorant Garamond"', 'Georgia', 'serif'],
-            mono: ['"JetBrains Mono"', 'monospace'],
-          }
-        }
-      }
-    }
-  </script>
-
-  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
-  <script src="https://unpkg.com/lenis@1.1.20/dist/lenis.min.js"></script>
-
-  <style>
-    [x-cloak] { display: none !important; }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #f1f1f1; }
-    ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 0; }
-    ::-webkit-scrollbar-thumb:hover { background: #8c8c8c; }
-
-    @media print {
-      header, nav, #grid-overlay, #ai-chat-widget, .no-print {
-        display: none !important;
-      }
-      body { background: white !important; color: black !important; }
-    }
-  </style>
+  <script src="{% static 'js/htmx.min.js' %}"></script>
+  <script defer src="{% static 'js/alpine.min.js' %}"></script>
+  <script src="{% static 'js/lenis.min.js' %}"></script>
   <script>
     document.addEventListener('htmx:configRequest', function(evt) {
       let token = document.querySelector('[name=csrfmiddlewaretoken]')?.value;

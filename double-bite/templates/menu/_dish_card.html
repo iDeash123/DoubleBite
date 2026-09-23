@@ -5,7 +5,8 @@
         <img
           src="{% if dish.image.url %}{{ dish.image.url }}{% else %}{{ dish.image }}{% endif %}"
           alt="{{ dish.title }}"
-          loading="lazy"
+          {% if forloop.counter <= 4 %}loading="eager" fetchpriority="high"{% else %}loading="lazy"{% endif %}
+          decoding="async"
           class="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-500"
         >
       {% else %}

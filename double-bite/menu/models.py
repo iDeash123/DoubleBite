@@ -16,6 +16,13 @@ class DishImageFieldFile(ImageFieldFile):
             return ''
         if self.name.startswith(('http://', 'https://', '//', '/', 'data:')):
             return self.name
+        if not self.name.endswith('.webp'):
+            webp_name = self.name.rsplit('.', 1)[0] + '.webp'
+            try:
+                if self.storage.exists(webp_name):
+                    return self.storage.url(webp_name)
+            except Exception:
+                pass
         return super().url
 
     @property

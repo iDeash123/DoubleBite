@@ -32,8 +32,7 @@ secrets/
 
 staticfiles/
 media/
-static/images/
-double-bite/static/images/
+static/images/*
 
 
 .DS_Store

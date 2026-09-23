@@ -1,6 +1,10 @@
+import mimetypes
 import os
 import sys
 from pathlib import Path
+
+mimetypes.add_type('image/webp', '.webp')
+mimetypes.add_type('font/woff2', '.woff2')
 
 from dotenv import load_dotenv
 
