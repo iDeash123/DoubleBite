@@ -233,7 +233,7 @@ window.__formatMarkdown = function(text) {
       </button>
     </div>
 
-    <div x-ref="msgContainer" class="flex-1 p-4 overflow-y-auto space-y-3 bg-white">
+    <div x-ref="msgContainer" data-lenis-prevent class="flex-1 min-h-0 p-4 overflow-y-auto space-y-3 bg-white">
       <template x-for="(msg, index) in messages" :key="index">
         <div :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
           <div

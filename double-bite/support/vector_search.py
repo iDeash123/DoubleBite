@@ -76,6 +76,8 @@ def search_dishes_semantic(
 
             vector_matches = (
                 qs.filter(embedding__isnull=False)
+                .select_related('category')
+                .prefetch_related('options')
                 .annotate(distance=CosineDistance('embedding', query_vec))
                 .order_by('distance')[:limit]
             )
@@ -91,7 +93,7 @@ def search_dishes_semantic(
     if category_slug:
         qs = qs.filter(category__slug=category_slug)
 
-    dishes_with_vec = list(qs.select_related('category'))
+    dishes_with_vec = list(qs.select_related('category').prefetch_related('options'))
     if dishes_with_vec:
         scored = [
             (dish, cosine_similarity(query_vec, dish.embedding))
@@ -112,4 +114,4 @@ def search_dishes_semantic(
     if category_slug:
         fallback_qs = fallback_qs.filter(category__slug=category_slug)
 
-    return list(fallback_qs.select_related('category')[:limit])
+    return list(fallback_qs.select_related('category').prefetch_related('options')[:limit])
