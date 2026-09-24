@@ -5,6 +5,7 @@ from django.core.exceptions import SuspiciousFileOperation, ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models.fields.files import ImageFieldFile
+from django.urls import reverse
 from django.utils.text import slugify
 from pgvector.django import HnswIndex, VectorField
 
@@ -64,6 +65,9 @@ class Category(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+    def get_absolute_url(self) -> str:
+        return reverse('menu:dish_detail', kwargs={'dish_slug': self.slug})
 
 
 class Dish(models.Model):
@@ -137,6 +141,12 @@ class Dish(models.Model):
 
     def __str__(self) -> str:
         return f"{self.title} ({self.price} грн)"
+
+    def get_absolute_url(self) -> str:
+        return reverse(
+            'menu:category_dish_detail',
+            kwargs={'category_slug': self.category.slug, 'dish_slug': self.slug},
+        )
 
 
 class DishOption(models.Model):

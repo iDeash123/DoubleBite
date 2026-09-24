@@ -1,14 +1,24 @@
 from accounts.views import HomeView
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
+from django.contrib.sitemaps.views import sitemap
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.urls import include, path
 from django.views.static import serve
+from menu.sitemaps import CategorySitemap, DishSitemap, StaticViewSitemap
+from menu.views import robots_txt_view
 from orders import views as orders_views
+
+sitemaps = {
+    'static': StaticViewSitemap,
+    'categories': CategorySitemap,
+    'dishes': DishSitemap,
+}
 
 urlpatterns = [
     path('favicon.ico', serve, {'document_root': settings.BASE_DIR / 'static' / 'favicon', 'path': 'favicon.ico'}),
+    path('robots.txt', robots_txt_view, name='robots_txt'),
+    path('sitemap.xml', sitemap, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
     path('admin/', admin.site.urls),
     path('', HomeView.as_view(), name='home'),
     path('accounts/', include('accounts.urls')),

@@ -121,3 +121,18 @@ def dish_detail_view(
         ],
     }
     return render(request, 'menu/dish_detail.html', context)
+
+
+def robots_txt_view(request: HttpRequest) -> HttpResponse:
+    sitemap_url = request.build_absolute_uri('/sitemap.xml')
+    content = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /admin/\n"
+        "Disallow: /cart/\n"
+        "Disallow: /orders/\n"
+        "Disallow: /support/chat/\n"
+        f"Sitemap: {sitemap_url}\n"
+    )
+    return HttpResponse(content, content_type='text/plain')
+

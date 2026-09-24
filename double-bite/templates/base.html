@@ -7,6 +7,10 @@
   <title>{% block title %}Double Bite™ — Авторська доставка їжі та ресторанний сервіс{% endblock %}</title>
   <meta name="description" content="{% block meta_description %}Преміальна доставка авторських ресторанних страв Double Bite: архітектурний мінімалізм, натуральні добірні інгредієнти та інтелектуальний AI-консьєрж 24/7.{% endblock %}">
 
+  {% block canonical %}
+  <link rel="canonical" href="{% block canonical_url %}{{ request.scheme }}://{{ request.get_host }}{{ request.path }}{% endblock %}">
+  {% endblock %}
+
   <link rel="icon" type="image/x-icon" href="{% static 'favicon/favicon.ico' %}">
   <link rel="icon" type="image/svg+xml" href="{% static 'favicon/favicon.svg' %}">
   <link rel="icon" type="image/png" sizes="32x32" href="{% static 'favicon/favicon-32x32.png' %}">
