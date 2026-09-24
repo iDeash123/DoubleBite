@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% load menu_extras %}
 
-{% block title %}Меню страв — Double Bite™ | Авторська ресторанна доставка в Києві{% endblock %}
-{% block meta_description %}Ознайомтеся з повним авторським меню Double Bite: неаполітанська піца, сети преміальних суші, мармурові бургери, свіжі салати та вишукані десерти.{% endblock %}
+{% block title %}{% if selected_category %}{% for cat in categories %}{% if cat.slug == selected_category %}{{ cat.name }} з доставкою — Double Bite | Меню ресторану{% endif %}{% endfor %}{% else %}Меню страв — Double Bite™ | Авторська ресторанна доставка в Києві{% endif %}{% endblock %}
+{% block meta_title %}{% if selected_category %}{% for cat in categories %}{% if cat.slug == selected_category %}{{ cat.name }} з доставкою — Double Bite | Меню ресторану{% endif %}{% endfor %}{% else %}Меню страв — Double Bite™ | Авторська ресторанна доставка в Києві{% endif %}{% endblock %}
+{% block meta_description %}{% if selected_category %}{% for cat in categories %}{% if cat.slug == selected_category %}Замовляйте {{ cat.name|lower }} з авторського меню ресторану Double Bite у Києві. Швидка доставка та преміальна якість.{% endif %}{% endfor %}{% else %}Ознайомтеся з повним авторським меню Double Bite: неаполітанська піца, сети преміальних суші, мармурові бургери, свіжі салати та вишукані десерти.{% endif %}{% endblock %}
+{% block og_title %}{% if selected_category %}{% for cat in categories %}{% if cat.slug == selected_category %}{{ cat.name }} з доставкою — Double Bite | Меню ресторану{% endif %}{% endfor %}{% else %}Меню страв — Double Bite™ | Авторська ресторанна доставка в Києві{% endif %}{% endblock %}
+{% block og_description %}{% if selected_category %}{% for cat in categories %}{% if cat.slug == selected_category %}Замовляйте {{ cat.name|lower }} з авторського меню ресторану Double Bite у Києві. Швидка доставка та преміальна якість.{% endif %}{% endfor %}{% else %}Ознайомтеся з повним авторським меню Double Bite: неаполітанська піца, сети преміальних суші, мармурові бургери, свіжі салати та вишукані десерти.{% endif %}{% endblock %}
 
 {% block content %}
 <div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-8 sm:py-12" x-data="{
@@ -168,7 +171,6 @@
     {% if paginator.num_pages > 1 %}
     <nav class="mt-10 flex items-center justify-center gap-1 font-mono text-xs" aria-label="Пагінація">
 
-      {# ← Попередня #}
       {% if page_obj.has_previous %}
         <a href="?{% query_transform page=page_obj.previous_page_number %}"
            class="px-3 py-2 border border-fv-noir/20 text-fv-noir hover:bg-fv-noir hover:text-white transition-colors"
@@ -177,7 +179,6 @@
         <span class="px-3 py-2 border border-fv-noir/10 text-fv-noir/30 cursor-not-allowed">←</span>
       {% endif %}
 
-      {# Номери сторінок #}
       {% for num in paginator.page_range %}
         {% if num == page_obj.number %}
           <span class="px-3 py-2 bg-fv-noir text-white border border-fv-noir" aria-current="page">{{ num }}</span>
@@ -189,7 +190,6 @@
         {% endif %}
       {% endfor %}
 
-      {# → Наступна #}
       {% if page_obj.has_next %}
         <a href="?{% query_transform page=page_obj.next_page_number %}"
            class="px-3 py-2 border border-fv-noir/20 text-fv-noir hover:bg-fv-noir hover:text-white transition-colors"
@@ -242,7 +242,7 @@
       >
         <div class="flex justify-between items-center px-6 py-4 border-b border-fv-noir/10">
           <span class="font-mono text-xs uppercase tracking-widest text-fv-slate" x-text="modalDish.category"></span>
-          <button @click="closeModal()" class="text-fv-slate hover:text-fv-noir transition-colors">
+          <button @click="closeModal()" class="text-fv-slate hover:text-fv-noir transition-colors" aria-label="Закрити">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
             </svg>

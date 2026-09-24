@@ -44,7 +44,7 @@
           {{ total_quantity|default:0 }} од.
         </span>
       </div>
-      <button type="button" @click="closeDrawer()" class="p-1.5 hover:bg-fv-offwhite text-fv-noir transition-colors text-base font-mono">
+      <button type="button" @click="closeDrawer()" class="p-1.5 hover:bg-fv-offwhite text-fv-noir transition-colors text-base font-mono" aria-label="Закрити кошик">
         ✕
       </button>
     </div>
@@ -101,20 +101,23 @@
                             hx-vals='{"quantity": {{ item.quantity|add:"-1" }}}'
                             hx-target="#cart-drawer-container"
                             hx-swap="outerHTML"
-                            class="px-2 py-0.5 hover:bg-fv-offwhite text-fv-noir font-mono">-</button>
+                            class="px-2 py-0.5 hover:bg-fv-offwhite text-fv-noir font-mono"
+                            aria-label="Зменшити кількість">-</button>
                     <span class="px-2 py-0.5 font-bold">{{ item.quantity }}</span>
                     <button type="button"
                             hx-post="{% url 'orders:cart_update' item.id %}"
                             hx-vals='{"quantity": {{ item.quantity|add:"1" }}}'
                             hx-target="#cart-drawer-container"
                             hx-swap="outerHTML"
-                            class="px-2 py-0.5 hover:bg-fv-offwhite text-fv-noir font-mono">+</button>
+                            class="px-2 py-0.5 hover:bg-fv-offwhite text-fv-noir font-mono"
+                            aria-label="Збільшити кількість">+</button>
                   </div>
                   <button type="button"
                           hx-post="{% url 'orders:cart_remove' item.id %}"
                           hx-target="#cart-drawer-container"
                           hx-swap="outerHTML"
-                          class="text-fv-slate hover:text-red-600 text-xs font-mono">✕</button>
+                          class="text-fv-slate hover:text-red-600 text-xs font-mono"
+                          aria-label="Видалити страву">✕</button>
                 </div>
               </div>
             </div>

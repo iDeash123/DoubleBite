@@ -4,11 +4,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}Double Bite™ — Авторська доставка їжі та ресторанний сервіс{% endblock %}</title>
+  <title>{% block meta_title %}{% block title %}Double Bite™ — Авторська доставка їжі та ресторанний сервіс{% endblock %}{% endblock %}</title>
   <meta name="description" content="{% block meta_description %}Преміальна доставка авторських ресторанних страв Double Bite: архітектурний мінімалізм, натуральні добірні інгредієнти та інтелектуальний AI-консьєрж 24/7.{% endblock %}">
 
   {% block canonical %}
   <link rel="canonical" href="{% block canonical_url %}{{ request.scheme }}://{{ request.get_host }}{{ request.path }}{% endblock %}">
+  {% endblock %}
+
+  {% block og_tags %}
+  <meta property="og:title" content="{% block og_title %}Double Bite™ — Авторська доставка їжі та ресторанний сервіс{% endblock %}">
+  <meta property="og:description" content="{% block og_description %}Преміальна доставка авторських ресторанних страв Double Bite: архітектурний мінімалізм, натуральні добірні інгредієнти та інтелектуальний AI-консьєрж 24/7.{% endblock %}">
+  <meta property="og:image" content="{% block og_image %}{{ request.scheme }}://{{ request.get_host }}{% static 'favicon/favicon.png' %}{% endblock %}">
+  <meta property="og:type" content="{% block og_type %}website{% endblock %}">
+  <meta property="og:url" content="{% block og_url %}{{ request.build_absolute_uri }}{% endblock %}">
+  <meta property="og:locale" content="uk_UA">
   {% endblock %}
 
   <link rel="icon" type="image/x-icon" href="{% static 'favicon/favicon.ico' %}">
@@ -38,6 +47,7 @@
     });
   </script>
   {% block extra_head %}{% endblock %}
+  {% block structured_data %}{% endblock %}
 </head>
 <body class="bg-fv-offwhite text-fv-noir font-sans antialiased selection:bg-fv-noir selection:text-white relative min-h-screen flex flex-col">
   <div style="display:none">{% csrf_token %}</div>
@@ -96,6 +106,7 @@
             onclick="toggleGrid()"
             class="border-r border-fv-noir/20 flex items-center justify-center hover:bg-fv-offwhite transition-colors text-fv-noir"
             title="12-колонкова сітка"
+            aria-label="12-колонкова сітка"
           >
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -108,6 +119,7 @@
               href="{% url 'accounts:profile' %}"
               class="border-r border-fv-noir/20 flex items-center justify-center hover:bg-fv-offwhite transition-colors text-fv-noir relative"
               title="Особистий кабінет"
+              aria-label="Особистий кабінет"
             >
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
@@ -120,6 +132,7 @@
               href="{% url 'accounts:login' %}"
               class="border-r border-fv-noir/20 flex items-center justify-center hover:bg-fv-offwhite transition-colors text-fv-noir"
               title="Увійти"
+              aria-label="Увійти"
             >
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
@@ -135,6 +148,7 @@
             onclick="window.dispatchEvent(new CustomEvent('open-cart-drawer'))"
             class="flex items-center justify-center hover:bg-fv-offwhite transition-colors text-fv-noir relative gap-1 cursor-pointer"
             title="Кошик"
+            aria-label="Кошик"
           >
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
@@ -154,16 +168,16 @@
         </a>
 
         <div class="flex items-center gap-2 text-xs font-mono">
-          <button onclick="toggleGrid()" class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite" title="Сітка">
+          <button onclick="toggleGrid()" class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite" title="Сітка" aria-label="12-колонкова сітка">
             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
 
           {% if user.is_authenticated %}
-            <a href="{% url 'accounts:profile' %}" class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite" title="Профіль">
+            <a href="{% url 'accounts:profile' %}" class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite" title="Профіль" aria-label="Особистий кабінет">
               <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             </a>
           {% else %}
-            <a href="{% url 'accounts:login' %}" class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite" title="Увійти">
+            <a href="{% url 'accounts:login' %}" class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite" title="Увійти" aria-label="Увійти">
               <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
             </a>
           {% endif %}
@@ -174,6 +188,7 @@
             onclick="window.dispatchEvent(new CustomEvent('open-cart-drawer'))"
             class="flex items-center gap-1 px-2 py-1 border border-fv-noir/20 text-fv-noir cursor-pointer"
             title="Кошик"
+            aria-label="Кошик"
           >
             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/></svg>
             <span id="cart-badge-mobile" class="inline-flex items-center justify-center min-w-[18px] h-4.5 px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
@@ -181,7 +196,7 @@
             </span>
           </button>
 
-          <button @click="mobileOpen = !mobileOpen" class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite">
+          <button @click="mobileOpen = !mobileOpen" class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite" aria-label="Меню навігації">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
         </div>

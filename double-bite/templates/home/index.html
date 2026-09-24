@@ -1,6 +1,29 @@
 {% extends "base.html" %}
 {% load static %}
 
+{% block title %}Double Bite — Онлайн-замовлення їжі з доставкою | Піца, суші, бургери, салати{% endblock %}
+{% block meta_title %}Double Bite — Онлайн-замовлення їжі з доставкою | Піца, суші, бургери, салати{% endblock %}
+{% block meta_description %}Преміальна доставка авторських ресторанних страв Double Bite: архітектурний мінімалізм, натуральні добірні інгредієнти та інтелектуальний AI-консьєрж 24/7.{% endblock %}
+{% block og_title %}Double Bite — Онлайн-замовлення їжі з доставкою | Піца, суші, бургери, салати{% endblock %}
+{% block og_description %}Преміальна доставка авторських ресторанних страв Double Bite: архітектурний мінімалізм, натуральні добірні інгредієнти та інтелектуальний AI-консьєрж 24/7.{% endblock %}
+
+{% block structured_data %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Restaurant",
+  "name": "Double Bite",
+  "servesCuisine": ["Піца", "Суші та Сети", "Бургери", "Паста", "Салати"],
+  "address": {
+    "@type": "PostalAddress",
+    "addressLocality": "Київ",
+    "addressCountry": "UA"
+  },
+  "url": "{{ request.scheme }}://{{ request.get_host }}"
+}
+</script>
+{% endblock %}
+
 {% block content %}
   {% include "home/partials/hero_showcase.html" %}
   {% include "home/partials/live_ticker.html" %}

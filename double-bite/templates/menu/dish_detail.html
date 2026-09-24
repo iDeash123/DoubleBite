@@ -1,8 +1,39 @@
 {% extends "base.html" %}
-{% load l10n %}
+{% load l10n static %}
 
 {% block title %}{{ dish.title }} — {{ dish.price }} грн | Double Bite™{% endblock %}
+{% block meta_title %}{{ dish.title }} — {{ dish.price }} грн | Double Bite™{% endblock %}
 {% block meta_description %}{{ dish.description|default:dish.title|truncatewords:25 }} Доставка авторських страв Double Bite у Києві.{% endblock %}
+
+{% block canonical_url %}{{ request.scheme }}://{{ request.get_host }}{{ dish.get_absolute_url }}{% endblock %}
+
+{% block og_title %}{{ dish.title }} — Double Bite{% endblock %}
+{% block og_description %}{{ dish.description|default:dish.title|truncatewords:25 }}{% endblock %}
+{% block og_image %}{% if dish.image %}{% if '://' in dish.image.url %}{{ dish.image.url }}{% else %}{{ request.scheme }}://{{ request.get_host }}{{ dish.image.url }}{% endif %}{% else %}{{ request.scheme }}://{{ request.get_host }}{% static 'favicon/favicon.png' %}{% endif %}{% endblock %}
+{% block og_url %}{{ request.scheme }}://{{ request.get_host }}{{ dish.get_absolute_url }}{% endblock %}
+
+{% block structured_data %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Product",
+  "name": "{{ dish.title|escapejs }}",
+  "description": "{{ dish.description|default:dish.title|escapejs }}",
+  "url": "{{ request.scheme }}://{{ request.get_host }}{{ dish.get_absolute_url }}",
+  "image": "{% if dish.image %}{% if '://' in dish.image.url %}{{ dish.image.url }}{% else %}{{ request.scheme }}://{{ request.get_host }}{{ dish.image.url }}{% endif %}{% else %}{{ request.scheme }}://{{ request.get_host }}{% static 'favicon/favicon.png' %}{% endif %}",
+  "offers": {
+    "@type": "Offer",
+    "price": "{{ dish.price|unlocalize }}",
+    "priceCurrency": "UAH",
+    "availability": "{% if dish.is_available %}https://schema.org/InStock{% else %}https://schema.org/OutOfStock{% endif %}"
+  },
+  "nutrition": {
+    "@type": "NutritionInformation",
+    "calories": "{{ dish.calories }} cal"
+  }
+}
+</script>
+{% endblock %}
 
 {% block content %}
 <div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-8 sm:py-12"
@@ -50,6 +81,8 @@
           <img
             src="{% if dish.image.url %}{{ dish.image.url }}{% else %}{{ dish.image }}{% endif %}"
             alt="{{ dish.title }}"
+            loading="lazy"
+            decoding="async"
             class="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-700"
           >
         {% else %}
@@ -160,6 +193,7 @@
               type="button"
               @click="decrement()"
               class="w-10 h-12 flex items-center justify-center text-fv-noir hover:bg-fv-offwhite transition-colors text-base font-mono"
+              aria-label="Зменшити кількість"
             >
               -
             </button>
@@ -168,6 +202,7 @@
               type="button"
               @click="increment()"
               class="w-10 h-12 flex items-center justify-center text-fv-noir hover:bg-fv-offwhite transition-colors text-base font-mono"
+              aria-label="Збільшити кількість"
             >
               +
             </button>
