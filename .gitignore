@@ -33,6 +33,8 @@ secrets/
 staticfiles/
 media/
 static/images/*
+double-bite/menu/management/commands/*
+snapshots/*
 
 
 .DS_Store
