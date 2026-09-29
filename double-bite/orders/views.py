@@ -155,6 +155,15 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
 
     cart = CartService.get_cart(request)
     if not cart or not cart.items.exists():
+        recent_order = _find_recent_pending_order(request)
+        if recent_order:
+            messages.info(
+                request,
+                f'Ваше замовлення {recent_order.order_number} вже оформлено. '
+                f'Ви можете відстежити його статус.',
+            )
+            return redirect('orders:tracking', order_number=recent_order.order_number)
+
         messages.warning(request, 'Кошик порожній. Додайте страви для оформлення замовлення.')
         return redirect('orders:cart')
 
@@ -174,23 +183,34 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
         form = OrderCheckoutForm(request.POST)
         if form.is_valid():
             try:
+                payment_method = form.cleaned_data['payment_method']
+                is_stripe_payment = payment_method in (
+                    PaymentMethod.ONLINE, PaymentMethod.STRIPE, 'ONLINE', 'STRIPE',
+                )
+
                 order = OrderService.create_order_from_cart(
                     request=request,
                     customer_name=form.cleaned_data['customer_name'],
                     customer_phone=form.cleaned_data['customer_phone'],
                     delivery_address=form.cleaned_data['delivery_address'],
-                    payment_method=form.cleaned_data['payment_method'],
+                    payment_method=payment_method,
                     notes=form.cleaned_data.get('notes', ''),
                     create_stripe_session=False,
                 )
-                if order.payment_method in (PaymentMethod.ONLINE, PaymentMethod.STRIPE, 'ONLINE', 'STRIPE'):
+
+                if is_stripe_payment:
                     try:
                         session = StripeService.create_checkout_session(order, request=request)
                         if session and getattr(session, 'url', None):
                             return redirect(session.url)
                     except (stripe.StripeError, ValueError) as e:
                         logger.error("Error creating Stripe checkout session: %s", e)
-                        messages.warning(request, 'Не вдалося перенаправити на оплату Stripe. Спробуйте пізніше.')
+                        messages.warning(
+                            request,
+                            f'Замовлення {order.order_number} створено, але не вдалося '
+                            f'перенаправити на оплату. Ви можете оплатити на сторінці замовлення.',
+                        )
+                        return redirect('orders:tracking', order_number=order.order_number)
 
                 messages.success(request, f'Замовлення {order.order_number} успішно оформлено!')
                 return redirect('orders:tracking', order_number=order.order_number)
@@ -220,6 +240,41 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
         'total_quantity': total_quantity,
     }
     return render(request, 'orders/checkout.html', context)
+
+
+def _find_recent_pending_order(request: HttpRequest) -> Order | None:
+    """Find a recent order for the current user/session to redirect to instead of empty cart."""
+    import datetime
+
+    from django.utils import timezone
+
+    cutoff = timezone.now() - datetime.timedelta(minutes=30)
+
+    if request.user.is_authenticated:
+        return (
+            Order.objects.filter(
+                user=request.user,
+                created_at__gte=cutoff,
+                status__in=(OrderStatus.PENDING, OrderStatus.PAID),
+            )
+            .order_by('-created_at')
+            .first()
+        )
+
+    session_key = getattr(request.session, 'session_key', None)
+    if session_key:
+        return (
+            Order.objects.filter(
+                session_key=session_key,
+                user__isnull=True,
+                created_at__gte=cutoff,
+                status__in=(OrderStatus.PENDING, OrderStatus.PAID),
+            )
+            .order_by('-created_at')
+            .first()
+        )
+
+    return None
 
 
 def _user_can_cancel_order(request: HttpRequest, order: Order) -> bool:

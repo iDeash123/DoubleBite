@@ -197,14 +197,25 @@ class CartService:
     @classmethod
     def merge_guest_cart(cls, request: HttpRequest, user: Any) -> None:
         guest_cart = None
+
         cart_id = request.session.get('guest_cart_id')
         if cart_id:
             guest_cart = Cart.objects.filter(id=cart_id, user__isnull=True).first()
 
         if not guest_cart:
+            cart_id_from_mw = getattr(request, '_pre_login_guest_cart_id', None)
+            if cart_id_from_mw:
+                guest_cart = Cart.objects.filter(id=cart_id_from_mw, user__isnull=True).first()
+
+        if not guest_cart:
             pre_key = request.session.get('_pre_login_session_key')
             if pre_key:
                 guest_cart = Cart.objects.filter(session_key=pre_key, user__isnull=True).first()
+
+        if not guest_cart:
+            pre_key_from_mw = getattr(request, '_pre_login_session_key', None)
+            if pre_key_from_mw:
+                guest_cart = Cart.objects.filter(session_key=pre_key_from_mw, user__isnull=True).first()
 
         if not guest_cart:
             session_key = getattr(request.session, 'session_key', None)
