@@ -304,6 +304,46 @@ class OAuthCallbackLoginTest(TestCase):
         social_acc = SocialAccount.objects.get(uid='github-uid-4004')
         self.assertEqual(social_acc.user, existing_user)
 
+    def test_social_login_rejects_auto_connect_for_unverified_local_user(self):
+        existing_user = User.objects.create_user(
+            email='unverified.victim@doublebite.ua',
+            password='VictimPassword123!',
+        )
+        EmailAddress.objects.create(
+            user=existing_user,
+            email=existing_user.email,
+            verified=False,
+            primary=True,
+        )
+
+        request = self._create_request()
+        adapter = get_adapter(request)
+        provider = adapter.get_provider(request, GoogleProvider.id)
+
+        account = SocialAccount(
+            provider=provider.id,
+            uid='google-hijack-attempt',
+            extra_data={'email': 'unverified.victim@doublebite.ua'},
+        )
+        sociallogin = SocialLogin(
+            user=User(email='unverified.victim@doublebite.ua'),
+            account=account,
+        )
+        sociallogin.provider = provider
+        sociallogin.email_addresses = [
+            EmailAddress(
+                email='unverified.victim@doublebite.ua',
+                verified=True,
+                primary=True,
+            )
+        ]
+
+        with request_context(request):
+            complete_social_login(request, sociallogin)
+
+        self.assertNotEqual(request.session.get('_auth_user_id'), str(existing_user.pk))
+        self.assertFalse(SocialAccount.objects.filter(uid='google-hijack-attempt', user=existing_user).exists())
+
     def test_google_oauth_from_response_creates_user(self):
         request = self._create_request()
         adapter = get_adapter(request)

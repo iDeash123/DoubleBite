@@ -442,7 +442,7 @@ def stripe_webhook_view(request: HttpRequest) -> HttpResponse:
 def stripe_checkout_view(request: HttpRequest, order_number: str) -> HttpResponse:
     order = get_object_or_404(Order, order_number=order_number)
     if not user_can_view_order(request, order):
-        raise Http404('Замовлення не знайдено.')
+        return HttpResponseForbidden('У вас немає доступу до цього замовлення.')
 
     if order.status == OrderStatus.CANCELLED:
         messages.error(request, 'Це замовлення було скасовано.')

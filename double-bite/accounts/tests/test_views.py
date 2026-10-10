@@ -297,3 +297,60 @@ class AddressDeleteViewTest(TestCase):
         response = self.client.post(reverse('accounts:delete_address', kwargs={'pk': self.address1.pk}))
         self.assertEqual(response.status_code, 404)
         self.assertTrue(DeliveryAddress.objects.filter(pk=self.address1.pk).exists())
+
+
+class AccountsSecurityAndRateLimitTest(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client = Client()
+
+    def tearDown(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def test_register_rate_limited_after_10_attempts(self):
+        payload = {
+            'email': 'ratelimit@doublebite.ua',
+            'password': 'Password123!',
+            'password_confirm': 'Mismatch123!',
+        }
+        for _ in range(10):
+            self.client.post(reverse('accounts:register'), payload, HTTP_X_FORWARDED_FOR='198.51.100.1')
+        response = self.client.post(reverse('accounts:register'), payload, HTTP_X_FORWARDED_FOR='198.51.100.1')
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Забагато спроб реєстрації')
+
+    def test_login_rate_limited_after_5_failed_attempts(self):
+        payload = {'email': 'nobody@doublebite.ua', 'password': 'wrongpassword'}
+        for _ in range(5):
+            self.client.post(reverse('accounts:login'), payload, HTTP_X_FORWARDED_FOR='198.51.100.2')
+        response = self.client.post(reverse('accounts:login'), payload, HTTP_X_FORWARDED_FOR='198.51.100.2')
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Забагато невдалих спроб входу')
+
+    def test_password_reset_rate_limited_after_5_attempts(self):
+        payload = {'email': 'reset@doublebite.ua'}
+        for _ in range(5):
+            self.client.post(reverse('accounts:password_reset'), payload, HTTP_X_FORWARDED_FOR='198.51.100.3')
+        response = self.client.post(reverse('accounts:password_reset'), payload, HTTP_X_FORWARDED_FOR='198.51.100.3')
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Забагато запитів на скидання пароля')
+
+    def test_profile_post_validation_error_preserves_orders_in_context(self):
+        from orders.models import Order
+        user = User.objects.create_user(email='profileuser@doublebite.ua', password='password123')
+        Order.objects.create(
+            user=user,
+            customer_name='Profile User',
+            customer_phone='+380501112233',
+            delivery_address='Kyiv',
+            total_amount=150,
+        )
+        self.client.force_login(user)
+        response = self.client.post(reverse('accounts:profile'), {'action': 'add_address'})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('orders', response.context)
+        self.assertEqual(len(response.context['orders']), 1)
+
+

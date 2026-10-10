@@ -56,8 +56,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         from accounts.models import DeliveryAddress, User
-        from menu.models import Category, Dish, DishOption
         from orders.models import Cart, CartItem, Order, OrderItem
+
+        from menu.models import Category, Dish, DishOption
 
         snapshot_path = Path(options["snapshot"])
         if not snapshot_path.exists():
@@ -211,7 +212,7 @@ class Command(BaseCommand):
             # Убираем поля которые не нужно восстанавливать
             clean = {k: v for k, v in row.items() if k not in skip_fields}
 
-            obj, was_created = Dish.objects.update_or_create(
+            _obj, was_created = Dish.objects.update_or_create(
                 pk=pk,
                 defaults=clean,
             )
@@ -234,7 +235,6 @@ class Command(BaseCommand):
             if pk is None:
                 continue
 
-            email = row.get("email", "")
             is_superuser = row.get("is_superuser", False)
 
             # Не трогаем существующих суперпользователей

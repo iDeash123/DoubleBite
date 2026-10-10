@@ -19,12 +19,11 @@ Management command: dump_snapshot
 """
 
 import json
-import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
 
 
 def _default(obj):
@@ -62,8 +61,9 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         # Импорты здесь, чтобы не падать при collectstatic и т.д.
         from accounts.models import DeliveryAddress, User
-        from menu.models import Category, Dish, DishOption
         from orders.models import Cart, CartItem, Order, OrderItem
+
+        from menu.models import Category, Dish, DishOption
 
         # --- Определяем папку для сохранения ---
         if options["output"]:
@@ -78,7 +78,7 @@ class Command(BaseCommand):
         snapshots_dir.mkdir(parents=True, exist_ok=True)
 
         # --- Формируем имя файла ---
-        ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
         tag = f"_{options['tag']}" if options["tag"] else ""
         filename = f"snapshot_{ts}{tag}.json"
         filepath = snapshots_dir / filename
@@ -108,7 +108,7 @@ class Command(BaseCommand):
         # --- Мета-информация ---
         snapshot = {
             "_meta": {
-                "created_at": datetime.now(tz=timezone.utc).isoformat(),
+                "created_at": datetime.now(tz=UTC).isoformat(),
                 "tag": options["tag"] or None,
                 "counts": {
                     "categories": len(categories),
