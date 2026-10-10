@@ -198,6 +198,16 @@ class CheckoutAndTrackingTest(TestCase):
         )
 
         tracking_url = reverse('orders:tracking', kwargs={'order_number': order.order_number})
+        unauth_response = self.client.get(tracking_url)
+        self.assertEqual(unauth_response.status_code, 404)
+
+        token_response = self.client.get(f"{tracking_url}?t={order.access_token}")
+        self.assertEqual(token_response.status_code, 200)
+        self.assertTemplateUsed(token_response, 'orders/tracking.html')
+        self.assertIn(order.order_number, token_response.content.decode('utf-8'))
+        self.assertIn(order.masked_customer_phone, token_response.content.decode('utf-8'))
+
+        self.client.force_login(self.user)
         response = self.client.get(tracking_url)
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'orders/tracking.html')
@@ -223,7 +233,7 @@ class CheckoutAndTrackingTest(TestCase):
         cancel_url = reverse('orders:order_cancel', kwargs={'order_number': order.order_number})
 
         attacker_resp = self.client.post(cancel_url)
-        self.assertEqual(attacker_resp.status_code, 403)
+        self.assertEqual(attacker_resp.status_code, 404)
         order.refresh_from_db()
         self.assertEqual(order.status, OrderStatus.PENDING)
 

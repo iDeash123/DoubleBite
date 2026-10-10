@@ -8,6 +8,9 @@ from django.urls import reverse
 
 def get_tracking_url(order: Any, domain: str | None = None, protocol: str = 'https') -> str:
     path = reverse('orders:tracking', kwargs={'order_number': order.order_number})
+    token = getattr(order, 'access_token', None)
+    if token:
+        path = f"{path}?t={token}"
     effective_domain = domain or getattr(settings, 'SITE_DOMAIN', None)
     if not effective_domain and getattr(settings, 'ALLOWED_HOSTS', None):
         allowed = [h for h in settings.ALLOWED_HOSTS if h and '*' not in h and h != '0.0.0.0']

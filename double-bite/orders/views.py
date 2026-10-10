@@ -1,5 +1,6 @@
 import logging
 import os
+import secrets
 from decimal import Decimal
 
 import stripe
@@ -9,8 +10,9 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
-from django.http import HttpRequest, HttpResponse, HttpResponseForbidden
+from django.http import Http404, HttpRequest, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
@@ -198,6 +200,13 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
                     create_stripe_session=False,
                 )
 
+                request.session[f'order_token_{order.pk}'] = order.access_token
+                request.session.modified = True
+
+                redirect_url = reverse('orders:tracking', kwargs={'order_number': order.order_number})
+                if not request.user.is_authenticated:
+                    redirect_url = f"{redirect_url}?t={order.access_token}"
+
                 if is_stripe_payment:
                     try:
                         session = StripeService.create_checkout_session(order, request=request)
@@ -210,10 +219,10 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
                             f'Замовлення {order.order_number} створено, але не вдалося '
                             f'перенаправити на оплату. Ви можете оплатити на сторінці замовлення.',
                         )
-                        return redirect('orders:tracking', order_number=order.order_number)
+                        return redirect(redirect_url)
 
                 messages.success(request, f'Замовлення {order.order_number} успішно оформлено!')
-                return redirect('orders:tracking', order_number=order.order_number)
+                return redirect(redirect_url)
             except (CartEmptyError, OrderMinimumAmountError, ValidationError) as e:
                 form.add_error(None, str(e))
     else:
@@ -277,28 +286,44 @@ def _find_recent_pending_order(request: HttpRequest) -> Order | None:
     return None
 
 
+def user_can_view_order(request: HttpRequest, order: Order) -> bool:
+    u = request.user
+    if u.is_authenticated and (u.is_superuser or getattr(u, 'role', None) == Role.RESTAURANT_ADMIN):
+        return True
+    if u.is_authenticated and order.user_id == u.id:
+        return True
+    token = request.GET.get('t') or request.session.get(f'order_token_{order.pk}')
+    if token and getattr(order, 'access_token', None) and secrets.compare_digest(str(token), str(order.access_token)):
+        return True
+    return bool(
+        order.session_key
+        and request.session.session_key
+        and order.user_id is None
+        and (
+            order.session_key == request.session.session_key
+            or order.session_key == request.session.get('_pre_login_session_key')
+        )
+    )
+
+
 def _user_can_cancel_order(request: HttpRequest, order: Order) -> bool:
     if order.status not in (OrderStatus.PENDING, OrderStatus.PAID):
         return False
-    if request.user.is_authenticated:
-        return bool(
-            order.user_id == request.user.id
-            or request.user.is_superuser
-            or getattr(request.user, 'role', None) == Role.RESTAURANT_ADMIN
-        )
-    if order.session_key and request.session.session_key:
-        return bool(order.user_id is None and order.session_key == request.session.session_key)
-    return False
+    return user_can_view_order(request, order)
 
 
 def tracking_view(request: HttpRequest, order_number: str) -> HttpResponse:
     order = get_object_or_404(Order.objects.prefetch_related('items'), order_number=order_number)
+    if not user_can_view_order(request, order):
+        raise Http404('Замовлення не знайдено.')
     can_cancel = _user_can_cancel_order(request, order)
     return render(request, 'orders/tracking.html', {'order': order, 'can_cancel': can_cancel})
 
 
 def tracking_status_view(request: HttpRequest, order_number: str) -> HttpResponse:
     order = get_object_or_404(Order.objects.prefetch_related('items'), order_number=order_number)
+    if not user_can_view_order(request, order):
+        raise Http404('Замовлення не знайдено.')
     can_cancel = _user_can_cancel_order(request, order)
     return render_partial_or_full(
         request,
@@ -310,21 +335,10 @@ def tracking_status_view(request: HttpRequest, order_number: str) -> HttpRespons
 @require_POST
 def order_cancel_view(request: HttpRequest, order_number: str) -> HttpResponse:
     order = get_object_or_404(Order, order_number=order_number)
+    if not user_can_view_order(request, order):
+        raise Http404('Замовлення не знайдено.')
 
-    is_admin = bool(
-        request.user.is_authenticated
-        and (
-            request.user.is_superuser
-            or getattr(request.user, 'role', None) == Role.RESTAURANT_ADMIN
-        )
-    )
-    is_owner = False
-    if request.user.is_authenticated:
-        is_owner = bool(order.user_id == request.user.id)
-    elif order.session_key and request.session.session_key:
-        is_owner = bool(order.user_id is None and order.session_key == request.session.session_key)
-
-    if not (is_admin or is_owner):
+    if not _user_can_cancel_order(request, order):
         return HttpResponseForbidden('Ви не маєте прав для скасування цього замовлення.')
 
     if order.status in (OrderStatus.PENDING, OrderStatus.PAID):
@@ -427,22 +441,8 @@ def stripe_webhook_view(request: HttpRequest) -> HttpResponse:
 
 def stripe_checkout_view(request: HttpRequest, order_number: str) -> HttpResponse:
     order = get_object_or_404(Order, order_number=order_number)
-    has_access = False
-    if request.user.is_authenticated:
-        has_access = bool(
-            request.user.is_superuser
-            or getattr(request.user, 'role', None) == Role.RESTAURANT_ADMIN
-            or (order.user_id and order.user_id == request.user.id)
-            or (order.user_id is None and order.session_key and (
-                order.session_key == request.session.session_key
-                or order.session_key == request.session.get('_pre_login_session_key')
-            ))
-        )
-    elif order.user_id is None and order.session_key and request.session.session_key:
-        has_access = bool(order.session_key == request.session.session_key)
-
-    if not has_access:
-        return HttpResponseForbidden('У вас немає доступу до цього замовлення.')
+    if not user_can_view_order(request, order):
+        raise Http404('Замовлення не знайдено.')
 
     if order.status == OrderStatus.CANCELLED:
         messages.error(request, 'Це замовлення було скасовано.')

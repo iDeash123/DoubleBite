@@ -1,13 +1,17 @@
+import logging
+import secrets
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from menu.models import Dish
 
 from .exceptions import InvalidStatusTransitionError
+
+logger = logging.getLogger('orders')
 
 
 class OrderStatus(models.TextChoices):
@@ -201,6 +205,14 @@ class Order(models.Model):
         blank=True,
         db_index=True,
     )
+    access_token = models.CharField(
+        'Токен доступу',
+        max_length=64,
+        unique=True,
+        editable=False,
+        default=secrets.token_urlsafe,
+        db_index=True,
+    )
     customer_name = models.CharField("Ім'я клієнта", max_length=100)
     customer_phone = models.CharField('Телефон клієнта', max_length=20)
     delivery_address = models.TextField('Адреса доставки')
@@ -253,18 +265,34 @@ class Order(models.Model):
         verbose_name_plural = 'Замовлення'
         ordering = ('-created_at',)
 
+    @property
+    def masked_customer_phone(self) -> str:
+        phone = self.customer_phone or ''
+        digits = [c for c in phone if c.isdigit()]
+        if len(digits) >= 10:
+            last2 = ''.join(digits[-2:])
+            return f"+380 •• ••• •• {last2}"
+        if len(phone) > 4:
+            return phone[:2] + '•' * (len(phone) - 4) + phone[-2:]
+        return phone
+
     def can_transition_to(self, target_status: str) -> bool:
         return target_status in ALLOWED_TRANSITIONS.get(self.status, set())
 
     def transition_to(self, target_status: str) -> None:
-        if not self.can_transition_to(target_status):
-            raise InvalidStatusTransitionError(
-                f"Неприпустимий перехід статусу з {self.status} до {target_status}."
-            )
-        self.status = target_status
-        if target_status == OrderStatus.PAID and self.payment_status != PaymentStatus.PAID:
-            self.payment_status = PaymentStatus.COMPLETED
-        self.save(update_fields=['status', 'payment_status', 'updated_at'])
+        with transaction.atomic():
+            locked_order = Order.objects.select_for_update().get(pk=self.pk)
+            if not locked_order.can_transition_to(target_status):
+                raise InvalidStatusTransitionError(
+                    f"Неприпустимий перехід статусу з {locked_order.status} до {target_status}."
+                )
+            locked_order.status = target_status
+            if target_status == OrderStatus.PAID and locked_order.payment_status != PaymentStatus.PAID:
+                locked_order.payment_status = PaymentStatus.COMPLETED
+            locked_order.save(update_fields=['status', 'payment_status', 'updated_at'])
+            self.status = locked_order.status
+            self.payment_status = locked_order.payment_status
+            self.updated_at = locked_order.updated_at
 
         if target_status in (
             OrderStatus.PREPARING,
@@ -277,7 +305,7 @@ class Order(models.Model):
 
                 send_order_status_update_email(self)
             except Exception:
-                pass
+                logger.exception('Помилка надсилання сповіщення про зміну статусу замовлення')
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         is_new = self.pk is None
@@ -337,3 +365,14 @@ class OrderItem(models.Model):
         qty = self.quantity or 0
         price_str = f"{self.price} грн" if self.price is not None else '0.00 грн'
         return f"{dish_title} x {qty} ({price_str})"
+
+
+class ProcessedStripeEvent(models.Model):
+    event_id = models.CharField('ID події Stripe', max_length=255, unique=True, db_index=True)
+    event_type = models.CharField('Тип події', max_length=100)
+    created_at = models.DateTimeField('Створено', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Оброблена подія Stripe'
+        verbose_name_plural = 'Оброблені події Stripe'
+        ordering = ('-created_at',)
