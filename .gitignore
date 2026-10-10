@@ -32,18 +32,15 @@ secrets/
 
 staticfiles/
 media/
-static/images/*
-double-bite/menu/management/commands/*
 snapshots/*
 
+transfer_package/
+*.sql
+*.dump
 
 .DS_Store
 Thumbs.db
 
 docker/data/
-
-*/migrations/*.py
-!*/migrations/__init__.py
-!*/migrations/
 
 instructions/*
