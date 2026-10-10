@@ -122,7 +122,7 @@ uv run uvicorn config.asgi:application --app-dir double-bite --reload --port 800
 
 ## AI-чатбот підтримки
 
-Чатбот працює на **Mistral AI** (`mistral-small-latest`) з автоматичним fallback на **Gemini Flash**. Відповіді стрімяться через ASGI + SSE. Мова відповіді визначається автоматично за повідомленням клієнта.
+Чатбот працює на **Mistral AI** (`mistral-small-latest`). Відповіді стрімяться через ASGI + SSE. Мова відповіді визначається автоматично за повідомленням клієнта.
 
 ```mermaid
 flowchart TD

@@ -19,31 +19,10 @@ try:
 except (ImportError, AttributeError):
     from mistralai.client import Mistral
 
-from google import genai
-from google.genai import types as genai_types
-
 logger = logging.getLogger('support')
 
 MAX_RETRIES = 3
-RETRY_BASE_DELAY = 2  # seconds; delays will be 2, 4, 8 …
-
-
-# ---------------------------------------------------------------------------
-# Gemini tool-schema converter
-# ---------------------------------------------------------------------------
-
-def _mistral_tools_to_gemini() -> list[genai_types.Tool]:
-    """Convert SUPPORT_AGENT_TOOLS (OpenAI/Mistral format) → Gemini format."""
-    declarations: list[genai_types.FunctionDeclaration] = []
-    for tool_def in SUPPORT_AGENT_TOOLS:
-        fn = tool_def['function']
-        params_schema = fn.get('parameters', {})
-        declarations.append(genai_types.FunctionDeclaration(
-            name=fn['name'],
-            description=fn.get('description', ''),
-            parameters=params_schema if params_schema.get('properties') else None,
-        ))
-    return [genai_types.Tool(function_declarations=declarations)]
+RETRY_BASE_DELAY = 2
 
 
 class MistralSupportAgent:
@@ -53,8 +32,6 @@ class MistralSupportAgent:
         model: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
-        gemini_api_key: str | None = None,
-        gemini_model: str | None = None,
     ):
         if api_key is not None:
             self.api_key = api_key
@@ -75,20 +52,6 @@ class MistralSupportAgent:
             max_tokens
             if max_tokens is not None
             else os.getenv('MISTRAL_MAX_TOKENS', '1024')
-        )
-
-        if gemini_api_key is not None:
-            self.gemini_api_key = gemini_api_key
-        else:
-            self.gemini_api_key = (
-                os.getenv('GEMINI_API_KEY')
-                or getattr(settings, 'GEMINI_API_KEY', '')
-                or ''
-            )
-        self.gemini_model = (
-            gemini_model
-            or getattr(settings, 'GEMINI_MODEL', '')
-            or os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
         )
 
     @staticmethod
@@ -119,8 +82,8 @@ class MistralSupportAgent:
         request: HttpRequest | None = None,
         session: ChatSession | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
-        if not self.api_key and not self.gemini_api_key:
-            logger.warning('Neither MISTRAL_API_KEY nor GEMINI_API_KEY is configured.')
+        if not self.api_key:
+            logger.warning('MISTRAL_API_KEY is not configured.')
             yield {
                 'token': (
                     'Вибачте, асистент тимчасово недоступний (відсутній ключ доступу). '
@@ -140,26 +103,12 @@ class MistralSupportAgent:
             content = msg.get('content', '')
             messages.append({'role': role, 'content': content})
 
-        # --- Try Mistral first ---
-        if self.api_key:
-            try:
-                async for chunk in self._stream_mistral(messages, request, session):
-                    yield chunk
-                return
-            except Exception:
-                logger.warning('Mistral API unavailable or rate limited, falling back to Gemini…')
-
-        if self.gemini_api_key:
-            yielded_any = False
-            try:
-                async for chunk in self._stream_gemini(messages, request, session):
-                    yielded_any = True
-                    yield chunk
-                return
-            except Exception:
-                logger.exception('Gemini API error')
-                if yielded_any:
-                    return
+        try:
+            async for chunk in self._stream_mistral(messages, request, session):
+                yield chunk
+            return
+        except Exception:
+            logger.exception('Mistral API error')
 
         yield {
             'error': (
@@ -280,120 +229,6 @@ class MistralSupportAgent:
                         if content:
                             yield {'token': content}
 
-    # ------------------------------------------------------------------
-    # Gemini fallback backend
-    # ------------------------------------------------------------------
-
-    async def _stream_gemini(
-        self,
-        messages: list[dict[str, Any]],
-        request: HttpRequest | None,
-        session: ChatSession | None,
-    ) -> AsyncGenerator[dict[str, Any], None]:
-        client = genai.Client(api_key=self.gemini_api_key)
-
-        system_content = next(
-            (msg['content'] for msg in messages if msg.get('role') == 'system'),
-            SYSTEM_PROMPT,
-        )
-
-        # Build Gemini contents list (system instruction is separate)
-        gemini_contents: list[genai_types.Content] = []
-        for msg in messages:
-            role = msg['role']
-            if role == 'system':
-                continue  # handled via system_instruction
-            gemini_role = 'model' if role == 'assistant' else 'user'
-            gemini_contents.append(genai_types.Content(
-                role=gemini_role,
-                parts=[genai_types.Part(text=msg['content'])],
-            ))
-
-        gemini_tools = _mistral_tools_to_gemini()
-
-        config = genai_types.GenerateContentConfig(
-            system_instruction=system_content,
-            tools=gemini_tools,
-            automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
-            temperature=self.temperature,
-            thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
-        )
-
-        response = await client.aio.models.generate_content(
-            model=self.gemini_model,
-            contents=gemini_contents,
-            config=config,
-        )
-
-        if not getattr(response, 'candidates', None):
-            return
-
-        candidate = response.candidates[0]
-        parts = candidate.content.parts if candidate.content and candidate.content.parts else []
-        function_calls = [
-            part for part in parts
-            if getattr(part, 'function_call', None) is not None
-        ]
-
-        if function_calls:
-            gemini_contents.append(candidate.content)
-
-            function_responses: list[genai_types.Part] = []
-
-            for fc_part in function_calls:
-                fc = fc_part.function_call
-                fn_name = fc.name
-                args = dict(fc.args) if fc.args else {}
-
-                tool_res = await sync_to_async(execute_agent_tool, thread_sensitive=True)(
-                    fn_name, args, request=request, session=session
-                )
-
-                if fn_name == 'escalate_to_operator':
-                    yield {
-                        'escalated': True,
-                        'ticket_id': tool_res.get('ticket_id'),
-                        'support_phone': tool_res.get('support_phone', '+380 44 123 45 67'),
-                    }
-
-                if fn_name in ('add_to_cart', 'remove_from_cart', 'update_cart_quantity') and tool_res.get('success'):
-                    yield {
-                        'cart_mutation': True,
-                        'cart_items_count': tool_res.get('cart_items_count', 0),
-                        'total_amount': tool_res.get('total_amount', 0.0),
-                        'action': tool_res.get('action'),
-                        'dish_id': tool_res.get('dish_id'),
-                    }
-
-                function_responses.append(genai_types.Part(
-                    function_response=genai_types.FunctionResponse(
-                        name=fn_name,
-                        response=tool_res,
-                    )
-                ))
-
-            gemini_contents.append(genai_types.Content(
-                role='user',
-                parts=function_responses,
-            ))
-
-            final_config = genai_types.GenerateContentConfig(
-                system_instruction=system_content,
-                temperature=self.temperature,
-                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
-            )
-            stream = await client.aio.models.generate_content_stream(
-                model=self.gemini_model,
-                contents=gemini_contents,
-                config=final_config,
-            )
-            async for chunk in stream:
-                if chunk.text:
-                    yield {'token': chunk.text}
-        else:
-            text = ''.join(getattr(part, 'text', '') or '' for part in parts)
-            if text:
-                yield {'token': text}
 
     # ------------------------------------------------------------------
     # Retry helper (Mistral only)
