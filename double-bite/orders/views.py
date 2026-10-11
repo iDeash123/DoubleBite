@@ -23,7 +23,7 @@ from .exceptions import (
     OrderMinimumAmountError,
 )
 from .forms import OrderCheckoutForm
-from .models import Order, OrderStatus, PaymentMethod, PaymentStatus
+from .models import Order, OrderStatus, PaymentMethod, PaymentStatus, ProcessedStripeEvent
 from .services import CartService, OrderService, StripeService
 
 logger = logging.getLogger('orders')
@@ -422,6 +422,11 @@ def stripe_webhook_view(request: HttpRequest) -> HttpResponse:
         logger.error('Unexpected error in Stripe webhook verification: %s', e)
         return HttpResponse('Webhook verification failed', status=400)
 
+    event_id = getattr(event, 'id', None) or (event.get('id') if isinstance(event, dict) else None)
+    if event_id and ProcessedStripeEvent.objects.filter(event_id=event_id).exists():
+        logger.info('Stripe event already processed: %s', event_id)
+        return HttpResponse(status=200)
+
     event_type = getattr(event, 'type', None) or (event.get('type') if isinstance(event, dict) else None)
     data_object = None
     if hasattr(event, 'data') and hasattr(event.data, 'object'):
@@ -435,6 +440,12 @@ def stripe_webhook_view(request: HttpRequest) -> HttpResponse:
         StripeService.handle_payment_failed(data_object)
     elif event_type == 'charge.refunded' and data_object:
         StripeService.handle_charge_refunded(data_object)
+
+    if event_id:
+        ProcessedStripeEvent.objects.get_or_create(
+            event_id=event_id,
+            defaults={'event_type': event_type or ''},
+        )
 
     return HttpResponse(status=200)
 

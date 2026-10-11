@@ -270,7 +270,7 @@ class StripeService:
         line_items = []
         for item in order.items.select_related('dish').all():
             price = item.price if item.price is not None else Decimal('0.00')
-            unit_amount = int(price * 100)
+            unit_amount = int((price * 100).quantize(Decimal(1)))
             if unit_amount > 0:
                 line_items.append({
                     'price_data': {
@@ -284,7 +284,7 @@ class StripeService:
                 })
 
         if not line_items:
-            fallback_amount = int((order.total_amount or Decimal('0.00')) * 100)
+            fallback_amount = int(((order.total_amount or Decimal('0.00')) * 100).quantize(Decimal(1)))
             if fallback_amount > 0:
                 line_items.append({
                     'price_data': {
@@ -334,7 +334,7 @@ class StripeService:
         if order.user and getattr(order.user, 'email', None):
             session_params['customer_email'] = order.user.email
 
-        session = stripe.checkout.Session.create(**session_params)
+        session = stripe.checkout.Session.create(api_key=secret_key, **session_params)
         session_id = _get_val(session, 'id')
         if session_id:
             order.stripe_session_id = session_id
@@ -342,11 +342,17 @@ class StripeService:
         return session
 
     @classmethod
+    @transaction.atomic
     def handle_checkout_session_completed(
         cls,
         session: Any,
         target_status: str | None = None,
     ) -> Order | None:
+        payment_status = _get_val(session, 'payment_status')
+        if payment_status != 'paid':
+            logger.warning("Checkout session payment status is not paid: %s", payment_status)
+            return None
+
         client_ref = _get_val(session, 'client_reference_id')
         session_id = _get_val(session, 'id')
         metadata = _get_val(session, 'metadata') or {}
@@ -356,13 +362,13 @@ class StripeService:
         order_id = _get_val(metadata, 'order_id')
 
         order = None
-        if order_number:
-            order = Order.objects.filter(order_number=order_number).first()
-        if not order and session_id:
-            order = Order.objects.filter(stripe_session_id=session_id).first()
+        if session_id:
+            order = Order.objects.select_for_update().filter(stripe_session_id=session_id).first()
+        if not order and order_number:
+            order = Order.objects.select_for_update().filter(order_number=order_number).first()
         if not order and order_id:
             try:
-                order = Order.objects.filter(id=int(order_id)).first()
+                order = Order.objects.select_for_update().filter(id=int(order_id)).first()
             except (ValueError, TypeError):
                 pass
 
@@ -374,6 +380,23 @@ class StripeService:
                 order_id,
             )
             return None
+
+        if order.payment_status in (PaymentStatus.PAID, PaymentStatus.COMPLETED):
+            return order
+
+        amount_total = _get_val(session, 'amount_total')
+        currency = _get_val(session, 'currency')
+        if amount_total is not None:
+            expected_cents = int(((order.total_amount or Decimal('0.00')) * 100).quantize(Decimal(1)))
+            if int(amount_total) != expected_cents or (currency and str(currency).lower() != 'uah'):
+                logger.error(
+                    "Amount or currency mismatch for %s: session=%s/%s, expected=%s/uah",
+                    order.order_number,
+                    amount_total,
+                    currency,
+                    expected_cents,
+                )
+                return None
 
         update_fields = ['payment_status', 'updated_at']
         if session_id and not order.stripe_session_id:
@@ -416,6 +439,7 @@ class StripeService:
         return order
 
     @classmethod
+    @transaction.atomic
     def handle_payment_failed(cls, payment_intent: Any) -> Order | None:
         payment_intent_id = _get_val(payment_intent, 'id')
         metadata = _get_val(payment_intent, 'metadata') or {}
@@ -424,16 +448,28 @@ class StripeService:
 
         order = None
         if payment_intent_id:
-            order = Order.objects.filter(stripe_payment_intent_id=payment_intent_id).first()
+            order = Order.objects.select_for_update().filter(stripe_payment_intent_id=payment_intent_id).first()
         if not order and order_number:
-            order = Order.objects.filter(order_number=order_number).first()
+            order = Order.objects.select_for_update().filter(order_number=order_number).first()
         if not order and order_id:
             try:
-                order = Order.objects.filter(id=int(order_id)).first()
+                order = Order.objects.select_for_update().filter(id=int(order_id)).first()
             except (ValueError, TypeError):
                 pass
 
         if order:
+            if order.payment_status in (
+                PaymentStatus.PAID,
+                PaymentStatus.COMPLETED,
+                PaymentStatus.REFUNDED,
+                PaymentStatus.PARTIALLY_REFUNDED,
+            ):
+                logger.warning(
+                    "Ignoring payment failed webhook for order %s with payment_status=%s",
+                    order.order_number,
+                    order.payment_status,
+                )
+                return order
             order.payment_status = PaymentStatus.FAILED
             update_fields = ['payment_status', 'updated_at']
             if payment_intent_id and not order.stripe_payment_intent_id:
@@ -447,6 +483,7 @@ class StripeService:
         return None
 
     @classmethod
+    @transaction.atomic
     def handle_charge_refunded(cls, charge: Any) -> Order | None:
         payment_intent = _get_val(charge, 'payment_intent')
         pi_id = payment_intent if isinstance(payment_intent, str) else _get_val(payment_intent, 'id')
@@ -455,14 +492,21 @@ class StripeService:
 
         order = None
         if pi_id:
-            order = Order.objects.filter(stripe_payment_intent_id=str(pi_id)).first()
+            order = Order.objects.select_for_update().filter(stripe_payment_intent_id=str(pi_id)).first()
         if not order and order_number:
-            order = Order.objects.filter(order_number=order_number).first()
+            order = Order.objects.select_for_update().filter(order_number=order_number).first()
 
         if order:
-            order.payment_status = PaymentStatus.REFUNDED
+            refunded = _get_val(charge, 'refunded')
+            amount = _get_val(charge, 'amount') or 0
+            amount_refunded = _get_val(charge, 'amount_refunded') or 0
+            if refunded is True or (amount > 0 and amount_refunded >= amount):
+                order.payment_status = PaymentStatus.REFUNDED
+            else:
+                order.payment_status = PaymentStatus.PARTIALLY_REFUNDED
+
             order.save(update_fields=['payment_status', 'updated_at'])
-            logger.info("Order %s marked as refunded via Stripe webhook", order.order_number)
+            logger.info("Order %s marked as %s via Stripe webhook", order.order_number, order.payment_status)
             try:
                 from orders.emails import send_refund_notice_email
 
@@ -574,6 +618,37 @@ class OrderService:
         return order
 
     @classmethod
+    @transaction.atomic
     def cancel_order(cls, order: Order) -> None:
-        order.transition_to(OrderStatus.CANCELLED)
+        locked_order = Order.objects.select_for_update().get(pk=order.pk)
+        if locked_order.status == OrderStatus.CANCELLED:
+            return
+
+        locked_order.transition_to(OrderStatus.CANCELLED)
+
+        if locked_order.payment_status in (PaymentStatus.PAID, PaymentStatus.COMPLETED):
+            secret_key = StripeService.get_stripe_secret_key()
+            if locked_order.stripe_payment_intent_id and secret_key:
+                try:
+                    stripe.Refund.create(
+                        payment_intent=locked_order.stripe_payment_intent_id,
+                        api_key=secret_key,
+                    )
+                    locked_order.payment_status = PaymentStatus.REFUNDED
+                except Exception as e:
+                    logger.error(
+                        "Failed to refund Stripe payment for cancelled order %s: %s",
+                        locked_order.order_number,
+                        e,
+                    )
+                    locked_order.requires_manual_refund = True
+                    note = "[Потребує ручного повернення коштів через Stripe]"
+                    locked_order.notes = f"{locked_order.notes}\n{note}".strip() if locked_order.notes else note
+            else:
+                locked_order.requires_manual_refund = True
+                note = "[Потребує ручного повернення коштів через Stripe]"
+                locked_order.notes = f"{locked_order.notes}\n{note}".strip() if locked_order.notes else note
+
+        locked_order.save(update_fields=['payment_status', 'requires_manual_refund', 'notes', 'updated_at'])
+        order.refresh_from_db()
 

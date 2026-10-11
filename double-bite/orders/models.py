@@ -36,6 +36,7 @@ class PaymentStatus(models.TextChoices):
     COMPLETED = 'COMPLETED', 'Оплачено'
     FAILED = 'FAILED', 'Помилка оплати'
     REFUNDED = 'REFUNDED', 'Повернено'
+    PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED', 'Частково повернено'
 
 
 
@@ -257,6 +258,10 @@ class Order(models.Model):
         default=30,
     )
     notes = models.TextField('Коментар до замовлення', blank=True)
+    requires_manual_refund = models.BooleanField(
+        'Потребує ручного повернення коштів',
+        default=False,
+    )
     created_at = models.DateTimeField('Створено', auto_now_add=True)
     updated_at = models.DateTimeField('Оновлено', auto_now=True)
 
@@ -376,3 +381,6 @@ class ProcessedStripeEvent(models.Model):
         verbose_name = 'Оброблена подія Stripe'
         verbose_name_plural = 'Оброблені події Stripe'
         ordering = ('-created_at',)
+
+    def __str__(self) -> str:
+        return f"{self.event_type}: {self.event_id}"

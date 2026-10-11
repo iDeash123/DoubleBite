@@ -193,6 +193,9 @@ class OrderEmailNotificationTests(TestCase):
 
         session_payload = {
             'id': 'cs_test_session_123',
+            'payment_status': 'paid',
+            'amount_total': 50000,
+            'currency': 'uah',
             'client_reference_id': order.order_number,
             'payment_intent': 'pi_test_receipt_789',
             'customer_details': {'email': self.user.email},
@@ -255,6 +258,9 @@ class OrderEmailNotificationTests(TestCase):
 
         session_payload = {
             'id': 'cs_test_guest_session',
+            'payment_status': 'paid',
+            'amount_total': 30000,
+            'currency': 'uah',
             'client_reference_id': order.order_number,
             'payment_intent': 'pi_test_guest_pi',
             'customer_details': {'email': 'guest_stripe_user@example.com'},

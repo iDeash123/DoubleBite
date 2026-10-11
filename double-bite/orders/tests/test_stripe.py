@@ -14,8 +14,9 @@ from orders.models import (
     OrderStatus,
     PaymentMethod,
     PaymentStatus,
+    ProcessedStripeEvent,
 )
-from orders.services import StripeService
+from orders.services import OrderService, StripeService
 
 User = get_user_model()
 
@@ -159,6 +160,9 @@ class StripeServiceTest(TestCase):
 
         session_data = {
             'id': 'cs_test_webhook_001',
+            'payment_status': 'paid',
+            'amount_total': 56000,
+            'currency': 'uah',
             'client_reference_id': self.order.order_number,
             'payment_intent': 'pi_3MtwBwLkdIwHu7ix28a3tqPa',
             'metadata': {'order_number': self.order.order_number, 'order_id': str(self.order.id)},
@@ -179,6 +183,9 @@ class StripeServiceTest(TestCase):
 
         session_data = {
             'id': 'cs_test_preparing_001',
+            'payment_status': 'paid',
+            'amount_total': 56000,
+            'currency': 'uah',
             'client_reference_id': self.order.order_number,
             'payment_intent': 'pi_preparing_123',
             'metadata': {'order_number': self.order.order_number},
@@ -211,6 +218,137 @@ class StripeServiceTest(TestCase):
         self.assertIsNotNone(updated)
         self.order.refresh_from_db()
         self.assertEqual(self.order.payment_status, PaymentStatus.FAILED)
+
+    def test_handle_checkout_session_unpaid_returns_none(self):
+        self.order.stripe_session_id = 'cs_test_unpaid'
+        self.order.save()
+
+        session_data = {
+            'id': 'cs_test_unpaid',
+            'payment_status': 'unpaid',
+            'client_reference_id': self.order.order_number,
+            'metadata': {'order_number': self.order.order_number},
+        }
+        result = StripeService.handle_checkout_session_completed(session_data)
+        self.assertIsNone(result)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, PaymentStatus.PENDING)
+
+    def test_handle_checkout_session_amount_mismatch_returns_none(self):
+        self.order.stripe_session_id = 'cs_test_mismatch'
+        self.order.save()
+
+        session_data = {
+            'id': 'cs_test_mismatch',
+            'payment_status': 'paid',
+            'amount_total': 10000,
+            'currency': 'uah',
+            'client_reference_id': self.order.order_number,
+            'metadata': {'order_number': self.order.order_number},
+        }
+        result = StripeService.handle_checkout_session_completed(session_data)
+        self.assertIsNone(result)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, PaymentStatus.PENDING)
+
+    def test_handle_checkout_session_currency_mismatch_returns_none(self):
+        self.order.stripe_session_id = 'cs_test_currency'
+        self.order.save()
+
+        session_data = {
+            'id': 'cs_test_currency',
+            'payment_status': 'paid',
+            'amount_total': 56000,
+            'currency': 'usd',
+            'client_reference_id': self.order.order_number,
+            'metadata': {'order_number': self.order.order_number},
+        }
+        result = StripeService.handle_checkout_session_completed(session_data)
+        self.assertIsNone(result)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, PaymentStatus.PENDING)
+
+    def test_handle_checkout_session_idempotent_if_already_paid(self):
+        self.order.stripe_session_id = 'cs_test_idempotent'
+        self.order.payment_status = PaymentStatus.PAID
+        self.order.status = OrderStatus.PAID
+        self.order.save()
+
+        session_data = {
+            'id': 'cs_test_idempotent',
+            'payment_status': 'paid',
+            'amount_total': 56000,
+            'currency': 'uah',
+            'client_reference_id': self.order.order_number,
+        }
+        result = StripeService.handle_checkout_session_completed(session_data)
+        self.assertEqual(result.id, self.order.id)
+
+    def test_handle_payment_failed_does_not_overwrite_paid_or_refunded_order(self):
+        self.order.stripe_payment_intent_id = 'pi_already_paid'
+        self.order.payment_status = PaymentStatus.PAID
+        self.order.save()
+
+        payment_intent = {
+            'id': 'pi_already_paid',
+            'metadata': {'order_number': self.order.order_number},
+        }
+        updated = StripeService.handle_payment_failed(payment_intent)
+        self.order.refresh_from_db()
+        self.assertEqual(updated.id, self.order.id)
+        self.assertEqual(self.order.payment_status, PaymentStatus.PAID)
+
+    def test_handle_charge_refunded_partial_status(self):
+        self.order.stripe_payment_intent_id = 'pi_partial_refund'
+        self.order.payment_status = PaymentStatus.PAID
+        self.order.save()
+
+        charge = {
+            'payment_intent': 'pi_partial_refund',
+            'refunded': False,
+            'amount': 56000,
+            'amount_refunded': 20000,
+            'metadata': {'order_number': self.order.order_number},
+        }
+        updated = StripeService.handle_charge_refunded(charge)
+        self.assertEqual(updated.payment_status, PaymentStatus.PARTIALLY_REFUNDED)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, PaymentStatus.PARTIALLY_REFUNDED)
+
+    @override_settings(STRIPE_SECRET_KEY='sk_test_fake_secret_key')
+    @patch('stripe.Refund.create')
+    def test_cancel_order_triggers_stripe_refund_for_paid_order(self, mock_refund_create):
+        self.order.status = OrderStatus.PAID
+        self.order.payment_status = PaymentStatus.PAID
+        self.order.stripe_payment_intent_id = 'pi_to_refund_123'
+        self.order.save()
+
+        OrderService.cancel_order(self.order)
+
+        mock_refund_create.assert_called_once_with(
+            payment_intent='pi_to_refund_123',
+            api_key='sk_test_fake_secret_key',
+        )
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.CANCELLED)
+        self.assertEqual(self.order.payment_status, PaymentStatus.REFUNDED)
+        self.assertFalse(self.order.requires_manual_refund)
+
+    @override_settings(STRIPE_SECRET_KEY='sk_test_fake_secret_key')
+    @patch('stripe.Refund.create')
+    def test_cancel_order_marks_manual_refund_when_stripe_refund_fails(self, mock_refund_create):
+        mock_refund_create.side_effect = stripe.StripeError('Stripe API error')
+        self.order.status = OrderStatus.PAID
+        self.order.payment_status = PaymentStatus.PAID
+        self.order.stripe_payment_intent_id = 'pi_fail_refund_123'
+        self.order.save()
+
+        OrderService.cancel_order(self.order)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.CANCELLED)
+        self.assertTrue(self.order.requires_manual_refund)
+        self.assertIn('ручного повернення', self.order.notes)
 
 
 class StripeCheckoutFlowTest(TestCase):
@@ -533,10 +671,14 @@ class StripeWebhookTest(TestCase):
         self.order.save()
 
         mock_event = {
+            'id': 'evt_wh_completed_123',
             'type': 'checkout.session.completed',
             'data': {
                 'object': {
                     'id': 'cs_wh_test_123',
+                    'payment_status': 'paid',
+                    'amount_total': 45000,
+                    'currency': 'uah',
                     'client_reference_id': self.order.order_number,
                     'payment_intent': 'pi_test_intent_999',
                     'metadata': {
@@ -560,6 +702,7 @@ class StripeWebhookTest(TestCase):
         self.assertEqual(self.order.payment_status, PaymentStatus.PAID)
         self.assertIn(self.order.status, [OrderStatus.PAID, OrderStatus.PREPARING])
         self.assertEqual(self.order.stripe_payment_intent_id, 'pi_test_intent_999')
+        self.assertTrue(ProcessedStripeEvent.objects.filter(event_id='evt_wh_completed_123').exists())
 
     @override_settings(STRIPE_WEBHOOK_SECRET='whsec_test_secret')
     @patch('stripe.Webhook.construct_event')
@@ -568,6 +711,7 @@ class StripeWebhookTest(TestCase):
         self.order.save()
 
         mock_event = {
+            'id': 'evt_wh_failed_123',
             'type': 'payment_intent.payment_failed',
             'data': {
                 'object': {
@@ -596,10 +740,14 @@ class StripeWebhookTest(TestCase):
         self.order.save()
 
         mock_event = {
+            'id': 'evt_wh_async_123',
             'type': 'checkout.session.async_payment_succeeded',
             'data': {
                 'object': {
                     'id': 'cs_wh_async_123',
+                    'payment_status': 'paid',
+                    'amount_total': 45000,
+                    'currency': 'uah',
                     'client_reference_id': self.order.order_number,
                     'payment_intent': 'pi_async_999',
                     'metadata': {'order_number': self.order.order_number},
@@ -627,10 +775,14 @@ class StripeWebhookTest(TestCase):
         self.order.save()
 
         mock_event = {
+            'id': 'evt_wh_refund_123',
             'type': 'charge.refunded',
             'data': {
                 'object': {
                     'payment_intent': 'pi_refund_123',
+                    'refunded': True,
+                    'amount': 45000,
+                    'amount_refunded': 45000,
                     'metadata': {'order_number': self.order.order_number},
                 }
             },
@@ -647,6 +799,30 @@ class StripeWebhookTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.order.refresh_from_db()
         self.assertEqual(self.order.payment_status, PaymentStatus.REFUNDED)
+
+    @override_settings(STRIPE_WEBHOOK_SECRET='whsec_test_secret')
+    @patch('stripe.Webhook.construct_event')
+    def test_webhook_idempotency_prevents_duplicate_processing(self, mock_construct):
+        ProcessedStripeEvent.objects.create(
+            event_id='evt_duplicate_test',
+            event_type='checkout.session.completed',
+        )
+        mock_event = {
+            'id': 'evt_duplicate_test',
+            'type': 'checkout.session.completed',
+            'data': {'object': {}},
+        }
+        mock_construct.return_value = mock_event
+
+        with patch('orders.services.StripeService.handle_checkout_session_completed') as mock_handle:
+            response = self.client.post(
+                self.webhook_url,
+                data=json.dumps(mock_event),
+                content_type='application/json',
+                HTTP_STRIPE_SIGNATURE='t=123,v1=valid_sig',
+            )
+            self.assertEqual(response.status_code, 200)
+            mock_handle.assert_not_called()
 
     @override_settings(STRIPE_WEBHOOK_SECRET='whsec_test_secret')
     @patch('stripe.Webhook.construct_event')

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Cart, CartItem, Order, OrderItem
+from .models import Cart, CartItem, Order, OrderItem, ProcessedStripeEvent
 
 
 class OrderItemInline(admin.TabularInline):
@@ -19,10 +19,11 @@ class OrderAdmin(admin.ModelAdmin):
         'status',
         'payment_method',
         'payment_status',
+        'requires_manual_refund',
         'total_amount',
         'created_at',
     )
-    list_filter = ('status', 'payment_method', 'payment_status', 'created_at')
+    list_filter = ('status', 'payment_method', 'payment_status', 'requires_manual_refund', 'created_at')
     search_fields = (
         'order_number',
         'customer_name',
@@ -40,6 +41,13 @@ class OrderAdmin(admin.ModelAdmin):
         'updated_at',
     )
     inlines = (OrderItemInline,)
+
+
+@admin.register(ProcessedStripeEvent)
+class ProcessedStripeEventAdmin(admin.ModelAdmin):
+    list_display = ('event_id', 'event_type', 'created_at')
+    search_fields = ('event_id', 'event_type')
+    readonly_fields = ('event_id', 'event_type', 'created_at')
 
 
 class CartItemInline(admin.TabularInline):
