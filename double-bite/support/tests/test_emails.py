@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core.cache import cache
 from django.test import RequestFactory, TestCase
 from orders.models import Order
 
@@ -15,6 +16,7 @@ User = get_user_model()
 
 class TicketEscalationEmailTests(TestCase):
     def setUp(self):
+        cache.clear()
         self.factory = RequestFactory()
         self.user = User.objects.create_user(
             email='supportuser@example.com',

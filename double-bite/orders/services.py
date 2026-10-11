@@ -4,7 +4,9 @@ from decimal import Decimal
 from typing import Any
 
 import stripe
+from accounts.models import Role
 from django.conf import settings
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Sum
 from django.http import HttpRequest
@@ -108,6 +110,17 @@ class CartService:
         option_id: int | None = None,
         selected_options: list[dict[str, Any]] | None = None,
     ) -> CartItem:
+        if (
+            hasattr(request, 'user')
+            and request.user.is_authenticated
+            and not request.user.is_superuser
+            and getattr(request.user, 'role', None) in (
+                Role.RESTAURANT_ADMIN,
+                Role.COURIER,
+            )
+        ):
+            raise PermissionDenied('Персонал ресторану не може замовляти страви через клієнтський кошик.')
+
         if quantity <= 0:
             quantity = 1
         quantity = min(quantity, 99)

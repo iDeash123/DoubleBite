@@ -1,5 +1,6 @@
 from typing import Any
 
+from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest
 from menu.models import Dish
 from menu.selectors import search_dishes_for_agent
@@ -15,23 +16,23 @@ from support.services import (
 
 
 def _find_dish(dish_id: int | None = None, dish_name: str | None = None) -> Dish | None:
-    if dish_id:
-        d = Dish.objects.filter(id=int(dish_id)).first()
-        if d:
-            return d
+    if dish_id is not None:
+        try:
+            d = Dish.objects.filter(id=int(dish_id)).first()
+            if d:
+                return d
+        except (ValueError, TypeError):
+            pass
     if dish_name and isinstance(dish_name, str):
         name = dish_name.strip()
         if not name:
             return None
-        # 1. Exact match
         d = Dish.objects.filter(title__iexact=name).first()
         if d:
             return d
-        # 2. Contains match
         d = Dish.objects.filter(title__icontains=name).first()
         if d:
             return d
-        # 3. Keyword match (skip generic category words)
         stop_words = {'піца', 'рол', 'бургер', 'салат', 'боул', 'сет', 'десерт', 'та', 'і', 'з', 'в', 'для', 'на'}
         keywords = [w for w in name.split() if len(w) > 2 and w.lower() not in stop_words]
         for kw in keywords:
@@ -280,9 +281,10 @@ def execute_agent_tool(
 
     elif tool_name == "escalate_to_operator":
         reason = arguments.get("reason", TicketReason.HUMAN_REQUESTED)
-        details = arguments.get("details", "Клієнт звернувся за допомогою оператора.")
-        order_id = arguments.get("order_id")
-        customer_phone = arguments.get("customer_phone", "")
+        details = str(arguments.get("details") or "Клієнт звернувся за допомогою оператора.")[:1000]
+        order_id_raw = arguments.get("order_id")
+        order_id = int(order_id_raw) if str(order_id_raw).isdigit() else None
+        customer_phone = str(arguments.get("customer_phone") or "")
 
         order = None
         if order_id and request:
@@ -320,10 +322,19 @@ def execute_agent_tool(
         if request is None:
             return {"error": "Неможливо оновити кошик: сесія не знайдена."}
 
-        dish_id = arguments.get("dish_id")
+        dish_id_raw = arguments.get("dish_id")
+        dish_id = int(dish_id_raw) if str(dish_id_raw).isdigit() else None
         dish_name = arguments.get("dish_name")
-        quantity = int(arguments.get("quantity") or 1)
-        option_id = arguments.get("option_id")
+        try:
+            quantity = int(arguments.get("quantity") or 1)
+        except (ValueError, TypeError):
+            quantity = 1
+        if quantity <= 0:
+            quantity = 1
+        quantity = min(quantity, 99)
+
+        option_id_raw = arguments.get("option_id")
+        option_id = int(option_id_raw) if str(option_id_raw).isdigit() else None
 
         dish = _find_dish(dish_id=dish_id, dish_name=dish_name)
         if not dish:
@@ -356,6 +367,8 @@ def execute_agent_tool(
                 "cart_items_count": items_count,
                 "message": f"Страву «{item.dish.title}» ({quantity} шт.) успішно додано до кошика."
             }
+        except PermissionDenied as e:
+            return {"error": str(e)}
         except DishUnavailableError as e:
             return {"error": str(e)}
         except (ValueError, KeyError, TypeError) as e:
@@ -369,9 +382,11 @@ def execute_agent_tool(
         if not cart or cart.items.count() == 0:
             return {"error": "Ваш кошик наразі порожній, немає страв для зміни кількості."}
 
-        item_id = arguments.get("item_id")
-        dish_id = arguments.get("dish_id")
+        item_id_raw = arguments.get("item_id")
+        dish_id_raw = arguments.get("dish_id")
         dish_name = arguments.get("dish_name")
+        item_id = int(item_id_raw) if str(item_id_raw).isdigit() else None
+        dish_id = int(dish_id_raw) if str(dish_id_raw).isdigit() else None
         try:
             quantity = int(arguments.get("quantity", 0))
         except (ValueError, TypeError):
@@ -379,9 +394,9 @@ def execute_agent_tool(
 
         target_item = None
         if item_id:
-            target_item = cart.items.filter(id=int(item_id)).first()
+            target_item = cart.items.filter(id=item_id).first()
         if not target_item and dish_id:
-            target_item = cart.items.filter(dish_id=int(dish_id)).first()
+            target_item = cart.items.filter(dish_id=dish_id).first()
         if not target_item and dish_name:
             name = str(dish_name).strip()
             target_item = cart.items.filter(dish__title__iexact=name).first()
@@ -430,9 +445,11 @@ def execute_agent_tool(
         if request is None:
             return {"error": "Неможливо оновити кошик: сесія не знайдена."}
 
-        item_id = arguments.get("item_id")
-        dish_id = arguments.get("dish_id")
+        item_id_raw = arguments.get("item_id")
+        dish_id_raw = arguments.get("dish_id")
         dish_name = arguments.get("dish_name")
+        item_id = int(item_id_raw) if str(item_id_raw).isdigit() else None
+        dish_id = int(dish_id_raw) if str(dish_id_raw).isdigit() else None
 
         cart = CartService.get_cart(request)
         if not cart or cart.items.count() == 0:
@@ -440,9 +457,9 @@ def execute_agent_tool(
 
         target_item = None
         if item_id:
-            target_item = cart.items.filter(id=int(item_id)).first()
+            target_item = cart.items.filter(id=item_id).first()
         if not target_item and dish_id:
-            target_item = cart.items.filter(dish_id=int(dish_id)).first()
+            target_item = cart.items.filter(dish_id=dish_id).first()
         if not target_item and dish_name:
             name = str(dish_name).strip()
             target_item = cart.items.filter(dish__title__iexact=name).first() or cart.items.filter(dish__title__icontains=name).first()

@@ -3,6 +3,7 @@ import re
 import uuid
 from typing import Any
 
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Q
 from django.http import HttpRequest
@@ -149,29 +150,50 @@ class ChatSessionService:
         order: Order | None = None,
         customer_phone: str = '',
     ) -> SupportTicket:
+        existing_ticket = SupportTicket.objects.filter(
+            session=session,
+            status__in=[TicketStatus.OPEN, TicketStatus.IN_PROGRESS],
+        ).first()
+        if existing_ticket:
+            return existing_ticket
+
+        cooldown_key = f'escalation_cooldown:{session.pk}'
+        if cache.get(cooldown_key):
+            recent_ticket = SupportTicket.objects.filter(session=session).order_by('-created_at').first()
+            if recent_ticket:
+                return recent_ticket
+
         valid_reasons = {choice[0] for choice in TicketReason.choices}
         normalized_reason = reason if reason in valid_reasons else TicketReason.HUMAN_REQUESTED
+        cleaned_details = str(details or '')[:1000]
 
         with transaction.atomic():
             session.is_escalated = True
             session.status = ChatSessionStatus.ESCALATED
-            session.escalation_reason = details
+            session.escalation_reason = cleaned_details
             session.save(update_fields=['is_escalated', 'status', 'escalation_reason', 'updated_at'])
 
-            phone = customer_phone.strip()
+            phone = str(customer_phone or '').strip()
             if not phone and session.user and hasattr(session.user, 'phone'):
                 phone = session.user.phone or ''
             if not phone and order:
                 phone = order.customer_phone or ''
+
+            clean_digits = re.sub(r'[\s\-\(\)]', '', phone)
+            if not re.match(r'^\+?[0-9]{7,15}$', clean_digits):
+                phone = ''
+            else:
+                phone = phone[:20]
 
             ticket = SupportTicket.objects.create(
                 session=session,
                 order=order,
                 customer_phone=phone,
                 reason=normalized_reason,
-                details=details,
+                details=cleaned_details,
                 status=TicketStatus.OPEN,
             )
+            cache.set(cooldown_key, True, timeout=60)
             try:
                 from support.emails import send_ticket_escalated_email
 
@@ -186,11 +208,7 @@ def validate_order_access(order: Order, request: HttpRequest) -> bool:
         return order.user_id == request.user.id
 
     session_key = request.session.session_key or ''
-    if order.session_key and session_key and order.session_key == session_key:
-        return True
-
-    session_phone = request.session.get('guest_phone')
-    return bool(session_phone and order.customer_phone and session_phone == order.customer_phone)
+    return bool(order.session_key and session_key and order.session_key == session_key)
 
 
 def check_order_status_for_request(

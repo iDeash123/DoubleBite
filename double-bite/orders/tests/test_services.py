@@ -203,3 +203,16 @@ class CartServiceTest(TestCase):
         cart = CartService.get_cart(req)
         self.assertEqual(cart.items.count(), 1)
         self.assertEqual(cart.items.first().quantity, 5)
+
+    def test_cart_service_add_dish_forbidden_for_staff(self):
+        from accounts.models import Role
+        from django.core.exceptions import PermissionDenied
+
+        courier_user = User.objects.create_user(
+            email='courier@doublebite.ua',
+            password='StrongPassword123!',
+            role=Role.COURIER,
+        )
+        req = self._get_request(user=courier_user)
+        with self.assertRaises(PermissionDenied):
+            CartService.add_dish(req, dish_id=self.dish1.id, quantity=1)

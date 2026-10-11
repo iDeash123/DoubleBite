@@ -1,6 +1,7 @@
 import uuid
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import RequestFactory, TestCase
 from orders.models import Order, OrderStatus
 
@@ -20,6 +21,7 @@ User = get_user_model()
 
 class SessionIsolationAndIdorTest(TestCase):
     def setUp(self):
+        cache.clear()
         self.factory = RequestFactory()
 
         self.user_a = User.objects.create_user(

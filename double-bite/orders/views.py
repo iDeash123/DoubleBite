@@ -9,7 +9,7 @@ from config.partials import render_partial_or_full
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -84,6 +84,8 @@ def cart_add_view(request: HttpRequest, dish_id: int) -> HttpResponse:
             quantity=quantity,
             option_id=option_id,
         )
+    except PermissionDenied as e:
+        return HttpResponseForbidden(str(e))
     except DishUnavailableError as e:
         if request.headers.get('HX-Request'):
             return HttpResponse(str(e), status=400)

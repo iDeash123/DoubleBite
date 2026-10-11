@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import RequestFactory, TestCase
 from menu.models import Category, Dish
 from orders.models import Order, OrderStatus
@@ -14,6 +15,7 @@ User = get_user_model()
 
 class AgentToolsTest(TestCase):
     def setUp(self):
+        cache.clear()
         self.factory = RequestFactory()
         self.user = User.objects.create_user(
             email='tools_user@example.com',
@@ -187,3 +189,78 @@ class AgentToolsTest(TestCase):
     def test_unknown_tool_returns_error(self):
         result = execute_agent_tool('make_coffee', {})
         self.assertIn('error', result)
+
+    def test_escalate_to_operator_throttled_to_single_open_ticket(self):
+        req = self._get_request(self.user)
+        res1 = execute_agent_tool(
+            'escalate_to_operator',
+            {'reason': TicketReason.COMPLAINT, 'details': 'Перша скарга'},
+            request=req,
+            session=self.session,
+        )
+        res2 = execute_agent_tool(
+            'escalate_to_operator',
+            {'reason': TicketReason.BOT_CONFUSED, 'details': 'Друга скарга'},
+            request=req,
+            session=self.session,
+        )
+        self.assertEqual(res1['ticket_id'], res2['ticket_id'])
+        self.assertEqual(SupportTicket.objects.filter(session=self.session).count(), 1)
+
+    def test_escalation_truncates_details_and_sanitizes_phone(self):
+        req = self._get_request(self.user)
+        new_session = ChatSession.objects.create(user=self.user)
+        long_details = 'A' * 2000
+        res = execute_agent_tool(
+            'escalate_to_operator',
+            {
+                'reason': TicketReason.COMPLAINT,
+                'details': long_details,
+                'customer_phone': 'bad-phone-number',
+            },
+            request=req,
+            session=new_session,
+        )
+        ticket = SupportTicket.objects.get(id=res['ticket_id'])
+        self.assertEqual(len(ticket.details), 1000)
+        self.assertEqual(ticket.customer_phone, '')
+
+    def test_add_to_cart_staff_forbidden(self):
+        from accounts.models import Role
+
+        courier = User.objects.create_user(
+            email='courier_tool@example.com',
+            password='password123',
+            role=Role.COURIER,
+        )
+        req = self._get_request(courier)
+        res = execute_agent_tool(
+            'add_to_cart',
+            {'dish_id': self.dish_margarita.id, 'quantity': 1},
+            request=req,
+        )
+        self.assertIn('error', res)
+        self.assertIn('Персонал ресторану', res['error'])
+
+    def test_tool_arguments_invalid_input_boundaries(self):
+        req = self._get_request(self.user)
+        res_add = execute_agent_tool(
+            'add_to_cart',
+            {'dish_id': 'invalid', 'quantity': 'bad'},
+            request=req,
+        )
+        self.assertIn('error', res_add)
+
+        res_update = execute_agent_tool(
+            'update_cart_quantity',
+            {'dish_id': 'invalid', 'quantity': 'bad'},
+            request=req,
+        )
+        self.assertIn('error', res_update)
+
+        res_remove = execute_agent_tool(
+            'remove_from_cart',
+            {'dish_id': 'invalid'},
+            request=req,
+        )
+        self.assertFalse(res_remove.get('success', True))
