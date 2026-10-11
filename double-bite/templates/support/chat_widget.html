@@ -1,10 +1,12 @@
 <script>
 window.__formatMarkdown = function(text) {
   if (!text) return '';
-  var s = text
+  var s = String(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
   s = s.split('\n').map(function(line) {
     line = line.replace(/^#{1,3}\s*(.+)$/, '<strong>$1</strong>');
     line = line.replace(/^-\s+(.+)$/, '&bull; $1');
@@ -12,7 +14,13 @@ window.__formatMarkdown = function(text) {
   }).join('\n');
   s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="underline">$1</a>');
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(match, label, rawUrl) {
+    var url = rawUrl.trim();
+    if (/^(https?:\/\/[^\s"'<>&]+|\/[^\s"'<>&]*)$/i.test(url)) {
+      return '<a href="' + url + '" target="_blank" rel="noopener noreferrer" class="underline">' + label + '</a>';
+    }
+    return label + ' (' + url + ')';
+  });
   return s;
 };
 </script>
