@@ -20,6 +20,24 @@ from support.services import ChatSessionService
 logger = logging.getLogger('support')
 
 
+def _get_client_ip(request: HttpRequest) -> str:
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        return x_forwarded_for.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR') or '127.0.0.1'
+
+
+def _is_rate_limited(key: str, limit: int, period: int = 60) -> bool:
+    if cache.add(key, 0, timeout=period) is False:
+        pass
+    try:
+        val = cache.incr(key)
+    except Exception:
+        val = 1
+        cache.set(key, val, timeout=period)
+    return val > limit
+
+
 def _save_message(session_uuid: Any, role: str, content: str) -> ChatMessage:
     session = ChatSession.objects.get(session_uuid=session_uuid)
     return ChatMessage.objects.create(
@@ -52,19 +70,24 @@ async def chat_stream_view(request: HttpRequest) -> HttpResponse:
     if len(user_text) > 2000:
         user_text = user_text[:2000]
 
+    ip = _get_client_ip(request)
     session_id = request.session.session_key
     if not session_id:
         await sync_to_async(request.session.save, thread_sensitive=True)()
         session_id = request.session.session_key or 'unknown'
 
-    cache_key = f"chat_rate:{session_id}"
-    rate_count = await sync_to_async(cache.get, thread_sensitive=True)(cache_key, 0)
-    if rate_count >= 10:
+    ip_limited = await sync_to_async(_is_rate_limited, thread_sensitive=True)(f'chat_rate_ip:{ip}', 10, 60)
+    session_limited = False
+    if session_id and session_id != 'unknown':
+        session_limited = await sync_to_async(_is_rate_limited, thread_sensitive=True)(
+            f'chat_rate_session:{session_id}', 10, 60
+        )
+
+    if ip_limited or session_limited:
         return JsonResponse(
             {'error': 'Забагато запитів. Ліміт: 10 повідомлень на хвилину.'},
             status=429,
         )
-    await sync_to_async(cache.set, thread_sensitive=True)(cache_key, rate_count + 1, timeout=60)
 
     session = await sync_to_async(
         ChatSessionService.get_or_create_active_session, thread_sensitive=True
@@ -120,7 +143,23 @@ def chat_reset_view(request: HttpRequest) -> JsonResponse:
 
 @require_GET
 def chat_history_view(request: HttpRequest) -> JsonResponse:
-    session = ChatSessionService.get_or_create_active_session(request)
+    if not request.user.is_authenticated and not request.session.session_key:
+        return JsonResponse({
+            'session_uuid': None,
+            'is_escalated': False,
+            'status': 'ACTIVE',
+            'messages': [],
+        })
+
+    session = ChatSessionService.get_active_session(request)
+    if not session:
+        return JsonResponse({
+            'session_uuid': None,
+            'is_escalated': False,
+            'status': 'ACTIVE',
+            'messages': [],
+        })
+
     messages = [
         {
             'id': m.id,

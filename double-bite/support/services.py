@@ -22,6 +22,22 @@ logger = logging.getLogger('support')
 
 class ChatSessionService:
     @staticmethod
+    def get_active_session(request: HttpRequest) -> ChatSession | None:
+        if request.user.is_authenticated:
+            return ChatSession.objects.filter(
+                user=request.user,
+                status__in=[ChatSessionStatus.ACTIVE, ChatSessionStatus.ESCALATED],
+            ).first()
+        session_key = request.session.session_key
+        if not session_key:
+            return None
+        return ChatSession.objects.filter(
+            session_key=session_key,
+            user__isnull=True,
+            status__in=[ChatSessionStatus.ACTIVE, ChatSessionStatus.ESCALATED],
+        ).first()
+
+    @staticmethod
     def get_or_create_active_session(request: HttpRequest) -> ChatSession:
         if not request.session.session_key:
             request.session.create()

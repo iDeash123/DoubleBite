@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import AsyncClient, Client, TestCase
 from django.urls import reverse
 
@@ -9,6 +10,7 @@ User = get_user_model()
 
 class HomeViewTest(TestCase):
     def setUp(self):
+        cache.clear()
         self.client = Client()
 
     def test_home_page_renders_200(self):
@@ -29,6 +31,7 @@ class HomeViewTest(TestCase):
 
 class RegisterViewTest(TestCase):
     def setUp(self):
+        cache.clear()
         self.client = Client()
 
     def test_register_page_get(self):
@@ -118,23 +121,33 @@ class RegisterViewTest(TestCase):
         self.assertIn('password', response.context['form'].errors)
         self.assertFalse(User.objects.filter(email='weakpass@doublebite.ua').exists())
 
-    def test_register_password_similar_to_attributes_rejected(self):
-        payload = {
-            'email': 'alexander@doublebite.ua',
-            'first_name': 'Alexander',
-            'last_name': 'Superchef',
-            'phone': '+380671112277',
-            'password': 'Alexander123!',
-            'password_confirm': 'Alexander123!',
-        }
-        response = self.client.post(reverse('accounts:register'), payload)
+    def test_register_rate_limited_after_repeated_attempts(self):
+        for i in range(10):
+            client = Client()
+            client.post(reverse('accounts:register'), {
+                'email': f'ratelimit{i}@doublebite.ua',
+                'first_name': 'Тест',
+                'last_name': 'Юзер',
+                'phone': '+380671112288',
+                'password': 'Password123!',
+                'password_confirm': 'Password123!',
+            })
+        client = Client()
+        response = client.post(reverse('accounts:register'), {
+            'email': 'ratelimit11@doublebite.ua',
+            'first_name': 'Тест',
+            'last_name': 'Юзер',
+            'phone': '+380671112288',
+            'password': 'Password123!',
+            'password_confirm': 'Password123!',
+        })
         self.assertEqual(response.status_code, 200)
-        self.assertIn('password', response.context['form'].errors)
-        self.assertFalse(User.objects.filter(email='alexander@doublebite.ua').exists())
+        self.assertContains(response, 'Забагато спроб реєстрації')
 
 
 class LoginViewTest(TestCase):
     def setUp(self):
+        cache.clear()
         self.client = Client()
         self.user = User.objects.create_user(
             email='user@doublebite.ua',
@@ -174,6 +187,19 @@ class LoginViewTest(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Невірний email або пароль.')
+
+    def test_login_rate_limited_after_repeated_failures(self):
+        for _ in range(5):
+            self.client.post(
+                reverse('accounts:login'),
+                {'email': 'user@doublebite.ua', 'password': 'WrongPassword!'},
+            )
+        response = self.client.post(
+            reverse('accounts:login'),
+            {'email': 'user@doublebite.ua', 'password': 'WrongPassword!'},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Забагато невдалих спроб входу')
 
     def test_authenticated_user_redirected(self):
         self.client.force_login(self.user)

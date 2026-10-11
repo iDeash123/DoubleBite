@@ -213,3 +213,32 @@ class SupportViewsTest(TestCase):
         self.assertEqual(len(history), 20)
         self.assertEqual(history[0]['content'], 'Message 5')
         self.assertEqual(history[-1]['content'], 'Message 24')
+
+    def test_anonymous_history_view_without_session_creates_no_database_records(self):
+        initial_sessions = ChatSession.objects.count()
+        client = Client()
+        res = client.get('/support/chat/history/')
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertIsNone(data['session_uuid'])
+        self.assertEqual(data['messages'], [])
+        self.assertEqual(ChatSession.objects.count(), initial_sessions)
+
+    @patch('support.agent.client.MistralSupportAgent.stream_chat_response', side_effect=mock_async_stream_tokens)
+    async def test_stream_view_rate_limit_by_ip_across_sessions(self, mock_stream):
+        for i in range(10):
+            res = await self.async_client.post(
+                '/support/chat/stream/',
+                data=json.dumps({'message': f'Повідомлення {i}'}),
+                content_type='application/json',
+                HTTP_X_FORWARDED_FOR='198.51.100.42',
+            )
+            self.assertEqual(res.status_code, 200)
+
+        res_blocked = await self.async_client.post(
+            '/support/chat/stream/',
+            data=json.dumps({'message': 'Повідомлення 11'}),
+            content_type='application/json',
+            HTTP_X_FORWARDED_FOR='198.51.100.42',
+        )
+        self.assertEqual(res_blocked.status_code, 429)
