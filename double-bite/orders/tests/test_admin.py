@@ -58,6 +58,15 @@ class OrdersAdminTest(TestCase):
         self.assertIn(Cart, site._registry)
         self.assertIsInstance(site._registry[Order], OrderAdmin)
         self.assertIsInstance(site._registry[Cart], CartAdmin)
+        cart_admin = site._registry[Cart]
+        order_admin = site._registry[Order]
+        self.assertNotIn('session_key', cart_admin.list_display)
+        self.assertNotIn('session_key', cart_admin.search_fields)
+        self.assertIn('session_key', cart_admin.exclude)
+        self.assertNotIn('session_key', order_admin.list_display)
+        self.assertNotIn('session_key', order_admin.search_fields)
+        self.assertIn('session_key', order_admin.exclude)
+        self.assertIn('access_token', order_admin.exclude)
 
     def test_order_change_view_renders_successfully(self):
         self.client.force_login(self.superuser)

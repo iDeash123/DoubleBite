@@ -43,6 +43,10 @@ class SupportAdminTest(TestCase):
         self.assertIn(ChatMessage, site._registry)
         self.assertIn(SupportTicket, site._registry)
         self.assertIn(FAQKnowledge, site._registry)
+        session_admin = site._registry[ChatSession]
+        self.assertNotIn('session_key', session_admin.list_display)
+        self.assertNotIn('session_key', session_admin.search_fields)
+        self.assertIn('session_key', session_admin.exclude)
 
     def test_support_ticket_admin_actions(self):
         admin_obj = SupportTicketAdmin(SupportTicket, site)

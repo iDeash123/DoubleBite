@@ -23,15 +23,15 @@ class ChatSessionAdmin(admin.ModelAdmin):
     list_display = (
         'session_uuid',
         'user',
-        'session_key',
         'status',
         'is_escalated',
         'created_at',
     )
     list_filter = ('status', 'is_escalated', 'created_at')
-    search_fields = ('session_uuid', 'user__email', 'session_key', 'escalation_reason')
+    search_fields = ('session_uuid', 'user__email', 'escalation_reason')
     list_select_related = ('user',)
     readonly_fields = ('session_uuid', 'created_at', 'updated_at')
+    exclude = ('session_key',)
     inlines = (ChatMessageInline,)
 
 

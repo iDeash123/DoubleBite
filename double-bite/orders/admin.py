@@ -32,6 +32,7 @@ class OrderAdmin(admin.ModelAdmin):
         'stripe_session_id',
         'stripe_payment_intent_id',
     )
+    exclude = ('session_key', 'access_token')
     readonly_fields = (
         'order_number',
         'stripe_session_id',
@@ -58,7 +59,8 @@ class CartItemInline(admin.TabularInline):
 
 @admin.register(Cart)
 class CartAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user', 'session_key', 'total_quantity', 'total_amount', 'updated_at')
-    search_fields = ('user__email', 'session_key')
+    list_display = ('id', 'user', 'total_quantity', 'total_amount', 'updated_at')
+    search_fields = ('user__email',)
+    exclude = ('session_key',)
     readonly_fields = ('created_at', 'updated_at')
     inlines = (CartItemInline,)
