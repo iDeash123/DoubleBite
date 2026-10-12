@@ -16,6 +16,21 @@ class LazyValue(SimpleLazyObject):
             self._setup()
         return self._wrapped.__format__(format_spec)
 
+    def __int__(self) -> int:
+        if self._wrapped is empty:
+            self._setup()
+        return int(self._wrapped)
+
+    def __float__(self) -> float:
+        if self._wrapped is empty:
+            self._setup()
+        return float(self._wrapped)
+
+    def __round__(self, ndigits: int | None = None) -> Any:
+        if self._wrapped is empty:
+            self._setup()
+        return round(self._wrapped, ndigits) if ndigits is not None else round(self._wrapped)
+
 
 def cart_context(request: HttpRequest) -> dict[str, Any]:
     def _get_cart():

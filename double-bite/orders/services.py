@@ -577,7 +577,7 @@ class OrderService:
         from .exceptions import CartEmptyError, OrderMinimumAmountError
 
         name = customer_name.strip()
-        phone = customer_phone.strip().replace(' ', '').replace('-', '')
+        phone = customer_phone.strip().replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
         address = delivery_address.strip()
         cleaned_notes = notes.strip()
 
@@ -610,7 +610,7 @@ class OrderService:
 
             available_items = [
                 item
-                for item in locked_cart.items.select_related('dish', 'dish__category').select_for_update().all()
+                for item in locked_cart.items.select_related('dish', 'dish__category').select_for_update(of=('self',)).all()
                 if item.is_available
             ]
 
@@ -619,7 +619,7 @@ class OrderService:
 
             total_amount = sum((item.total_price for item in available_items), Decimal('0.00'))
 
-            min_order_amount = getattr(settings, 'MIN_ORDER_AMOUNT', Decimal(os.getenv('MIN_ORDER_AMOUNT', '200')))
+            min_order_amount = getattr(settings, 'MIN_ORDER_AMOUNT', Decimal(200))
             if total_amount < min_order_amount:
                 raise OrderMinimumAmountError(
                     f'Мінімальна сума замовлення становить {min_order_amount} грн. Поточна сума: {total_amount} грн.'

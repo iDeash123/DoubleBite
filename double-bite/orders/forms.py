@@ -55,6 +55,6 @@ class OrderCheckoutForm(forms.Form):
 
     def clean_customer_phone(self) -> str:
         raw_phone = self.cleaned_data.get('customer_phone', '').strip()
-        cleaned_phone = raw_phone.replace(' ', '').replace('-', '')
+        cleaned_phone = raw_phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
         phone_validator(cleaned_phone)
         return cleaned_phone

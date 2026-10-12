@@ -67,3 +67,8 @@ class RefactoringAndCodeQualityTest(TestCase):
         self.assertIsInstance(ctx['items'], SimpleLazyObject)
         self.assertIsInstance(ctx['total_amount'], SimpleLazyObject)
         self.assertEqual(ctx['total_quantity'], 0)
+        self.assertEqual(int(ctx['total_quantity']), 0)
+        self.assertEqual(int(ctx['cart_items_count']), 0)
+        self.assertEqual(float(ctx['total_amount']), 0.0)
+        self.assertEqual(round(ctx['total_amount']), Decimal(0))
+        self.assertEqual(f"{ctx['total_amount']:.2f}", '0.00')

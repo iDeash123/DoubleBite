@@ -227,7 +227,9 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
 
                 messages.success(request, f'Замовлення {order.order_number} успішно оформлено!')
                 return redirect(redirect_url)
-            except (CartEmptyError, OrderMinimumAmountError, ValidationError) as e:
+            except ValidationError as e:
+                form.add_error(None, e)
+            except (CartEmptyError, OrderMinimumAmountError) as e:
                 form.add_error(None, str(e))
     else:
         initial_data = {}

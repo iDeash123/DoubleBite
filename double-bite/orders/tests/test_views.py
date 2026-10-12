@@ -281,4 +281,13 @@ class CartViewsTest(TestCase):
         self.assertTrue(form_valid.is_valid())
         self.assertEqual(form_valid.cleaned_data['customer_phone'], '+380501234567')
 
+        form_parentheses = OrderCheckoutForm(data={
+            'customer_name': 'Test User',
+            'customer_phone': '+380 (50) 123-45-67',
+            'delivery_address': 'Kyiv, Main St, 1',
+            'payment_method': 'CARD',
+        })
+        self.assertTrue(form_parentheses.is_valid())
+        self.assertEqual(form_parentheses.cleaned_data['customer_phone'], '+380501234567')
+
 
