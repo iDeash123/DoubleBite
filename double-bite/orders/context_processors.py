@@ -1,38 +1,50 @@
-import os
 from decimal import Decimal
 from typing import Any
 
+from django.conf import settings
 from django.core.exceptions import SynchronousOnlyOperation
 from django.db import DatabaseError
 from django.http import HttpRequest
+from django.utils.functional import SimpleLazyObject, empty
 
 from .services import CartService
 
 
+class LazyValue(SimpleLazyObject):
+    def __format__(self, format_spec: str) -> str:
+        if self._wrapped is empty:
+            self._setup()
+        return self._wrapped.__format__(format_spec)
+
+
 def cart_context(request: HttpRequest) -> dict[str, Any]:
-    try:
-        cart = CartService.get_cart(request)
-        items = list(cart.items.select_related('dish', 'dish__category').all()) if cart else []
-        total_amount = sum((item.total_price for item in items if item.is_available), Decimal('0.00'))
-        total_quantity = sum((item.quantity or 0 for item in items if item.is_available), 0)
-        min_order_amount = Decimal(os.getenv('MIN_ORDER_AMOUNT', '200'))
-        meets_min_amount = total_amount >= min_order_amount
-        cart_items_count = total_quantity
-    except (SynchronousOnlyOperation, DatabaseError, AttributeError, KeyError):
-        cart = None
-        items = []
-        total_amount = Decimal('0.00')
-        total_quantity = 0
-        min_order_amount = Decimal(200)
-        meets_min_amount = False
-        cart_items_count = 0
+    def _get_cart():
+        if hasattr(request, '_cached_cart_obj'):
+            return request._cached_cart_obj
+        try:
+            cart = CartService.get_cart(request)
+        except (SynchronousOnlyOperation, DatabaseError, AttributeError, KeyError):
+            cart = None
+        request._cached_cart_obj = cart
+        return cart
+
+    def _get_summary():
+        if hasattr(request, '_cached_cart_summary_obj'):
+            return request._cached_cart_summary_obj
+        cart = _get_cart()
+        try:
+            summary = CartService.summary(cart)
+        except (SynchronousOnlyOperation, DatabaseError, AttributeError, KeyError):
+            summary = CartService.summary(None)
+        request._cached_cart_summary_obj = summary
+        return summary
 
     return {
-        'cart': cart,
-        'items': items,
-        'total_amount': total_amount,
-        'total_quantity': total_quantity,
-        'min_order_amount': min_order_amount,
-        'meets_min_amount': meets_min_amount,
-        'cart_items_count': cart_items_count,
+        'cart': LazyValue(_get_cart),
+        'items': LazyValue(lambda: _get_summary().items),
+        'total_amount': LazyValue(lambda: _get_summary().total_amount),
+        'total_quantity': LazyValue(lambda: _get_summary().total_quantity),
+        'min_order_amount': getattr(settings, 'MIN_ORDER_AMOUNT', Decimal(200)),
+        'meets_min_amount': LazyValue(lambda: _get_summary().meets_min_amount),
+        'cart_items_count': LazyValue(lambda: _get_summary().total_quantity),
     }

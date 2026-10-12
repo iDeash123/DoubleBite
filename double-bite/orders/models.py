@@ -29,6 +29,10 @@ class PaymentMethod(models.TextChoices):
     CARD = 'CARD', 'Картка'
     CASH = 'CASH', 'Готівка'
 
+    @classmethod
+    def is_online(cls, method: str | None) -> bool:
+        return method in (cls.ONLINE, cls.STRIPE, 'ONLINE', 'STRIPE')
+
 
 class PaymentStatus(models.TextChoices):
     PENDING = 'PENDING', 'Очікує оплати'
@@ -269,6 +273,10 @@ class Order(models.Model):
         verbose_name = 'Замовлення'
         verbose_name_plural = 'Замовлення'
         ordering = ('-created_at',)
+
+    @property
+    def is_online_payment(self) -> bool:
+        return PaymentMethod.is_online(self.payment_method)
 
     @property
     def masked_customer_phone(self) -> str:

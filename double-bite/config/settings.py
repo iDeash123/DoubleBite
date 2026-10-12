@@ -1,6 +1,7 @@
 import mimetypes
 import os
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 mimetypes.add_type('image/webp', '.webp')
@@ -14,6 +15,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / '.env')
 load_dotenv(BASE_DIR.parent / '.env')
+
+MIN_ORDER_AMOUNT = Decimal(os.getenv('MIN_ORDER_AMOUNT', '200'))
 
 DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 'yes')
 is_testing = 'pytest' in sys.modules or 'test' in sys.argv

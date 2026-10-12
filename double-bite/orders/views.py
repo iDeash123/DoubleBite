@@ -44,21 +44,17 @@ def _safe_referer_redirect(request: HttpRequest, fallback: str = 'menu:catalog')
 
 def cart_view(request: HttpRequest) -> HttpResponse:
     cart = CartService.get_cart(request)
-    items = list(cart.items.select_related('dish', 'dish__category').all()) if cart else []
-    total_amount = sum((item.total_price for item in items if item.is_available), Decimal('0.00'))
-    total_quantity = sum((item.quantity or 0 for item in items if item.is_available), 0)
-
-    min_order_amount = Decimal(os.getenv('MIN_ORDER_AMOUNT', '200'))
-    meets_min_amount = (total_amount >= min_order_amount)
-    min_diff = max(Decimal('0.00'), min_order_amount - total_amount)
+    summary = CartService.summary(cart)
+    min_order_amount = getattr(settings, 'MIN_ORDER_AMOUNT', Decimal(200))
+    min_diff = max(Decimal('0.00'), min_order_amount - summary.total_amount)
 
     context = {
         'cart': cart,
-        'items': items,
-        'total_amount': total_amount,
-        'total_quantity': total_quantity,
+        'items': summary.items,
+        'total_amount': summary.total_amount,
+        'total_quantity': summary.total_quantity,
         'min_order_amount': min_order_amount,
-        'meets_min_amount': meets_min_amount,
+        'meets_min_amount': summary.meets_min_amount,
         'min_diff': min_diff,
     }
 
@@ -181,12 +177,10 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
         messages.warning(request, 'Кошик порожній. Додайте страви для оформлення замовлення.')
         return redirect('orders:cart')
 
-    items = list(cart.items.select_related('dish', 'dish__category').all())
-    total_amount = sum((item.total_price for item in items if item.is_available), Decimal('0.00'))
-    total_quantity = sum((item.quantity or 0 for item in items if item.is_available), 0)
-    min_order_amount = Decimal(os.getenv('MIN_ORDER_AMOUNT', '200'))
+    summary = CartService.summary(cart)
+    min_order_amount = getattr(settings, 'MIN_ORDER_AMOUNT', Decimal(200))
 
-    if total_amount < min_order_amount:
+    if not summary.meets_min_amount:
         messages.warning(
             request,
             f'Мінімальна сума замовлення — {min_order_amount} грн. Додайте ще страв до кошика.',
@@ -198,9 +192,7 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
         if form.is_valid():
             try:
                 payment_method = form.cleaned_data['payment_method']
-                is_stripe_payment = payment_method in (
-                    PaymentMethod.ONLINE, PaymentMethod.STRIPE, 'ONLINE', 'STRIPE',
-                )
+                is_stripe_payment = PaymentMethod.is_online(payment_method)
 
                 order = OrderService.create_order_from_cart(
                     request=request,
@@ -256,9 +248,9 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
     context = {
         'form': form,
         'cart': cart,
-        'items': items,
-        'total_amount': total_amount,
-        'total_quantity': total_quantity,
+        'items': summary.items,
+        'total_amount': summary.total_amount,
+        'total_quantity': summary.total_quantity,
     }
     return render(request, 'orders/checkout.html', context)
 
@@ -366,19 +358,16 @@ def order_cancel_view(request: HttpRequest, order_number: str) -> HttpResponse:
 
 def cart_drawer_view(request: HttpRequest) -> HttpResponse:
     cart = CartService.get_cart(request)
-    items = list(cart.items.select_related('dish', 'dish__category').all()) if cart else []
-    total_amount = sum((item.total_price for item in items if item.is_available), Decimal('0.00'))
-    total_quantity = sum((item.quantity or 0 for item in items if item.is_available), 0)
-    min_order_amount = Decimal(os.getenv('MIN_ORDER_AMOUNT', '200'))
-    meets_min_amount = (total_amount >= min_order_amount)
+    summary = CartService.summary(cart)
+    min_order_amount = getattr(settings, 'MIN_ORDER_AMOUNT', Decimal(200))
 
     context = {
         'cart': cart,
-        'items': items,
-        'total_amount': total_amount,
-        'total_quantity': total_quantity,
+        'items': summary.items,
+        'total_amount': summary.total_amount,
+        'total_quantity': summary.total_quantity,
         'min_order_amount': min_order_amount,
-        'meets_min_amount': meets_min_amount,
+        'meets_min_amount': summary.meets_min_amount,
     }
     if request.headers.get('HX-Request'):
         return render_partial_or_full(

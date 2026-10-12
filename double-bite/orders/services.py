@@ -1,5 +1,6 @@
 import logging
 import os
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
@@ -36,8 +37,35 @@ def _get_val(obj: Any, key: str, default: Any = None) -> Any:
     return getattr(obj, key, default)
 
 
+@dataclass(frozen=True)
+class CartSummary:
+    items: list[CartItem]
+    total_amount: Decimal
+    total_quantity: int
+    meets_min_amount: bool
+
 
 class CartService:
+    @classmethod
+    def summary(cls, cart: Cart | None) -> CartSummary:
+        if not cart:
+            return CartSummary(
+                items=[],
+                total_amount=Decimal('0.00'),
+                total_quantity=0,
+                meets_min_amount=False,
+            )
+        items = list(cart.items.select_related('dish', 'dish__category').all())
+        available_items = [item for item in items if item.is_available]
+        total_amount = sum((item.total_price for item in available_items), Decimal('0.00'))
+        total_quantity = sum((item.quantity or 0 for item in available_items), 0)
+        min_amount = getattr(settings, 'MIN_ORDER_AMOUNT', Decimal(200))
+        return CartSummary(
+            items=items,
+            total_amount=total_amount,
+            total_quantity=total_quantity,
+            meets_min_amount=total_amount >= min_amount,
+        )
     @staticmethod
     def _invalidate_cart_cache(request: HttpRequest) -> None:
         if hasattr(request, '_cached_cart'):
@@ -632,10 +660,7 @@ class OrderService:
         except Exception as e:
             logger.warning("Failed to send order confirmation email for %s: %s", order.order_number, e)
 
-        if (
-            payment_method in (PaymentMethod.ONLINE, PaymentMethod.STRIPE, 'ONLINE', 'STRIPE')
-            and create_stripe_session
-        ):
+        if PaymentMethod.is_online(payment_method) and create_stripe_session:
             try:
                 StripeService.create_checkout_session(order, request=request)
             except (stripe.StripeError, ValueError) as e:
