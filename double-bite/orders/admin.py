@@ -1,6 +1,14 @@
 from django.contrib import admin
 
-from .models import Cart, CartItem, Order, OrderItem, ProcessedStripeEvent
+from .models import (
+    Cart,
+    CartItem,
+    InvalidStatusTransitionError,
+    Order,
+    OrderItem,
+    OrderStatus,
+    ProcessedStripeEvent,
+)
 
 
 class OrderItemInline(admin.TabularInline):
@@ -35,13 +43,61 @@ class OrderAdmin(admin.ModelAdmin):
     exclude = ('session_key', 'access_token')
     readonly_fields = (
         'order_number',
+        'status',
+        'payment_status',
         'stripe_session_id',
         'stripe_payment_intent_id',
         'total_amount',
         'created_at',
         'updated_at',
     )
+    actions = [
+        'action_mark_paid',
+        'action_mark_preparing',
+        'action_mark_on_way',
+        'action_mark_delivered',
+        'action_mark_cancelled',
+    ]
     inlines = (OrderItemInline,)
+
+    def _apply_transition(self, request, queryset, target_status):
+        success_count = 0
+        error_count = 0
+        for order in queryset:
+            try:
+                order.transition_to(target_status)
+                success_count += 1
+            except InvalidStatusTransitionError:
+                error_count += 1
+        if request:
+            if success_count:
+                self.message_user(request, f"Успішно змінено статус {success_count} замовлень на {target_status}.")
+            if error_count:
+                self.message_user(
+                    request,
+                    f"Не вдалося змінити статус для {error_count} замовлень через неприпустимий перехід.",
+                    level='warning',
+                )
+
+    @admin.action(description='Перевести у статус: Оплачено')
+    def action_mark_paid(self, request, queryset):
+        self._apply_transition(request, queryset, OrderStatus.PAID)
+
+    @admin.action(description='Перевести у статус: Готується')
+    def action_mark_preparing(self, request, queryset):
+        self._apply_transition(request, queryset, OrderStatus.PREPARING)
+
+    @admin.action(description='Перевести у статус: В дорозі')
+    def action_mark_on_way(self, request, queryset):
+        self._apply_transition(request, queryset, OrderStatus.ON_WAY)
+
+    @admin.action(description='Перевести у статус: Доставлено')
+    def action_mark_delivered(self, request, queryset):
+        self._apply_transition(request, queryset, OrderStatus.DELIVERED)
+
+    @admin.action(description='Перевести у статус: Скасовано')
+    def action_mark_cancelled(self, request, queryset):
+        self._apply_transition(request, queryset, OrderStatus.CANCELLED)
 
 
 @admin.register(ProcessedStripeEvent)

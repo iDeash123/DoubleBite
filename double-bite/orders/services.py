@@ -548,30 +548,10 @@ class OrderService:
 
         from .exceptions import CartEmptyError, OrderMinimumAmountError
 
-        cart = CartService.get_cart(request)
-        if not cart or not cart.items.exists():
-            raise CartEmptyError('Кошик порожній. Додайте страви для оформлення замовлення.')
-
-        available_items = [
-            item
-            for item in cart.items.select_related('dish', 'dish__category').all()
-            if item.is_available
-        ]
-
-        if not available_items:
-            raise CartEmptyError('У вашому кошику немає доступних для замовлення страв.')
-
-        total_amount = sum((item.total_price for item in available_items), Decimal('0.00'))
-
-        min_order_amount = Decimal(os.getenv('MIN_ORDER_AMOUNT', '200'))
-        if total_amount < min_order_amount:
-            raise OrderMinimumAmountError(
-                f'Мінімальна сума замовлення становить {min_order_amount} грн. Поточна сума: {total_amount} грн.'
-            )
-
         name = customer_name.strip()
-        phone = customer_phone.strip()
+        phone = customer_phone.strip().replace(' ', '').replace('-', '')
         address = delivery_address.strip()
+        cleaned_notes = notes.strip()
 
         if not name:
             raise ValidationError({'customer_name': "Вкажіть ваше ім'я."})
@@ -579,11 +559,44 @@ class OrderService:
             raise ValidationError({'customer_phone': 'Вкажіть контактний номер телефону.'})
         if not address:
             raise ValidationError({'delivery_address': 'Вкажіть повну адресу доставки.'})
+        if len(address) > 500:
+            raise ValidationError({'delivery_address': 'Адреса занадто довга (максимум 500 символів).'})
+        if len(cleaned_notes) > 500:
+            raise ValidationError({'notes': 'Коментар занадто довгий (максимум 500 символів).'})
+
+        from .forms import phone_validator
+
+        phone_validator(phone)
+
+        cart = CartService.get_cart(request)
+        if not cart or not cart.items.exists():
+            raise CartEmptyError('Кошик порожній. Додайте страви для оформлення замовлення.')
 
         session_key = getattr(request.session, 'session_key', '') or ''
         user = request.user if request.user.is_authenticated else None
 
         with transaction.atomic():
+            locked_cart = Cart.objects.select_for_update().filter(id=cart.id).first()
+            if not locked_cart:
+                raise CartEmptyError('Кошик порожній. Додайте страви для оформлення замовлення.')
+
+            available_items = [
+                item
+                for item in locked_cart.items.select_related('dish', 'dish__category').select_for_update().all()
+                if item.is_available
+            ]
+
+            if not available_items:
+                raise CartEmptyError('У вашому кошику немає доступних для замовлення страв.')
+
+            total_amount = sum((item.total_price for item in available_items), Decimal('0.00'))
+
+            min_order_amount = getattr(settings, 'MIN_ORDER_AMOUNT', Decimal(os.getenv('MIN_ORDER_AMOUNT', '200')))
+            if total_amount < min_order_amount:
+                raise OrderMinimumAmountError(
+                    f'Мінімальна сума замовлення становить {min_order_amount} грн. Поточна сума: {total_amount} грн.'
+                )
+
             order = Order.objects.create(
                 user=user,
                 session_key=session_key,
@@ -594,7 +607,7 @@ class OrderService:
                 status=OrderStatus.PENDING,
                 payment_status=PaymentStatus.PENDING,
                 total_amount=total_amount,
-                notes=notes.strip(),
+                notes=cleaned_notes,
                 eta_minutes=30,
             )
 
@@ -608,7 +621,7 @@ class OrderService:
                     selected_options=item.selected_options,
                 )
 
-            cart.items.filter(id__in=[item.id for item in available_items]).delete()
+            locked_cart.items.filter(id__in=[item.id for item in available_items]).delete()
 
         try:
             from orders.emails import send_order_confirmation_email

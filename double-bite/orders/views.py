@@ -13,6 +13,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
@@ -27,6 +28,17 @@ from .models import Order, OrderStatus, PaymentMethod, PaymentStatus, ProcessedS
 from .services import CartService, OrderService, StripeService
 
 logger = logging.getLogger('orders')
+
+
+def _safe_referer_redirect(request: HttpRequest, fallback: str = 'menu:catalog') -> HttpResponse:
+    referer = request.META.get('HTTP_REFERER')
+    if referer and url_has_allowed_host_and_scheme(
+        url=referer,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return redirect(referer)
+    return redirect(fallback)
 
 
 
@@ -90,8 +102,7 @@ def cart_add_view(request: HttpRequest, dish_id: int) -> HttpResponse:
         if request.headers.get('HX-Request'):
             return HttpResponse(str(e), status=400)
         messages.error(request, str(e))
-        referer = request.META.get('HTTP_REFERER')
-        return redirect(referer or 'menu:catalog')
+        return _safe_referer_redirect(request, fallback='menu:catalog')
 
     if request.headers.get('HX-Request'):
         count = CartService.get_items_count(request)
@@ -99,8 +110,7 @@ def cart_add_view(request: HttpRequest, dish_id: int) -> HttpResponse:
         response['HX-Trigger'] = 'open-cart-drawer'
         return response
 
-    referer = request.META.get('HTTP_REFERER')
-    return redirect(referer or 'menu:catalog')
+    return _safe_referer_redirect(request, fallback='menu:catalog')
 
 
 @require_POST

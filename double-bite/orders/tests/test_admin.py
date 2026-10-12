@@ -67,6 +67,29 @@ class OrdersAdminTest(TestCase):
         self.assertNotIn('session_key', order_admin.search_fields)
         self.assertIn('session_key', order_admin.exclude)
         self.assertIn('access_token', order_admin.exclude)
+        self.assertIn('status', order_admin.readonly_fields)
+        self.assertIn('payment_status', order_admin.readonly_fields)
+
+    def test_order_admin_transition_actions(self):
+        order_admin = site._registry[Order]
+        from orders.models import OrderStatus
+
+        queryset = Order.objects.filter(pk=self.order.pk)
+        order_admin.action_mark_paid(None, queryset)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.PAID)
+
+        order_admin.action_mark_preparing(None, queryset)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.PREPARING)
+
+        order_admin.action_mark_on_way(None, queryset)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.ON_WAY)
+
+        order_admin.action_mark_delivered(None, queryset)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.DELIVERED)
 
     def test_order_change_view_renders_successfully(self):
         self.client.force_login(self.superuser)

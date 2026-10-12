@@ -241,4 +241,44 @@ class CartViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers.get('HX-Trigger'), 'open-cart-drawer')
 
+    def test_cart_add_safe_referer_redirect(self):
+        url = reverse('orders:cart_add', kwargs={'dish_id': self.dish1.id})
+        response = self.client.post(
+            url,
+            {'quantity': '1'},
+            HTTP_REFERER='https://evil-phishing.com/steal',
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse('menu:catalog'))
+
+        valid_referer = 'http://testserver/menu/'
+        response_valid = self.client.post(
+            url,
+            {'quantity': '1'},
+            HTTP_REFERER=valid_referer,
+        )
+        self.assertEqual(response_valid.status_code, 302)
+        self.assertEqual(response_valid.url, valid_referer)
+
+    def test_checkout_form_phone_validation(self):
+        from orders.forms import OrderCheckoutForm
+
+        form_invalid = OrderCheckoutForm(data={
+            'customer_name': 'Test User',
+            'customer_phone': '12345',
+            'delivery_address': 'Kyiv, Main St, 1',
+            'payment_method': 'CARD',
+        })
+        self.assertFalse(form_invalid.is_valid())
+        self.assertIn('customer_phone', form_invalid.errors)
+
+        form_valid = OrderCheckoutForm(data={
+            'customer_name': 'Test User',
+            'customer_phone': '+380 50 123 45 67',
+            'delivery_address': 'Kyiv, Main St, 1',
+            'payment_method': 'CARD',
+        })
+        self.assertTrue(form_valid.is_valid())
+        self.assertEqual(form_valid.cleaned_data['customer_phone'], '+380501234567')
+
 
