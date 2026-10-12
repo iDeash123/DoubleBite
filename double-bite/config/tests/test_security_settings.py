@@ -1,5 +1,8 @@
+import os
+import subprocess
+import sys
+
 from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
@@ -27,12 +30,17 @@ class SecuritySettingsTest(TestCase):
 
 class SecretKeyValidationTest(SimpleTestCase):
     def test_secret_key_required_in_production(self):
-        with self.assertRaises(ImproperlyConfigured):
-            secret = ''
-            debug = False
-            testing = False
-            if not secret:
-                if debug or testing:
-                    secret = 'dev-key'
-                else:
-                    raise ImproperlyConfigured('SECRET_KEY required')
+        env = os.environ.copy()
+        env['DEBUG'] = 'False'
+        env['SECRET_KEY'] = ''
+        code = 'import config.settings'
+        proc = subprocess.run(
+            [sys.executable, '-c', code],
+            cwd=str(settings.BASE_DIR),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn('ImproperlyConfigured', proc.stderr)
