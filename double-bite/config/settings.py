@@ -6,6 +6,8 @@ from pathlib import Path
 mimetypes.add_type('image/webp', '.webp')
 mimetypes.add_type('font/woff2', '.woff2')
 
+from django.core.exceptions import ImproperlyConfigured
+from django.utils.csp import CSP
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -13,15 +15,20 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
 load_dotenv(BASE_DIR.parent / '.env')
 
-SECRET_KEY = os.getenv('SECRET_KEY')
-
 DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 'yes')
 is_testing = 'pytest' in sys.modules or 'test' in sys.argv
 
+SECRET_KEY = os.getenv('SECRET_KEY')
+if not SECRET_KEY:
+    if DEBUG or is_testing:
+        SECRET_KEY = 'django-insecure-doublebite-dev-secret-key-change-in-production-2026!'
+    else:
+        raise ImproperlyConfigured('SECRET_KEY environment variable is required when DEBUG=False')
+
 ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', '').split(',') if h.strip()]
 if not ALLOWED_HOSTS:
-    ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
-if 'testserver' not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+if is_testing and 'testserver' not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append('testserver')
 
 CSRF_TRUSTED_ORIGINS = [
@@ -29,9 +36,6 @@ CSRF_TRUSTED_ORIGINS = [
     for origin in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',')
     if origin.strip()
 ]
-
-if DEBUG:
-    os.environ.setdefault('DJANGO_ALLOW_ASYNC_UNSAFE', 'true')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -55,6 +59,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'django.middleware.csp.ContentSecurityPolicyMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'orders.middleware.PreserveSessionKeyMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -64,6 +69,31 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+SECURE_CSP = {
+    'default-src': [CSP.SELF],
+    'script-src': [CSP.SELF, CSP.UNSAFE_INLINE, CSP.UNSAFE_EVAL, 'https://js.stripe.com'],
+    'style-src': [CSP.SELF, CSP.UNSAFE_INLINE],
+    'img-src': [CSP.SELF, 'data:', 'https://images.unsplash.com', 'https://*.stripe.com'],
+    'font-src': [CSP.SELF, 'data:'],
+    'connect-src': [CSP.SELF, 'https://api.stripe.com'],
+    'frame-src': [CSP.SELF, 'https://checkout.stripe.com', 'https://js.stripe.com'],
+    'object-src': [CSP.NONE],
+    'base-uri': [CSP.SELF],
+}
+
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'True').lower() in ('true', '1', 'yes')
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '31536000'))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CROSS_ORIGIN_OPENER_POLICY = 'same-origin'
+
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
 
 if DEBUG and not is_testing:
     INSTALLED_APPS.append('debug_toolbar')
@@ -179,8 +209,10 @@ LOGGING = {
             'class': 'logging.StreamHandler',
         },
         'file': {
-            'class': 'logging.FileHandler',
+            'class': 'logging.handlers.RotatingFileHandler',
             'filename': LOGS_DIR / 'double_bite.log',
+            'maxBytes': 5 * 1024 * 1024,
+            'backupCount': 5,
             'encoding': 'utf-8',
         },
     },
