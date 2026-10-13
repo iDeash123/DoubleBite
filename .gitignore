@@ -44,3 +44,6 @@ Thumbs.db
 docker/data/
 
 instructions/*
+
+# High-resolution showcase source assets (stored locally, not pushed to git)
+double-bite/static/images/showcase/8k/

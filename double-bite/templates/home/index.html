@@ -24,10 +24,47 @@
 </script>
 {% endblock %}
 
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/home.css' %}">
+<link rel="preload" as="image" href="{% static 'images/showcase/photo-1568901346375-23c9450c58cd.webp' %}">
+{% endblock %}
+
 {% block content %}
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <mask id="db-bite-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="20" height="20">
+        <rect width="20" height="20" fill="#fff"/>
+        <circle cx="17.2" cy="3.4" r="4.2" fill="#000"/>
+        <circle cx="19.6" cy="10.4" r="3.4" fill="#000"/>
+      </mask>
+      <symbol id="db-bite" viewBox="0 0 20 20">
+        <circle cx="10" cy="10" r="9" fill="currentColor" mask="url(#db-bite-mask)"/>
+      </symbol>
+    </defs>
+  </svg>
+
   {% include "home/partials/hero_showcase.html" %}
   {% include "home/partials/live_ticker.html" %}
   {% include "home/partials/collections_section.html" %}
   {% include "home/partials/delivery_section.html" %}
   {% include "home/partials/about_section.html" %}
+
+  <script>
+    (function () {
+      var els = document.querySelectorAll('[data-reveal]');
+      if (!('IntersectionObserver' in window) || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        els.forEach(function (el) { el.classList.add('is-in'); });
+        return;
+      }
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-in');
+            io.unobserve(entry.target);
+          }
+        });
+      }, { rootMargin: '0px 0px -12% 0px', threshold: 0.08 });
+      els.forEach(function (el) { io.observe(el); });
+    })();
+  </script>
 {% endblock %}

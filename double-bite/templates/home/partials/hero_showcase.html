@@ -2,6 +2,11 @@
 function heroShowcase(initialDishes) {
   return {
     currentIndex: 0,
+    prevIndex: -1,
+    paused: false,
+    hovering: false,
+    offscreen: false,
+    origin: { x: 72, y: 50 },
     dishes: initialDishes && initialDishes.length ? initialDishes : [
       {
         id: 1,
@@ -64,24 +69,67 @@ function heroShowcase(initialDishes) {
         bg_watermark: 'BURNT CHEESECAKE'
       }
     ],
-    tiltTransform: '',
     get currentDish() {
       return this.dishes[this.currentIndex] || this.dishes[0];
     },
+    get titleWords() {
+      return (this.currentDish.title || '').split(' ');
+    },
+    pad(n) {
+      return (n < 10 ? '0' : '') + n;
+    },
+    init() {
+      var self = this;
+      if ('IntersectionObserver' in window) {
+        new IntersectionObserver(function (entries) {
+          self.offscreen = !entries[0].isIntersecting;
+          self.syncPause();
+        }, { threshold: 0.25 }).observe(this.$el);
+      }
+    },
+    syncPause() {
+      this.paused = this.hovering || this.offscreen;
+    },
+    setHover(state) {
+      this.hovering = state;
+      this.syncPause();
+    },
+    originFrom(index) {
+      var rail = this.$refs.rail;
+      var btn = rail ? rail.querySelectorAll('[data-rail-item]')[index] : null;
+      if (!btn) return { x: 72, y: 50 };
+      var heroRect = this.$el.getBoundingClientRect();
+      var r = btn.getBoundingClientRect();
+      return {
+        x: ((r.left + r.width / 2 - heroRect.left) / heroRect.width) * 100,
+        y: ((r.top + r.height / 2 - heroRect.top) / heroRect.height) * 100
+      };
+    },
     selectDish(index) {
+      if (index === this.currentIndex) return;
+      this.origin = this.originFrom(index);
+      this.prevIndex = this.currentIndex;
       this.currentIndex = index;
     },
+    next() {
+      this.selectDish((this.currentIndex + 1) % this.dishes.length);
+    },
     onMouseMove(event) {
-      const card = event.currentTarget;
-      const rect = card.getBoundingClientRect();
-      const x = event.clientX - rect.left - rect.width / 2;
-      const y = event.clientY - rect.top - rect.height / 2;
-      const rotateX = -(y / (rect.height / 2)) * 8;
-      const rotateY = (x / (rect.width / 2)) * 8;
-      this.tiltTransform = 'perspective(1000px) rotateX(' + rotateX.toFixed(2) + 'deg) rotateY(' + rotateY.toFixed(2) + 'deg)';
+      var rect = this.$el.getBoundingClientRect();
+      var nx = (event.clientX - rect.left) / rect.width;
+      var ny = (event.clientY - rect.top) / rect.height;
+      var stage = this.$refs.stage;
+      if (!stage) return;
+      stage.style.setProperty('--px', ((0.5 - nx) * 24).toFixed(1) + 'px');
+      stage.style.setProperty('--py', ((0.5 - ny) * 16).toFixed(1) + 'px');
+      stage.style.setProperty('--mx', (nx * 100).toFixed(1) + '%');
+      stage.style.setProperty('--my', (ny * 100).toFixed(1) + '%');
     },
     resetTilt() {
-      this.tiltTransform = 'perspective(1000px) rotateX(0deg) rotateY(0deg)';
+      var stage = this.$refs.stage;
+      if (!stage) return;
+      stage.style.setProperty('--px', '0px');
+      stage.style.setProperty('--py', '0px');
     },
     addToCart(dish) {
       if (!dish) return;
@@ -111,151 +159,113 @@ function heroShowcase(initialDishes) {
 }
 </script>
 
-<section id="hero-showcase" x-data="heroShowcase({{ hero_dishes_json|default:'[]' }})" class="relative bg-white pt-8 pb-16 overflow-hidden border-b border-fv-noir/10 select-none">
-  <div class="max-w-[1440px] mx-auto px-4 sm:px-8">
+<section
+  id="hero-showcase"
+  class="db-hero"
+  x-data="heroShowcase({{ hero_dishes_json|default:'[]' }})"
+  :class="{ 'is-paused': paused }"
+  style="--db-autoplay: 7s"
+  @mousemove="onMouseMove($event)"
+  @mouseleave="resetTilt()"
+  aria-roledescription="carousel"
+  aria-label="Фірмові страви Double Bite"
+>
+  <div class="db-hero__stage" x-ref="stage" :style="'--ox:' + origin.x + '%;--oy:' + origin.y + '%'">
+    <template x-for="(dish, idx) in dishes" :key="'slide-' + idx">
+      <div class="db-hero__slide" :class="{ 'is-active': idx === currentIndex, 'is-prev': idx === prevIndex }" :aria-hidden="idx !== currentIndex">
+        <img class="db-hero__img" :src="dish.image" :alt="dish.title" width="1600" height="1000" :loading="idx === 0 ? 'eager' : 'lazy'" decoding="async">
+      </div>
+    </template>
+    <div class="db-hero__shade"></div>
+    <div class="db-hero__spot"></div>
+    <div class="db-hero__grain"></div>
+  </div>
 
-    <div class="text-center mb-6">
-      <span class="font-serif italic text-sm sm:text-base tracking-widest text-fv-noir uppercase">
-        АВТОРСЬКА ГАСТРОНОМІЯ ТА АРХІТЕКТУРНА ТОЧНІСТЬ СМАКУ
+  <div class="db-hero__index" aria-hidden="true">
+    <span class="db-hero__index-roll">
+      <span class="db-hero__index-track" :style="'transform: translateY(-' + (currentIndex * 0.8) + 'em)'">
+        <template x-for="(dish, idx) in dishes" :key="'num-' + idx">
+          <span x-text="pad(idx + 1)"></span>
+        </template>
       </span>
-    </div>
+    </span>
+    <small x-text="'/' + pad(dishes.length)"></small>
+  </div>
 
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4 mb-8">
-      <template x-for="(dish, idx) in dishes" :key="idx">
-        <button
-          type="button"
-          @click="selectDish(idx)"
-          :class="currentIndex === idx ? 'bg-fv-noir text-white border-fv-noir shadow-md' : 'bg-fv-offwhite text-fv-noir border-fv-noir/10 hover:bg-[#EAEAEA]'"
-          class="p-3 sm:p-4 text-left border transition-all duration-200 cursor-pointer flex flex-col justify-between"
-        >
-          <div>
-            <span class="block text-[10px] font-mono uppercase tracking-widest opacity-60 mb-1" x-text="dish.tag"></span>
-            <span class="block text-xs sm:text-sm font-bold font-sans tracking-tight truncate" x-text="dish.title"></span>
-          </div>
-          <div class="mt-3 flex items-center justify-between text-xs font-mono">
-            <span class="font-bold" x-text="dish.price + ' ₴'"></span>
-            <span class="text-[10px] opacity-70" x-text="dish.prep_time"></span>
-          </div>
-        </button>
-      </template>
-    </div>
+  <div class="db-hero__body">
+    <div class="db-wrap db-hero__inner">
 
-    <div class="relative min-h-[460px] sm:min-h-[560px] lg:min-h-[620px] flex items-center justify-center my-2">
-
-      <div class="absolute inset-0 flex items-center justify-center select-none pointer-events-none z-0">
-        <h1 class="text-[11vw] sm:text-[13vw] font-black tracking-tighter text-fv-noir/[0.04] uppercase whitespace-nowrap leading-none w-full text-center transition-all duration-500" x-text="currentDish.bg_watermark">
-          DOUBLE BITE
-        </h1>
+      <div class="db-hero__top">
+        <h1 class="db-hero__h1"><b>Double Bite</b> — авторські бургери, неаполітанська піца, боули та десерти з доставкою по Києву</h1>
+        <span class="db-hero__status"><span class="db-pulse"></span>Приймаємо замовлення · 10:00 — 22:00</span>
       </div>
 
-      <div
-        class="relative z-10 max-w-xs sm:max-w-md lg:max-w-lg mx-auto cursor-pointer"
-        @mousemove="onMouseMove($event)"
-        @mouseleave="resetTilt()"
-      >
-        <img
-          :src="currentDish.image"
-          :alt="currentDish.title"
-          :style="{ transform: tiltTransform }"
-          class="w-full h-auto max-h-[380px] sm:max-h-[460px] object-contain drop-shadow-2xl mx-auto mix-blend-multiply transition-transform duration-300 ease-out"
-        >
-      </div>
+      <div class="db-hero__content" @mouseenter="setHover(true)" @mouseleave="setHover(false)" @focusin="setHover(true)" @focusout="setHover(false)">
+        <template x-for="dish in [currentDish]" :key="'content-' + currentIndex">
+          <div aria-live="polite">
+            <span class="db-kicker db-hero__tag db-fade-in">
+              <svg class="db-bite" aria-hidden="true"><use href="#db-bite"></use></svg>
+              <span x-text="dish.tag + ' · ' + dish.badge"></span>
+            </span>
 
-      <div class="hidden lg:block absolute left-0 bottom-8 max-w-sm z-20">
-        <div class="mb-4">
-          <span class="text-[10px] font-mono uppercase tracking-widest text-fv-slate block mb-1" x-text="currentDish.tag"></span>
-          <div class="p-3 bg-fv-offwhite border-l-2 border-fv-noir text-xs font-sans mb-3">
-            <span class="font-mono text-[10px] uppercase tracking-wider text-fv-slate block mb-1">Смаковий профіль</span>
-            <p class="text-fv-noir font-medium leading-relaxed" x-text="currentDish.taste_notes"></p>
+            <h2 class="db-hero__title">
+              <template x-for="(word, wi) in titleWords" :key="currentIndex + '-' + wi">
+                <span class="w"><span :style="'animation-delay:' + (0.12 + wi * 0.08) + 's'" x-text="word"></span></span>
+              </template>
+            </h2>
+
+            <p class="db-hero__sub db-fade-in" style="animation-delay:.35s" x-text="dish.subtitle"></p>
+            <p class="db-hero__desc db-fade-in" style="animation-delay:.45s" x-text="dish.description"></p>
+
+            <dl class="db-hero__passport db-fade-in" style="animation-delay:.55s">
+              <div><dt>Вартість</dt><dd class="is-price" x-text="dish.price + ' ₴'"></dd></div>
+              <div><dt>Вага</dt><dd x-text="dish.weight_grams + ' г'"></dd></div>
+              <div><dt>Енергія</dt><dd x-text="dish.calories + ' ккал'"></dd></div>
+              <div><dt>Час подачі</dt><dd x-text="dish.prep_time"></dd></div>
+            </dl>
           </div>
+        </template>
+
+        <div class="db-hero__actions">
+          <button type="button" id="hero-quick-add-btn" class="db-btn db-btn--light" @click="addToCart(currentDish)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+            <span>Додати до замовлення</span>
+            <span class="db-btn__price" x-text="currentDish.price + ' ₴'"></span>
+          </button>
+          <a href="/menu/" class="db-btn db-btn--ghost-dark">Відкрити меню</a>
         </div>
-        <p class="text-xs sm:text-sm text-fv-noir leading-relaxed mb-6 font-normal" x-text="currentDish.description"></p>
-        <div class="flex flex-col items-start gap-3">
-          <div class="flex items-center gap-3">
+        <button type="button" id="hero-ai-consult-btn" class="db-link db-hero__ai" @click="askAiConcierge(currentDish)">
+          <span class="db-pulse"></span>
+          <span class="db-link__label">Запитати AI-консьєржа про страву</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="db-hero__rail" @mouseenter="setHover(true)" @mouseleave="setHover(false)">
+      <div class="db-wrap">
+        <div class="db-hero__rail-grid" x-ref="rail" role="tablist" aria-label="Оберіть страву">
+          <template x-for="(dish, idx) in dishes" :key="'rail-' + idx">
             <button
               type="button"
-              id="hero-quick-add-btn"
-              @click="addToCart(currentDish)"
-              class="px-6 py-3.5 bg-fv-noir text-white text-xs font-mono tracking-wider hover:bg-black transition-colors rounded-none shadow-xs uppercase font-medium flex items-center gap-2 cursor-pointer"
+              role="tab"
+              data-rail-item
+              class="db-rail-item"
+              :class="{ 'is-active': idx === currentIndex }"
+              :aria-selected="idx === currentIndex"
+              @click="selectDish(idx)"
             >
-              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
-              <span>Додати до замовлення</span>
-              <span class="font-bold ml-1" x-text="currentDish.price + ' ₴'"></span>
+              <span class="db-rail-item__bar" aria-hidden="true"><i @animationend="idx === currentIndex && next()"></i></span>
+              <span class="db-rail-item__thumb"><img :src="dish.image" alt="" width="56" height="56" loading="lazy"></span>
+              <span class="db-rail-item__meta">
+                <span class="db-rail-item__tag" x-text="dish.tag"></span>
+                <span class="db-rail-item__title" x-text="dish.title"></span>
+                <span class="db-rail-item__price" x-text="dish.price + ' ₴ · ' + dish.prep_time"></span>
+              </span>
             </button>
-            <a
-              href="/menu/"
-              class="px-5 py-3.5 border border-fv-noir/20 bg-white text-fv-noir text-xs font-mono tracking-wider hover:bg-fv-offwhite transition-colors uppercase"
-            >
-              Меню
-            </a>
-          </div>
-          <button
-            type="button"
-            id="hero-ai-consult-btn"
-            @click="askAiConcierge(currentDish)"
-            class="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-fv-noir hover:underline underline-offset-4 transition-all cursor-pointer"
-          >
-            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>Запитати AI-консьєржа про страву</span>
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-          </button>
-        </div>
-      </div>
-
-      <div class="hidden lg:block absolute right-0 bottom-8 max-w-xs text-left z-20 bg-white/90 backdrop-blur-xs p-5 border border-fv-noir/10 shadow-sm">
-        <div class="mb-4">
-          <span class="text-[10px] font-mono uppercase tracking-widest text-fv-slate block mb-1" x-text="currentDish.badge"></span>
-          <h3 class="text-sm font-bold tracking-wider uppercase text-fv-noir" x-text="currentDish.title"></h3>
-          <p class="text-xs text-fv-slate mt-0.5" x-text="currentDish.subtitle"></p>
-        </div>
-        <div class="w-full h-px bg-fv-noir/20 mb-4"></div>
-        <div class="space-y-3 text-xs font-mono">
-          <div class="flex items-center justify-between">
-            <span class="text-fv-slate uppercase text-[10px]">Вартість</span>
-            <strong class="text-fv-noir font-bold text-lg" x-text="currentDish.price + ' ₴'"></strong>
-          </div>
-          <div class="flex items-center justify-between">
-            <span class="text-fv-slate uppercase text-[10px]">Вага / Енергія</span>
-            <span class="text-fv-noir font-medium" x-text="currentDish.weight_grams + ' г · ' + currentDish.calories + ' ккал'"></span>
-          </div>
-          <div class="flex items-center justify-between">
-            <span class="text-fv-slate uppercase text-[10px]">Час подачі</span>
-            <span class="text-fv-noir font-medium" x-text="currentDish.prep_time"></span>
-          </div>
-        </div>
-      </div>
-
-    </div>
-
-    <div class="lg:hidden mt-6 pt-6 border-t border-fv-noir/10 space-y-4">
-      <div class="p-4 bg-fv-offwhite border border-fv-noir/10">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-[10px] font-mono uppercase tracking-widest text-fv-slate" x-text="currentDish.badge"></span>
-          <strong class="text-fv-noir font-bold font-mono text-base" x-text="currentDish.price + ' ₴'"></strong>
-        </div>
-        <h3 class="text-sm font-bold tracking-wider uppercase text-fv-noir mb-1" x-text="currentDish.title"></h3>
-        <p class="text-xs text-fv-slate mb-3" x-text="currentDish.subtitle"></p>
-        <div class="text-[11px] font-mono text-fv-slate mb-4" x-text="currentDish.weight_grams + ' г · ' + currentDish.calories + ' ккал · ' + currentDish.prep_time"></div>
-        <div class="flex flex-col gap-2">
-          <button
-            type="button"
-            @click="addToCart(currentDish)"
-            class="w-full py-3 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
-            <span>Додати до замовлення</span>
-          </button>
-          <button
-            type="button"
-            @click="askAiConcierge(currentDish)"
-            class="w-full py-2.5 border border-fv-noir/20 bg-white text-fv-noir text-xs font-mono uppercase tracking-wider hover:bg-fv-offwhite transition-colors flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>Запитати AI-консьєржа</span>
-          </button>
+          </template>
         </div>
       </div>
     </div>
-
   </div>
 </section>

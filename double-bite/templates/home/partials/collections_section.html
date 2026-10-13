@@ -216,93 +216,75 @@ function collectionsShowcase(initialCollections) {
 }
 </script>
 
-<section id="collections" x-data="collectionsShowcase({{ collections_json|default:'[]' }})" class="py-16 bg-white border-b border-fv-noir/10 select-none">
-  <div class="max-w-[1440px] mx-auto px-4 sm:px-8">
+<section id="collections" x-data="collectionsShowcase({{ collections_json|default:'[]' }})" class="db-section db-collections">
+  <div class="db-wrap">
 
-    <div class="flex items-center gap-6 text-xs font-mono text-fv-noir mb-8 pb-4 border-b border-fv-noir/10">
-      <span class="font-bold">02:</span>
-      <span class="uppercase tracking-widest text-fv-slate">Гастрономічні колекції страв</span>
-    </div>
+    <header class="db-head">
+      <div data-reveal>
+        <span class="db-kicker"><span class="db-kicker__num">02</span><span class="db-kicker__line"></span><span>Гастрономічні колекції страв</span></span>
+        <h2 class="db-head__title"><em>Гастрономічні</em>колекції</h2>
+      </div>
+      <div class="db-head__aside" data-reveal style="--d:.15s">
+        <p class="db-head__lead">Пʼять напрямів кухні Double Bite. Оберіть колекцію — і додайте страву в кошик просто звідси, без переходу в меню.</p>
+        <a href="/menu/" class="db-btn db-btn--dark">Переглянути все меню</a>
+      </div>
+    </header>
 
-    <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-10">
-      <div>
-        <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-fv-noir uppercase leading-none">
-          ГАСТРОНОМІЧНІ<br>КОЛЕКЦІЇ
-        </h2>
-      </div>
-      <div class="max-w-md">
-        <p class="text-xs sm:text-sm text-fv-slate leading-relaxed">
-          Серія авторських страв від бренд-шефа Double Bite, кожна з яких досліджує досконалий баланс форми, натуральних продуктів та смакових акцентів.
-        </p>
-      </div>
-      <div>
-        <a href="/menu/" class="px-6 py-3.5 bg-fv-noir text-white text-xs font-mono tracking-wider uppercase hover:bg-black transition-colors rounded-none shadow-xs inline-block">
-          Переглянути все меню →
-        </a>
-      </div>
-    </div>
+    <div class="db-collections__layout">
+      <nav class="db-coll-nav" role="tablist" aria-label="Колекції" data-reveal>
+        <template x-for="(col, idx) in collections" :key="'tab-' + idx">
+          <button
+            type="button"
+            role="tab"
+            class="db-coll-tab"
+            :class="{ 'is-active': activeCollectionIndex === idx }"
+            :aria-selected="activeCollectionIndex === idx"
+            @click="selectCollection(idx)"
+          >
+            <span class="db-coll-tab__num" x-text="(col.index < 10 ? '0' : '') + col.index"></span>
+            <span class="db-coll-tab__title" x-text="col.title"></span>
+            <svg class="db-coll-tab__arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
+        </template>
+      </nav>
 
-    <div class="flex flex-wrap gap-2 sm:gap-3 mb-8 border-b border-fv-noir/10 pb-6">
-      <template x-for="(col, idx) in collections" :key="idx">
-        <button
-          type="button"
-          @click="selectCollection(idx)"
-          :class="activeCollectionIndex === idx ? 'bg-fv-noir text-white border-fv-noir shadow-sm' : 'bg-fv-offwhite text-fv-noir border-fv-noir/10 hover:bg-[#EAEAEA]'"
-          class="px-4 py-2.5 text-xs font-mono uppercase tracking-wider border transition-all cursor-pointer flex items-center gap-2"
-        >
-          <span x-text="col.tag"></span>
-        </button>
-      </template>
-    </div>
-
-    <div class="mb-8 p-6 bg-fv-offwhite border border-fv-noir/10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-      <div>
-        <span class="text-[10px] font-mono uppercase tracking-widest text-fv-slate block mb-1" x-text="currentCollection.tag"></span>
-        <h3 class="text-xl font-bold text-fv-noir tracking-tight mb-1" x-text="currentCollection.title"></h3>
-        <p class="text-xs text-fv-slate mt-0.5" x-text="currentCollection.subtitle"></p>
-        <p class="text-xs text-fv-noir mt-2 leading-relaxed max-w-2xl" x-text="currentCollection.description"></p>
-      </div>
-      <div class="shrink-0">
-        <a
-          :href="'/menu/?category=' + currentCollection.slug"
-          class="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-fv-noir hover:underline underline-offset-4 py-2 font-bold"
-        >
-          <span>Дивитися всю колекцію в меню</span>
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-        </a>
-      </div>
-    </div>
-
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <template x-for="(dish, dIdx) in currentCollection.dishes" :key="dIdx">
-        <div class="dish-card-stagger bg-white p-6 rounded-none border border-fv-noir/10 flex flex-col justify-between hover:border-fv-noir/30 transition-all shadow-xs">
+      <div role="tabpanel" aria-live="polite">
+        <template x-for="col in [currentCollection]" :key="'panel-' + activeCollectionIndex">
           <div>
-            <div class="bg-fv-offwhite aspect-square p-4 flex items-center justify-center overflow-hidden mix-blend-multiply mb-4">
-              <img :src="dish.image" :alt="dish.title" class="w-full h-full object-contain mix-blend-multiply hover:scale-105 transition-transform duration-500">
+            <div class="db-coll-intro db-swap">
+              <div>
+                <span class="db-kicker db-coll-intro__tag" x-text="col.tag"></span>
+                <h3 class="db-coll-intro__title" x-text="col.title"></h3>
+                <p class="db-coll-intro__sub" x-text="col.subtitle"></p>
+                <p class="db-coll-intro__desc" x-text="col.description"></p>
+              </div>
+              <a :href="'/menu/?category=' + col.slug" class="db-link">
+                <span class="db-link__label">Дивитися всю колекцію в меню</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+              </a>
             </div>
-            <div class="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-fv-slate mb-1">
-              <span x-text="currentCollection.title"></span>
-              <span x-text="dish.weight_grams + ' г · ' + dish.calories + ' ккал'"></span>
+
+            <div class="db-dishes">
+              <template x-for="(dish, dIdx) in col.dishes" :key="activeCollectionIndex + '-' + dIdx">
+                <article class="db-dish dish-card-stagger" :style="'--i:' + dIdx">
+                  <div class="db-dish__media">
+                    <img :src="dish.image" :alt="dish.title" width="600" height="750" loading="lazy" decoding="async">
+                    <span class="db-dish__price" x-text="dish.price + ' ₴'"></span>
+                    <span class="db-dish__specs" x-text="dish.weight_grams + ' г · ' + dish.calories + ' ккал'"></span>
+                    <button type="button" class="db-dish__add" @click="addToCart(dish)" :aria-label="'Додати в кошик: ' + dish.title" title="В кошик">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    </button>
+                  </div>
+                  <div class="db-dish__body">
+                    <h4 class="db-dish__title" x-text="dish.title"></h4>
+                    <p class="db-dish__desc" x-text="dish.description"></p>
+                  </div>
+                </article>
+              </template>
             </div>
-            <h3 class="text-lg font-bold text-fv-noir tracking-tight mb-2" x-text="dish.title"></h3>
-            <p class="text-xs text-fv-slate leading-relaxed mb-4 line-clamp-2" x-text="dish.description"></p>
           </div>
-          <div class="pt-4 border-t border-fv-noir/10">
-            <div class="flex items-center justify-between mb-3 font-mono">
-              <span class="text-xs text-fv-slate uppercase">Вартість</span>
-              <span class="text-2xl font-medium text-fv-noir" x-text="dish.price + ' ₴'"></span>
-            </div>
-            <button
-              type="button"
-              @click="addToCart(dish)"
-              class="w-full py-3 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors rounded-none flex items-center justify-center gap-2 cursor-pointer font-medium"
-            >
-              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
-              <span>В кошик</span>
-            </button>
-          </div>
-        </div>
-      </template>
+        </template>
+      </div>
     </div>
 
   </div>

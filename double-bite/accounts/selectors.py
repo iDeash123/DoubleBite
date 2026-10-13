@@ -1,9 +1,12 @@
 import json
+import re
 from decimal import Decimal
 from typing import Any
 
 from django.core.exceptions import SynchronousOnlyOperation
 from django.db import DatabaseError
+
+_UNSPLASH_PHOTO_RE = re.compile(r'images\.unsplash\.com/(photo-[\w-]+)')
 
 DEFAULT_HERO_DISHES: list[dict[str, Any]] = [
     {
@@ -257,8 +260,19 @@ DEFAULT_COLLECTIONS_DATA: list[dict[str, Any]] = [
 ]
 
 
+def _local_showcase_image(url: str) -> str:
+    match = _UNSPLASH_PHOTO_RE.search(url or '')
+    if not match:
+        return url
+    relative = f'images/showcase/{match.group(1)}.webp'
+    from django.contrib.staticfiles import finders
+    from django.templatetags.static import static
+
+    return static(relative) if finders.find(relative) else url
+
+
 def get_home_page_context(total_amount: Decimal | None = None) -> dict[str, Any]:
-    hero_dishes = [dict(d) for d in DEFAULT_HERO_DISHES]
+    hero_dishes = [dict(d, image=_local_showcase_image(d['image'])) for d in DEFAULT_HERO_DISHES]
     collections_data = [
         {
             'index': c['index'],
@@ -267,7 +281,7 @@ def get_home_page_context(total_amount: Decimal | None = None) -> dict[str, Any]
             'title': c['title'],
             'subtitle': c['subtitle'],
             'description': c['description'],
-            'dishes': [dict(item) for item in c['dishes']],
+            'dishes': [dict(item, image=_local_showcase_image(item['image'])) for item in c['dishes']],
         }
         for c in DEFAULT_COLLECTIONS_DATA
     ]

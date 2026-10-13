@@ -30,6 +30,30 @@
 
   <link rel="stylesheet" href="{% static 'css/fonts.css' %}">
   <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
+  <style>
+    :root {
+      --btn-radius: 8px;
+    }
+    button:not(.rounded-full):not(.db-dish__add),
+    input[type="button"],
+    input[type="submit"],
+    input[type="reset"],
+    .db-btn,
+    .btn-primary,
+    a.db-btn,
+    a.btn-primary,
+    a[class~="bg-fv-noir"]:not([class*="col-span"]):not([class*="p-1.5"]) {
+      border-radius: var(--btn-radius) !important;
+    }
+    header,
+    header *:not(.rounded-full) {
+      border-radius: 0 !important;
+    }
+    .footer-newsletter-form {
+      border-radius: var(--btn-radius);
+      overflow: hidden;
+    }
+  </style>
 
   <script src="{% static 'js/htmx.min.js' %}"></script>
   <script defer src="{% static 'js/alpine.min.js' %}"></script>
@@ -277,7 +301,7 @@
           <p class="text-white/60 text-xs leading-relaxed mb-4">
             Підпишіться на сповіщення про нові сезонні позиції меню та спеціальні сети від шеф-кухаря.
           </p>
-          <form onsubmit="event.preventDefault(); alert('Дякуємо за підписку на оновлення Double Bite.');" class="flex border border-white/20 bg-white/5 rounded-none">
+          <form onsubmit="event.preventDefault(); alert('Дякуємо за підписку на оновлення Double Bite.');" class="flex border border-white/20 bg-white/5 footer-newsletter-form">
             <input
               type="email"
               placeholder="Введіть email адресу..."
@@ -286,7 +310,7 @@
             >
             <button
               type="submit"
-              class="px-5 bg-white text-fv-noir text-xs font-mono uppercase tracking-wider font-bold hover:bg-fv-offwhite transition-colors whitespace-nowrap rounded-none"
+              class="px-5 bg-white text-fv-noir text-xs font-mono uppercase tracking-wider font-bold hover:bg-fv-offwhite transition-colors whitespace-nowrap"
             >
               Підписатися
             </button>
