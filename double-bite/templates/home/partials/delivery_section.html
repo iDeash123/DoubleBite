@@ -7,48 +7,48 @@ function deliveryCalculator() {
       {
         name: 'Печерський',
         eta: '20–25 хв',
-        min_amount: 500,
-        fee: '65 ₴',
+        min_amount: {{ free_delivery_threshold|default:500|floatformat:'-2u' }},
+        fee: '{{ delivery_fee|default:65|floatformat:'-2u' }} ₴',
         courier_status: 'Кур\'єр #12 на термо-скутері · 1.8 км від вас',
         description: 'Експрес-зона ресторану: Липки, Арсенальна, Кловська'
       },
       {
         name: 'Шевченківський',
         eta: '25–30 хв',
-        min_amount: 500,
-        fee: '65 ₴',
+        min_amount: {{ free_delivery_threshold|default:500|floatformat:'-2u' }},
+        fee: '{{ delivery_fee|default:65|floatformat:'-2u' }} ₴',
         courier_status: 'Кур\'єр #07 біля Золотих Воріт · 2.4 км від вас',
         description: 'Центр, Золоті Ворота, Лук\'янівка, КПІ'
       },
       {
         name: 'Подільський',
         eta: '25–30 хв',
-        min_amount: 500,
-        fee: '65 ₴',
+        min_amount: {{ free_delivery_threshold|default:500|floatformat:'-2u' }},
+        fee: '{{ delivery_fee|default:65|floatformat:'-2u' }} ₴',
         courier_status: 'Кур\'єр #19 на Подолі · 2.9 км від вас',
         description: 'Контрактова площа, Поштова, Воздвиженка'
       },
       {
         name: 'Оболонський',
         eta: '35–40 хв',
-        min_amount: 500,
-        fee: '65 ₴',
+        min_amount: {{ free_delivery_threshold|default:500|floatformat:'-2u' }},
+        fee: '{{ delivery_fee|default:65|floatformat:'-2u' }} ₴',
         courier_status: 'Кур\'єр #03 біля набережної · 5.1 км від вас',
         description: 'Оболонська набережна, Героїв Дніпра, Мінська'
       },
       {
         name: 'Голосіївський',
         eta: '35–45 хв',
-        min_amount: 500,
-        fee: '65 ₴',
+        min_amount: {{ free_delivery_threshold|default:500|floatformat:'-2u' }},
+        fee: '{{ delivery_fee|default:65|floatformat:'-2u' }} ₴',
         courier_status: 'Кур\'єр #15 у Голосієві · 5.8 км від вас',
         description: 'Деміївка, Голосіївський парк, ВДНГ, Теремки'
       },
       {
         name: 'Лівий берег',
         eta: '40–50 хв',
-        min_amount: 500,
-        fee: '65 ₴',
+        min_amount: {{ free_delivery_threshold|default:500|floatformat:'-2u' }},
+        fee: '{{ delivery_fee|default:65|floatformat:'-2u' }} ₴',
         courier_status: 'Кур\'єр #22 на Дарниці · 7.2 км від вас',
         description: 'Дніпровський та Дарницький райони, Позняки, Осокорки'
       }
@@ -115,8 +115,8 @@ function deliveryCalculator() {
             </template>
             <div>
               <div class="db-eta__fee">
-                <div><span class="db-eta__label">Від 500 ₴</span><b class="is-free">0 ₴</b></div>
-                <div><span class="db-eta__label">До 500 ₴</span><b x-text="currentDistrict.fee"></b></div>
+                <div><span class="db-eta__label">Від {{ free_delivery_threshold|default:500|floatformat:'-2u' }} ₴</span><b class="is-free">0 ₴</b></div>
+                <div><span class="db-eta__label">До {{ free_delivery_threshold|default:500|floatformat:'-2u' }} ₴</span><b x-text="currentDistrict.fee"></b></div>
               </div>
               <div class="db-eta__courier">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -128,17 +128,17 @@ function deliveryCalculator() {
 
         <div class="db-freebar" data-reveal>
           <div class="db-freebar__row">
-            <span>Шкала безкоштовної доставки (поріг 500 ₴)</span>
-            <b>{{ total_amount|default:'0' }} / 500 ₴</b>
+            <span>Шкала безкоштовної доставки (поріг {{ free_delivery_threshold|default:500|floatformat:'-2u' }} ₴)</span>
+            <b>{{ total_amount|default:'0' }} / {{ free_delivery_threshold|default:500|floatformat:'-2u' }} ₴</b>
           </div>
           <div class="db-freebar__track">
-            <div class="db-freebar__fill" style="width: {% if meets_free_delivery or total_amount >= 500 %}100{% else %}{% widthratio total_amount|default:0 500 100 %}{% endif %}%;"></div>
+            <div class="db-freebar__fill" style="width: {% if meets_free_delivery or total_amount >= free_delivery_threshold|default:500 %}100{% else %}{% widthratio total_amount|default:0 free_delivery_threshold|default:500 100 %}{% endif %}%;"></div>
           </div>
           <div class="db-freebar__note">
-            {% if meets_free_delivery or total_amount >= 500 %}
+            {% if meets_free_delivery or total_amount >= free_delivery_threshold|default:500 %}
               <span class="is-ok">Безкоштовна доставка активна для вашого замовлення</span>
             {% else %}
-              Додайте ще <strong>{{ free_delivery_remaining|default:'500' }} ₴</strong> до кошика для безкоштовної доставки.
+              Додайте ще <strong>{{ free_delivery_remaining|default:free_delivery_threshold|default:'500' }} ₴</strong> до кошика для безкоштовної доставки.
             {% endif %}
           </div>
         </div>

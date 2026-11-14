@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.contrib.staticfiles import finders
-from django.test import AsyncClient, Client, TestCase
+from django.test import AsyncClient, Client, TestCase, override_settings
 from django.urls import reverse
 from menu.models import Category, Dish
 
@@ -131,5 +131,23 @@ class HomeShowcaseTest(TestCase):
         self.assertEqual(ctx['free_delivery_remaining'], Decimal('0.00'))
         self.assertEqual(len(ctx['hero_dishes']), 4)
         self.assertEqual(len(ctx['collections_data']), 5)
+
+    @override_settings(
+        FREE_DELIVERY_THRESHOLD=Decimal('750.00'),
+        DELIVERY_FEE=Decimal('90.00'),
+        RESTAURANT_ADDRESS='вул. Сагайдачного, 15, Київ',
+        RESTAURANT_HOTLINE='+380 44 999 00 11',
+    )
+    def test_home_templates_reflect_unified_delivery_and_contact_settings(self):
+        response = self.client.get(reverse('home'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'БЕЗКОШТОВНА ДОСТАВКА ВІД 750 ₴')
+        self.assertContains(response, 'Від 750 ₴')
+        self.assertContains(response, 'min_amount: 750')
+        self.assertContains(response, '90 ₴')
+        self.assertContains(response, 'вул. Сагайдачного, 15, Київ')
+        self.assertContains(response, '+380 44 999 00 11')
+        self.assertNotContains(response, '500 ₴')
+        self.assertNotContains(response, '65 ₴')
 
 

@@ -41,11 +41,6 @@ is_testing = (
     or env_bool('DJANGO_TESTING', False)
 )
 
-SITE_DOMAIN = os.getenv(
-    'SITE_DOMAIN',
-    'localhost:8000' if (DEBUG or is_testing) else 'doublebite.ua',
-).strip()
-SITE_PROTOCOL = os.getenv('SITE_PROTOCOL', 'http' if (DEBUG or is_testing) else 'https').strip()
 DJANGO_ADMIN_URL = normalize_admin_url(os.getenv('DJANGO_ADMIN_URL', 'admin/'))
 
 SECRET_KEY = os.getenv('SECRET_KEY', '')
@@ -79,9 +74,15 @@ elif not ALLOWED_HOSTS:
 if is_testing and 'testserver' not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append('testserver')
 
-CSRF_TRUSTED_ORIGINS = [
-    origin.strip() for origin in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if origin.strip()
-]
+_domain_candidates = [h for h in ALLOWED_HOSTS if h not in {'testserver', '*', '0.0.0.0'}]
+SITE_DOMAIN = (
+    os.getenv('SITE_DOMAIN', '').strip()
+    or (_domain_candidates[0] if _domain_candidates else '127.0.0.1:8000')
+)
+SITE_PROTOCOL = (
+    os.getenv('SITE_PROTOCOL', '').strip()
+    or ('http' if (DEBUG or is_testing) else 'https')
+)
 
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
@@ -202,6 +203,13 @@ elif 'postgresql' in db_engine:
     if not is_testing and (not db_name or not db_user or not db_password):
         raise ImproperlyConfigured(
             'DB_NAME, DB_USER, and DB_PASSWORD environment variables are required for PostgreSQL'
+        )
+    if not is_testing and not DEBUG and db_password.lower() in {
+        'postgres',
+        'change_this_to_a_secure_db_password',
+    }:
+        raise ImproperlyConfigured(
+            'DB_PASSWORD must not use default or placeholder credentials when DEBUG=False'
         )
     DATABASES = {
         'default': {

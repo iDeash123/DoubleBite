@@ -65,4 +65,6 @@ class NativePartialsTests(TestCase):
             HTTP_HX_HISTORY_RESTORE_REQUEST='true',
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn('<!DOCTYPE html>', response.content.decode('utf-8'))
+        html = response.content.decode('utf-8')
+        self.assertIn('<!DOCTYPE html>', html)
+        self.assertIn(self.category.name, html)

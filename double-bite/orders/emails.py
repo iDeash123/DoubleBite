@@ -6,7 +6,7 @@ from django.conf import settings
 from django.urls import reverse
 
 
-def get_tracking_url(order: Any, domain: str | None = None, protocol: str = 'https') -> str:
+def get_tracking_url(order: Any, domain: str | None = None, protocol: str | None = None) -> str:
     path = reverse('orders:tracking', kwargs={'order_number': order.order_number})
     token = getattr(order, 'access_token', None)
     if token:
@@ -18,14 +18,15 @@ def get_tracking_url(order: Any, domain: str | None = None, protocol: str = 'htt
             effective_domain = allowed[0]
     if not effective_domain:
         effective_domain = 'localhost:8000'
-    return f"{protocol}://{effective_domain}{path}"
+    effective_protocol = protocol or getattr(settings, 'SITE_PROTOCOL', 'https')
+    return f"{effective_protocol}://{effective_domain}{path}"
 
 
 def send_order_confirmation_email(
     order: Any,
     recipient_email: str | None = None,
     domain: str | None = None,
-    protocol: str = 'https',
+    protocol: str | None = None,
 ) -> int:
     to_email = recipient_email
     if not to_email and getattr(order, 'user', None) and order.user.email:
@@ -36,11 +37,12 @@ def send_order_confirmation_email(
     if not to_email:
         return 0
 
-    tracking_url = get_tracking_url(order, domain=domain, protocol=protocol)
+    effective_protocol = protocol or getattr(settings, 'SITE_PROTOCOL', 'https')
+    tracking_url = get_tracking_url(order, domain=domain, protocol=effective_protocol)
     context = {
         'order': order,
         'tracking_url': tracking_url,
-        'protocol': protocol,
+        'protocol': effective_protocol,
         'domain': domain,
     }
     return send_templated_email(
@@ -55,7 +57,7 @@ def send_order_status_update_email(
     order: Any,
     recipient_email: str | None = None,
     domain: str | None = None,
-    protocol: str = 'https',
+    protocol: str | None = None,
 ) -> int:
     to_email = recipient_email
     if not to_email and getattr(order, 'user', None) and order.user.email:
@@ -66,11 +68,12 @@ def send_order_status_update_email(
     if not to_email:
         return 0
 
-    tracking_url = get_tracking_url(order, domain=domain, protocol=protocol)
+    effective_protocol = protocol or getattr(settings, 'SITE_PROTOCOL', 'https')
+    tracking_url = get_tracking_url(order, domain=domain, protocol=effective_protocol)
     context = {
         'order': order,
         'tracking_url': tracking_url,
-        'protocol': protocol,
+        'protocol': effective_protocol,
         'domain': domain,
     }
     return send_templated_email(
@@ -86,7 +89,7 @@ def send_stripe_receipt_email(
     session: Any = None,
     recipient_email: str | None = None,
     domain: str | None = None,
-    protocol: str = 'https',
+    protocol: str | None = None,
 ) -> int:
     to_email = recipient_email
     if not to_email and session:
@@ -103,11 +106,12 @@ def send_stripe_receipt_email(
     if not to_email:
         return 0
 
-    tracking_url = get_tracking_url(order, domain=domain, protocol=protocol)
+    effective_protocol = protocol or getattr(settings, 'SITE_PROTOCOL', 'https')
+    tracking_url = get_tracking_url(order, domain=domain, protocol=effective_protocol)
     context = {
         'order': order,
         'tracking_url': tracking_url,
-        'protocol': protocol,
+        'protocol': effective_protocol,
         'domain': domain,
     }
     return send_templated_email(
@@ -123,7 +127,7 @@ def send_refund_notice_email(
     charge: Any = None,
     recipient_email: str | None = None,
     domain: str | None = None,
-    protocol: str = 'https',
+    protocol: str | None = None,
 ) -> int:
     to_email = recipient_email
     if not to_email and charge:
@@ -151,12 +155,13 @@ def send_refund_notice_email(
     if refund_amount is None and hasattr(order, 'total_amount'):
         refund_amount = order.total_amount
 
-    tracking_url = get_tracking_url(order, domain=domain, protocol=protocol)
+    effective_protocol = protocol or getattr(settings, 'SITE_PROTOCOL', 'https')
+    tracking_url = get_tracking_url(order, domain=domain, protocol=effective_protocol)
     context = {
         'order': order,
         'refund_amount': refund_amount,
         'tracking_url': tracking_url,
-        'protocol': protocol,
+        'protocol': effective_protocol,
         'domain': domain,
     }
     return send_templated_email(

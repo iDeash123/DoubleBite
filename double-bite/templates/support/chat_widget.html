@@ -162,7 +162,7 @@ window.__formatMarkdown = function(text) {
         this.loading = false;
         this.messages.push({
           role: 'assistant',
-          content: 'Вибачте, асистент тимчасово недоступний. Будь ласка, зверніться за номером: +380 44 123 45 67.'
+          content: 'Вибачте, асистент тимчасово недоступний. Будь ласка, зверніться за номером: {{ restaurant_hotline|default:'+380 44 123 45 67'|escapejs }}.'
         });
       }
       this.$nextTick(() => {
@@ -217,7 +217,7 @@ window.__formatMarkdown = function(text) {
           <span class="font-bold text-sm font-sans tracking-tight text-fv-noir">double bite<span class="text-[10px] font-mono align-top ml-0.5">™</span></span>
           <span :class="isEscalated ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-fv-offwhite text-fv-slate border-fv-noir/10'" class="text-[9px] font-mono uppercase tracking-widest px-1.5 py-0.5 border" x-text="isEscalated ? 'Адміністратор' : 'Mistral AI'"></span>
         </div>
-        <div class="text-[10px] font-mono uppercase tracking-wider text-fv-slate mt-0.5" x-text="isEscalated ? '⚠️ Підключено персонал · +380 44 123 45 67' : 'Персональний гастро-консьєрж'"></div>
+        <div class="text-[10px] font-mono uppercase tracking-wider text-fv-slate mt-0.5" x-text="isEscalated ? '⚠️ Підключено персонал · {{ restaurant_hotline|default:'+380 44 123 45 67'|escapejs }}' : 'Персональний гастро-консьєрж'"></div>
       </div>
       <div class="flex items-center gap-2">
         <button @click="resetChat()" title="Почати новий діалог" class="text-[10px] font-mono uppercase px-2 py-1 bg-fv-offwhite hover:bg-fv-lightgray text-fv-noir border border-fv-noir/10 transition-colors">

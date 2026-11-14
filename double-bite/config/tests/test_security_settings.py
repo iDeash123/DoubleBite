@@ -2,6 +2,7 @@ import os
 import re
 import subprocess
 import sys
+import textwrap
 
 from django.conf import settings
 from django.test import SimpleTestCase, TestCase
@@ -130,6 +131,40 @@ class SecretKeyValidationTest(SimpleTestCase):
             self.assertNotEqual(proc.returncode, 0)
             self.assertIn('ImproperlyConfigured', proc.stderr)
 
+    def test_database_rejects_default_or_placeholder_password_in_production(self):
+        for bad_password in ('postgres', 'change_this_to_a_secure_db_password'):
+            proc = self._run_settings_import(DB_PASSWORD=bad_password)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn('ImproperlyConfigured', proc.stderr)
+
+    def test_site_domain_falls_back_to_first_allowed_host_in_production(self):
+        env = os.environ.copy()
+        env.update(self.BASE_PROD_ENV)
+        env['ALLOWED_HOSTS'] = 'shop.doublebite.ua,www.shop.doublebite.ua'
+        env.pop('SITE_DOMAIN', None)
+        env.pop('SITE_PROTOCOL', None)
+        code = (
+            'import config.settings as s; '
+            'assert s.SITE_DOMAIN == "shop.doublebite.ua", s.SITE_DOMAIN; '
+            'assert s.SITE_PROTOCOL == "https", s.SITE_PROTOCOL'
+        )
+        proc = subprocess.run(
+            [sys.executable, '-c', code],
+            cwd=str(settings.BASE_DIR),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+        empty_override = self._run_settings_import(
+            code=code,
+            ALLOWED_HOSTS='shop.doublebite.ua',
+            SITE_DOMAIN='',
+        )
+        self.assertEqual(empty_override.returncode, 0, empty_override.stderr)
+
     def test_redis_url_required_in_production(self):
         proc = self._run_settings_import(REDIS_URL='')
         self.assertNotEqual(proc.returncode, 0)
@@ -183,6 +218,66 @@ class SecretKeyValidationTest(SimpleTestCase):
             'import os, config.asgi; '
             'assert "DJANGO_ALLOW_ASYNC_UNSAFE" not in os.environ'
         )
+        proc = subprocess.run(
+            [sys.executable, '-c', code],
+            cwd=str(settings.BASE_DIR),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_dev_static_and_media_cache_control_no_cache(self):
+        env = os.environ.copy()
+        env.update(self.BASE_PROD_ENV)
+        env['DEBUG'] = 'True'
+        env['DJANGO_TESTING'] = '0'
+        env['DB_ENGINE'] = 'django.db.backends.sqlite3'
+        code = textwrap.dedent("""
+            import asyncio, pathlib, tempfile, config.asgi as asgi_mod, config.urls as urls_mod
+            from django.test import RequestFactory
+
+            async def check_asgi():
+                events = []
+                reqs = [{"type": "http.request", "body": b"", "more_body": False}]
+                async def receive():
+                    if reqs:
+                        return reqs.pop(0)
+                    await asyncio.sleep(1)
+                    return {"type": "http.disconnect"}
+                async def send(msg):
+                    events.append(msg)
+                scope = {
+                    "type": "http",
+                    "asgi": {"version": "3.0"},
+                    "http_version": "1.1",
+                    "method": "GET",
+                    "scheme": "http",
+                    "path": "/static/css/fonts.css",
+                    "raw_path": b"/static/css/fonts.css",
+                    "query_string": b"",
+                    "headers": [],
+                }
+                await asgi_mod.application(scope, receive, send)
+                start = next(e for e in events if e["type"] == "http.response.start")
+                assert start["status"] == 200, start
+                hdrs = {k.lower(): v for k, v in start["headers"]}
+                assert hdrs.get(b"cache-control") == b"no-cache, must-revalidate", hdrs
+
+            asyncio.run(check_asgi())
+            rf = RequestFactory()
+            with tempfile.TemporaryDirectory() as tmp:
+                pathlib.Path(tmp, "sample.txt").write_text("ok", encoding="utf-8")
+                resp = urls_mod.cached_media_serve(
+                    rf.get("/media/sample.txt"), "sample.txt", document_root=tmp
+                )
+                try:
+                    assert resp.status_code == 200
+                    assert resp["Cache-Control"] == "no-cache, must-revalidate", resp.headers
+                finally:
+                    resp.close()
+        """)
         proc = subprocess.run(
             [sys.executable, '-c', code],
             cwd=str(settings.BASE_DIR),

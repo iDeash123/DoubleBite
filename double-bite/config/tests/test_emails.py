@@ -150,3 +150,36 @@ class TemplatedEmailServiceTests(SimpleTestCase):
         self.assertNotIn('{', email.body)
         self.assertIn(settings.RESTAURANT_ADDRESS, email.body)
         self.assertIn(settings.RESTAURANT_HOTLINE, email.body)
+
+    @override_settings(
+        RESTAURANT_ADDRESS='вул. Сагайдачного, 15, Київ',
+        RESTAURANT_HOTLINE='+380 44 999 00 11',
+        SITE_DOMAIN='shop.doublebite.ua',
+        SITE_PROTOCOL='http',
+    )
+    def test_txt_emails_and_urls_respect_unified_contacts_and_protocol(self):
+        from types import SimpleNamespace
+
+        from orders.emails import get_tracking_url
+
+        send_templated_email(
+            subject='Вітаємо',
+            template_prefix='emails/welcome',
+            context={
+                'user': SimpleNamespace(email='guest@doublebite.ua'),
+                'customer_name': 'Гість',
+                'protocol': 'http',
+                'domain': 'shop.doublebite.ua',
+            },
+            recipient_list=['guest@doublebite.ua'],
+        )
+        self.assertEqual(len(mail.outbox), 1)
+        body = mail.outbox[0].body
+        self.assertIn('вул. Сагайдачного, 15, Київ', body)
+        self.assertIn('+380 44 999 00 11', body)
+        self.assertNotIn('вул. Володимирська, 42, Київ', body)
+        self.assertNotIn('+380 44 123 45 67', body)
+
+        dummy_order = SimpleNamespace(order_number='DB-777', access_token='tok-123')
+        url = get_tracking_url(dummy_order)
+        self.assertEqual(url, 'http://shop.doublebite.ua/orders/tracking/DB-777/?t=tok-123')

@@ -5,7 +5,7 @@ from django.conf import settings
 from django.urls import reverse
 
 
-def get_admin_ticket_url(ticket: Any, domain: str | None = None, protocol: str = 'https') -> str:
+def get_admin_ticket_url(ticket: Any, domain: str | None = None, protocol: str | None = None) -> str:
     try:
         path = reverse('admin:support_supportticket_change', args=[ticket.id])
     except Exception:
@@ -18,14 +18,15 @@ def get_admin_ticket_url(ticket: Any, domain: str | None = None, protocol: str =
             effective_domain = allowed[0]
     if not effective_domain:
         effective_domain = 'localhost:8000'
-    return f"{protocol}://{effective_domain}{path}"
+    effective_protocol = protocol or getattr(settings, 'SITE_PROTOCOL', 'https')
+    return f"{effective_protocol}://{effective_domain}{path}"
 
 
 def send_ticket_escalated_email(
     ticket: Any,
     recipient_email: str | None = None,
     domain: str | None = None,
-    protocol: str = 'https',
+    protocol: str | None = None,
 ) -> int:
     admin_email = recipient_email or getattr(settings, 'ADMIN_EMAIL', 'admin@doublebite.ua')
     if not admin_email:
@@ -38,7 +39,8 @@ def send_ticket_escalated_email(
         customer_name = getattr(user, 'first_name', '') or getattr(user, 'username', '') or getattr(user, 'email', '') or 'Гість'
         customer_email = getattr(user, 'email', None) or 'Не вказано'
 
-    admin_ticket_url = get_admin_ticket_url(ticket, domain=domain, protocol=protocol)
+    effective_protocol = protocol or getattr(settings, 'SITE_PROTOCOL', 'https')
+    admin_ticket_url = get_admin_ticket_url(ticket, domain=domain, protocol=effective_protocol)
     reason_display = ticket.get_reason_display() if hasattr(ticket, 'get_reason_display') else ticket.reason
 
     recent_messages = []
@@ -55,7 +57,7 @@ def send_ticket_escalated_email(
         'customer_email': customer_email,
         'admin_ticket_url': admin_ticket_url,
         'recent_messages': recent_messages,
-        'protocol': protocol,
+        'protocol': effective_protocol,
         'domain': domain,
     }
     return send_templated_email(

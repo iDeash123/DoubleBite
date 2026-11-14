@@ -63,7 +63,10 @@ def catalog_view(request: HttpRequest, category_slug: str | None = None) -> Http
         only_available=True,
         ordering=ordering,
     )
-    categories = [] if request.headers.get('HX-Request') else get_active_categories()
+    is_htmx_partial = bool(request.headers.get('HX-Request')) and not bool(
+        request.headers.get('HX-History-Restore-Request')
+    )
+    categories = [] if is_htmx_partial else get_active_categories()
 
     paginator = Paginator(dishes_qs, DISHES_PER_PAGE)
     page_obj = paginator.get_page(page_number)
@@ -82,7 +85,7 @@ def catalog_view(request: HttpRequest, category_slug: str | None = None) -> Http
         'total_dishes': paginator.count,
     }
 
-    if request.headers.get('HX-Request') and not request.headers.get('HX-History-Restore-Request'):
+    if is_htmx_partial:
         return render_partial_or_full(request, 'menu/catalog.html#dish-grid', context)
 
     return render_partial_or_full(request, 'menu/catalog.html', context)
