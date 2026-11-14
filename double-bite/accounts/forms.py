@@ -1,9 +1,11 @@
 from typing import Any
 
+from config import emails as config_emails
 from django import forms
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.forms import PasswordResetForm, SetPasswordForm
 from django.contrib.auth.password_validation import validate_password
+from django.template.loader import render_to_string
 
 from .models import DeliveryAddress
 
@@ -161,6 +163,28 @@ class CustomPasswordResetForm(PasswordResetForm):
             'class': 'w-full px-4 py-2.5 border border-fv-noir/20 bg-white text-xs font-mono text-fv-noir focus:border-fv-noir outline-none rounded-none transition-colors',
             'placeholder': 'name@example.com',
         })
+
+    def send_mail(
+        self,
+        subject_template_name: str,
+        email_template_name: str,
+        context: dict[str, Any],
+        from_email: str | None,
+        to_email: str,
+        html_email_template_name: str | None = None,
+    ) -> None:
+        subject = render_to_string(subject_template_name, context)
+        subject = ''.join(subject.splitlines())
+        config_emails.send_templated_email(
+            subject=subject,
+            template_prefix=email_template_name,
+            context=context,
+            recipient_list=[to_email],
+            from_email=from_email,
+            html_template=html_email_template_name,
+            txt_template=email_template_name,
+            include_html=html_email_template_name is not None,
+        )
 
 
 class CustomSetPasswordForm(SetPasswordForm):

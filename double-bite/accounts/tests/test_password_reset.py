@@ -1,10 +1,16 @@
+from unittest.mock import patch
+
+from config import emails as config_emails
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.core import mail
-from django.test import Client, TestCase
+from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
+
+from accounts.forms import CustomPasswordResetForm
 
 User = get_user_model()
 
@@ -135,3 +141,64 @@ class PasswordResetTests(TestCase):
         self.assertEqual(welcome_email.alternatives[0][1], 'text/html')
         self.assertIn('#F6F6F6', welcome_email.alternatives[0][0])
         self.assertIn('#262626', welcome_email.alternatives[0][0])
+
+    def test_password_reset_renders_default_contacts_in_html_and_txt(self):
+        response = self.client.post(
+            reverse('accounts:password_reset'),
+            {'email': self.user.email},
+        )
+        self.assertRedirects(response, reverse('accounts:password_reset_done'))
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        html = email.alternatives[0][0]
+        self.assertIn(settings.RESTAURANT_ADDRESS, html)
+        self.assertIn(settings.RESTAURANT_HOTLINE, html)
+        self.assertIn(settings.RESTAURANT_ADDRESS, email.body)
+        self.assertIn(settings.RESTAURANT_HOTLINE, email.body)
+
+    @override_settings(
+        RESTAURANT_ADDRESS='вул. Сагайдачного, 15, Київ',
+        RESTAURANT_HOTLINE='+380 44 999 00 11',
+        DEFAULT_FROM_EMAIL='Double Bite Test <reset@doublebite.ua>',
+    )
+    def test_password_reset_uses_send_templated_email_and_overridden_contacts(self):
+        with patch(
+            'config.emails.send_templated_email',
+            wraps=config_emails.send_templated_email,
+        ) as mock_send:
+            response = self.client.post(
+                reverse('accounts:password_reset'),
+                {'email': self.user.email},
+            )
+
+        self.assertRedirects(response, reverse('accounts:password_reset_done'))
+        mock_send.assert_called_once()
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        self.assertEqual(email.from_email, 'Double Bite Test <reset@doublebite.ua>')
+        self.assertIn('вул. Сагайдачного, 15, Київ', email.body)
+        self.assertIn('+380 44 999 00 11', email.body)
+        self.assertNotIn('вул. Володимирська, 42, Київ', email.body)
+        self.assertNotIn('+380 44 123 45 67', email.body)
+
+        html = email.alternatives[0][0]
+        self.assertIn('вул. Сагайдачного, 15, Київ', html)
+        self.assertIn('+380 44 999 00 11', html)
+        self.assertNotIn('вул. Володимирська, 42, Київ', html)
+        self.assertNotIn('+380 44 123 45 67', html)
+
+    def test_password_reset_form_without_html_template_omits_html_alternative(self):
+        form = CustomPasswordResetForm({'email': self.user.email})
+        self.assertTrue(form.is_valid())
+        request = RequestFactory().post('/accounts/password_reset/')
+        form.save(
+            subject_template_name='emails/password_reset_subject.txt',
+            email_template_name='emails/password_reset_email.txt',
+            html_email_template_name=None,
+            request=request,
+        )
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        self.assertEqual(len(email.alternatives), 0)
+        self.assertIn(settings.RESTAURANT_ADDRESS, email.body)
+        self.assertIn(settings.RESTAURANT_HOTLINE, email.body)

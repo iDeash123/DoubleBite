@@ -70,8 +70,8 @@ def cart_context(request: HttpRequest) -> dict[str, Any]:
             settings, 'FREE_DELIVERY_THRESHOLD', DEFAULT_FREE_DELIVERY_THRESHOLD
         ),
         'delivery_fee': getattr(settings, 'DELIVERY_FEE', DEFAULT_DELIVERY_FEE),
-        'restaurant_address': getattr(settings, 'RESTAURANT_ADDRESS', DEFAULT_RESTAURANT_ADDRESS),
-        'restaurant_hotline': getattr(settings, 'RESTAURANT_HOTLINE', DEFAULT_RESTAURANT_HOTLINE),
+        'restaurant_address': getattr(settings, 'RESTAURANT_ADDRESS', '') or DEFAULT_RESTAURANT_ADDRESS,
+        'restaurant_hotline': getattr(settings, 'RESTAURANT_HOTLINE', '') or DEFAULT_RESTAURANT_HOTLINE,
         'meets_min_amount': LazyValue(lambda: _get_summary().meets_min_amount),
         'cart_items_count': LazyValue(lambda: _get_summary().total_quantity),
     }

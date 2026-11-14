@@ -1,7 +1,6 @@
 import mimetypes
 import os
 import sys
-from decimal import Decimal
 from pathlib import Path
 
 mimetypes.add_type('image/webp', '.webp')
@@ -23,16 +22,17 @@ from config.constants import (
     DEFAULT_RESTAURANT_ADDRESS,
     DEFAULT_RESTAURANT_HOTLINE,
     env_bool,
+    env_decimal,
+    env_int,
+    env_str,
     normalize_admin_url,
 )
 
-MIN_ORDER_AMOUNT = Decimal(os.getenv('MIN_ORDER_AMOUNT', str(DEFAULT_MIN_ORDER_AMOUNT)))
-FREE_DELIVERY_THRESHOLD = Decimal(
-    os.getenv('FREE_DELIVERY_THRESHOLD', str(DEFAULT_FREE_DELIVERY_THRESHOLD))
-)
-DELIVERY_FEE = Decimal(os.getenv('DELIVERY_FEE', str(DEFAULT_DELIVERY_FEE)))
-RESTAURANT_ADDRESS = os.getenv('RESTAURANT_ADDRESS', DEFAULT_RESTAURANT_ADDRESS)
-RESTAURANT_HOTLINE = os.getenv('RESTAURANT_HOTLINE', DEFAULT_RESTAURANT_HOTLINE)
+MIN_ORDER_AMOUNT = env_decimal('MIN_ORDER_AMOUNT', DEFAULT_MIN_ORDER_AMOUNT)
+FREE_DELIVERY_THRESHOLD = env_decimal('FREE_DELIVERY_THRESHOLD', DEFAULT_FREE_DELIVERY_THRESHOLD)
+DELIVERY_FEE = env_decimal('DELIVERY_FEE', DEFAULT_DELIVERY_FEE)
+RESTAURANT_ADDRESS = env_str('RESTAURANT_ADDRESS', DEFAULT_RESTAURANT_ADDRESS)
+RESTAURANT_HOTLINE = env_str('RESTAURANT_HOTLINE', DEFAULT_RESTAURANT_HOTLINE)
 
 DEBUG = env_bool('DEBUG', False)
 is_testing = (
@@ -143,7 +143,7 @@ if not DEBUG:
     SECURE_SSL_REDIRECT = env_bool('SECURE_SSL_REDIRECT', True)
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
-    SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '31536000'))
+    SECURE_HSTS_SECONDS = env_int('SECURE_HSTS_SECONDS', 31536000)
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
     SECURE_CROSS_ORIGIN_OPENER_POLICY = 'same-origin'
@@ -278,7 +278,7 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-ADMIN_NAME = os.getenv('ADMIN_NAME', 'Double Bite Admin').strip()
+ADMIN_NAME = env_str('ADMIN_NAME', 'Double Bite Admin')
 ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', 'admin@doublebite.ua').strip()
 ADMINS = [(ADMIN_NAME, ADMIN_EMAIL)] if ADMIN_EMAIL else []
 
@@ -364,23 +364,23 @@ LOGGING = {
 if is_testing:
     EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'
 else:
-    EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
+    EMAIL_BACKEND = env_str('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
 
-EMAIL_HOST = os.getenv('EMAIL_HOST', 'localhost')
-EMAIL_PORT = int(os.getenv('EMAIL_PORT', '1025'))
+EMAIL_HOST = env_str('EMAIL_HOST', 'localhost')
+EMAIL_PORT = env_int('EMAIL_PORT', 1025)
 EMAIL_USE_TLS = env_bool('EMAIL_USE_TLS', False)
 EMAIL_USE_SSL = env_bool('EMAIL_USE_SSL', False)
 if EMAIL_USE_TLS and EMAIL_USE_SSL:
     raise ImproperlyConfigured('EMAIL_USE_TLS and EMAIL_USE_SSL cannot both be True')
-EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', '10'))
+EMAIL_TIMEOUT = env_int('EMAIL_TIMEOUT', 10)
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
-DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'Double Bite <noreply@doublebite.ua>')
+DEFAULT_FROM_EMAIL = env_str('DEFAULT_FROM_EMAIL', 'Double Bite <noreply@doublebite.ua>')
 
 STRIPE_PUBLIC_KEY = os.getenv('STRIPE_PUBLIC_KEY', '')
 STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', '')
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', '')
-STRIPE_ORDER_SUCCESS_STATUS = os.getenv('STRIPE_ORDER_SUCCESS_STATUS', 'PAID')
+STRIPE_ORDER_SUCCESS_STATUS = env_str('STRIPE_ORDER_SUCCESS_STATUS', 'PAID')
 
 if is_testing:
     CACHES = {

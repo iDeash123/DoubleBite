@@ -1,8 +1,7 @@
 from decimal import Decimal
 from typing import Any
 
-from config.emails import send_templated_email
-from django.conf import settings
+from config.emails import resolve_site_domain, resolve_site_protocol, send_templated_email
 from django.urls import reverse
 
 
@@ -11,14 +10,8 @@ def get_tracking_url(order: Any, domain: str | None = None, protocol: str | None
     token = getattr(order, 'access_token', None)
     if token:
         path = f"{path}?t={token}"
-    effective_domain = domain or getattr(settings, 'SITE_DOMAIN', None)
-    if not effective_domain and getattr(settings, 'ALLOWED_HOSTS', None):
-        allowed = [h for h in settings.ALLOWED_HOSTS if h and '*' not in h and h != '0.0.0.0']
-        if allowed:
-            effective_domain = allowed[0]
-    if not effective_domain:
-        effective_domain = 'localhost:8000'
-    effective_protocol = protocol or getattr(settings, 'SITE_PROTOCOL', 'https')
+    effective_domain = resolve_site_domain(domain)
+    effective_protocol = resolve_site_protocol(protocol)
     return f"{effective_protocol}://{effective_domain}{path}"
 
 
@@ -37,13 +30,14 @@ def send_order_confirmation_email(
     if not to_email:
         return 0
 
-    effective_protocol = protocol or getattr(settings, 'SITE_PROTOCOL', 'https')
-    tracking_url = get_tracking_url(order, domain=domain, protocol=effective_protocol)
+    effective_domain = resolve_site_domain(domain)
+    effective_protocol = resolve_site_protocol(protocol)
+    tracking_url = get_tracking_url(order, domain=effective_domain, protocol=effective_protocol)
     context = {
         'order': order,
         'tracking_url': tracking_url,
         'protocol': effective_protocol,
-        'domain': domain,
+        'domain': effective_domain,
     }
     return send_templated_email(
         subject=f'Double Bite: Замовлення #{order.order_number} підтверджено!',
@@ -68,13 +62,14 @@ def send_order_status_update_email(
     if not to_email:
         return 0
 
-    effective_protocol = protocol or getattr(settings, 'SITE_PROTOCOL', 'https')
-    tracking_url = get_tracking_url(order, domain=domain, protocol=effective_protocol)
+    effective_domain = resolve_site_domain(domain)
+    effective_protocol = resolve_site_protocol(protocol)
+    tracking_url = get_tracking_url(order, domain=effective_domain, protocol=effective_protocol)
     context = {
         'order': order,
         'tracking_url': tracking_url,
         'protocol': effective_protocol,
-        'domain': domain,
+        'domain': effective_domain,
     }
     return send_templated_email(
         subject=f'Double Bite: Статус замовлення #{order.order_number} оновлено — {order.get_status_display()}',
@@ -106,13 +101,14 @@ def send_stripe_receipt_email(
     if not to_email:
         return 0
 
-    effective_protocol = protocol or getattr(settings, 'SITE_PROTOCOL', 'https')
-    tracking_url = get_tracking_url(order, domain=domain, protocol=effective_protocol)
+    effective_domain = resolve_site_domain(domain)
+    effective_protocol = resolve_site_protocol(protocol)
+    tracking_url = get_tracking_url(order, domain=effective_domain, protocol=effective_protocol)
     context = {
         'order': order,
         'tracking_url': tracking_url,
         'protocol': effective_protocol,
-        'domain': domain,
+        'domain': effective_domain,
     }
     return send_templated_email(
         subject=f'Double Bite: Квитанція про успішну оплату замовлення #{order.order_number}',
@@ -155,14 +151,15 @@ def send_refund_notice_email(
     if refund_amount is None and hasattr(order, 'total_amount'):
         refund_amount = order.total_amount
 
-    effective_protocol = protocol or getattr(settings, 'SITE_PROTOCOL', 'https')
-    tracking_url = get_tracking_url(order, domain=domain, protocol=effective_protocol)
+    effective_domain = resolve_site_domain(domain)
+    effective_protocol = resolve_site_protocol(protocol)
+    tracking_url = get_tracking_url(order, domain=effective_domain, protocol=effective_protocol)
     context = {
         'order': order,
         'refund_amount': refund_amount,
         'tracking_url': tracking_url,
         'protocol': effective_protocol,
-        'domain': domain,
+        'domain': effective_domain,
     }
     return send_templated_email(
         subject=f'Double Bite: Повернення коштів за замовлення #{order.order_number}',

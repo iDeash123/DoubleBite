@@ -40,11 +40,13 @@ if settings.DEBUG:
     urlpatterns += [
         path(f"{media_prefix}/<path:path>", cached_media_serve, {'document_root': settings.MEDIA_ROOT}),
     ]
-    try:
-        import debug_toolbar
-        urlpatterns = [
-            path('__debug__/', include(debug_toolbar.urls)),
-        ] + urlpatterns
-    except ImportError:
-        pass
+    if 'debug_toolbar' in settings.INSTALLED_APPS:
+        try:
+            import debug_toolbar
+
+            urlpatterns = [
+                path('__debug__/', include(debug_toolbar.urls)),
+            ] + urlpatterns
+        except ImportError:
+            pass
 

@@ -183,3 +183,84 @@ class TemplatedEmailServiceTests(SimpleTestCase):
         dummy_order = SimpleNamespace(order_number='DB-777', access_token='tok-123')
         url = get_tracking_url(dummy_order)
         self.assertEqual(url, 'http://shop.doublebite.ua/orders/tracking/DB-777/?t=tok-123')
+
+    @override_settings(
+        SITE_DOMAIN='shop.doublebite.ua',
+        SITE_PROTOCOL='https',
+    )
+    def test_order_and_support_emails_pass_resolved_domain_in_context(self):
+        from types import SimpleNamespace
+
+        from orders.emails import (
+            send_order_confirmation_email,
+            send_order_status_update_email,
+            send_refund_notice_email,
+            send_stripe_receipt_email,
+        )
+        from support.emails import send_ticket_escalated_email
+
+        dummy_order = SimpleNamespace(
+            order_number='DB-888',
+            access_token='tok-888',
+            customer_name='Тарас',
+            customer_email='client@example.com',
+            delivery_address='Київ',
+            eta_minutes=30,
+            total_amount='500.00',
+            status='PREPARING',
+            stripe_payment_intent_id='pi_test_1',
+            user=None,
+            items=SimpleNamespace(all=list),
+            get_payment_method_display=lambda: 'Готівка',
+            get_status_display=lambda: 'Готується',
+        )
+        dummy_ticket = SimpleNamespace(
+            id=42,
+            reason='ORDER_ISSUE',
+            details='Потрібна допомога',
+            customer_phone='+380501234567',
+            order=None,
+            session=None,
+            get_reason_display=lambda: 'Проблема із замовленням',
+        )
+
+        with (
+            patch('orders.emails.send_templated_email', return_value=1) as order_send_mock,
+            patch('support.emails.send_templated_email', return_value=1) as support_send_mock,
+        ):
+            send_order_confirmation_email(dummy_order)
+            send_order_status_update_email(dummy_order)
+            send_stripe_receipt_email(dummy_order)
+            send_refund_notice_email(dummy_order)
+            send_ticket_escalated_email(dummy_ticket, recipient_email='admin@doublebite.ua')
+
+        self.assertEqual(order_send_mock.call_count, 4)
+        for call in order_send_mock.call_args_list:
+            ctx = call.kwargs['context']
+            self.assertEqual(ctx['domain'], 'shop.doublebite.ua')
+            self.assertEqual(ctx['protocol'], 'https')
+            self.assertTrue(ctx['tracking_url'].startswith('https://shop.doublebite.ua/'))
+
+        support_send_mock.assert_called_once()
+        support_ctx = support_send_mock.call_args.kwargs['context']
+        self.assertEqual(support_ctx['domain'], 'shop.doublebite.ua')
+        self.assertEqual(support_ctx['protocol'], 'https')
+        self.assertTrue(support_ctx['admin_ticket_url'].startswith('https://shop.doublebite.ua/'))
+
+    def test_resolve_site_domain_fallbacks(self):
+        from config.emails import resolve_site_domain, resolve_site_protocol
+
+        with override_settings(SITE_DOMAIN='primary.doublebite.ua', ALLOWED_HOSTS=['fallback.doublebite.ua']):
+            self.assertEqual(resolve_site_domain('override.doublebite.ua'), 'override.doublebite.ua')
+            self.assertEqual(resolve_site_domain(None), 'primary.doublebite.ua')
+            self.assertEqual(resolve_site_domain('  '), 'primary.doublebite.ua')
+
+        with override_settings(SITE_DOMAIN='', ALLOWED_HOSTS=['testserver', '*', '0.0.0.0', 'fallback.doublebite.ua']):
+            self.assertEqual(resolve_site_domain(None), 'fallback.doublebite.ua')
+
+        with override_settings(SITE_DOMAIN='', ALLOWED_HOSTS=['testserver', '*']):
+            self.assertEqual(resolve_site_domain(None), 'localhost:8000')
+
+        with override_settings(SITE_PROTOCOL='http'):
+            self.assertEqual(resolve_site_protocol(None), 'http')
+            self.assertEqual(resolve_site_protocol('https'), 'https')

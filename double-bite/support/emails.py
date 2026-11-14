@@ -1,6 +1,6 @@
 from typing import Any
 
-from config.emails import send_templated_email
+from config.emails import resolve_site_domain, resolve_site_protocol, send_templated_email
 from django.conf import settings
 from django.urls import reverse
 
@@ -11,14 +11,8 @@ def get_admin_ticket_url(ticket: Any, domain: str | None = None, protocol: str |
     except Exception:
         admin_prefix = getattr(settings, 'DJANGO_ADMIN_URL', 'admin/').strip('/')
         path = f'/{admin_prefix}/support/supportticket/{ticket.id}/change/'
-    effective_domain = domain or getattr(settings, 'SITE_DOMAIN', None)
-    if not effective_domain and getattr(settings, 'ALLOWED_HOSTS', None):
-        allowed = [h for h in settings.ALLOWED_HOSTS if h and '*' not in h and h != '0.0.0.0']
-        if allowed:
-            effective_domain = allowed[0]
-    if not effective_domain:
-        effective_domain = 'localhost:8000'
-    effective_protocol = protocol or getattr(settings, 'SITE_PROTOCOL', 'https')
+    effective_domain = resolve_site_domain(domain)
+    effective_protocol = resolve_site_protocol(protocol)
     return f"{effective_protocol}://{effective_domain}{path}"
 
 
@@ -39,8 +33,9 @@ def send_ticket_escalated_email(
         customer_name = getattr(user, 'first_name', '') or getattr(user, 'username', '') or getattr(user, 'email', '') or 'Гість'
         customer_email = getattr(user, 'email', None) or 'Не вказано'
 
-    effective_protocol = protocol or getattr(settings, 'SITE_PROTOCOL', 'https')
-    admin_ticket_url = get_admin_ticket_url(ticket, domain=domain, protocol=effective_protocol)
+    effective_domain = resolve_site_domain(domain)
+    effective_protocol = resolve_site_protocol(protocol)
+    admin_ticket_url = get_admin_ticket_url(ticket, domain=effective_domain, protocol=effective_protocol)
     reason_display = ticket.get_reason_display() if hasattr(ticket, 'get_reason_display') else ticket.reason
 
     recent_messages = []
@@ -58,7 +53,7 @@ def send_ticket_escalated_email(
         'admin_ticket_url': admin_ticket_url,
         'recent_messages': recent_messages,
         'protocol': effective_protocol,
-        'domain': domain,
+        'domain': effective_domain,
     }
     return send_templated_email(
         subject=f'Double Bite: [ТЕРМІНОВО] Ескалація тікету #{ticket.id} — {reason_display}',

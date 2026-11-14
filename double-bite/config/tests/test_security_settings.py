@@ -287,3 +287,97 @@ class SecretKeyValidationTest(SimpleTestCase):
             check=False,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_debug_true_while_testing_does_not_crash_url_resolution(self):
+        code = textwrap.dedent("""
+            import django
+            from django.conf import settings
+            from django.template.loader import render_to_string
+            from django.urls import resolve, reverse
+
+            django.setup()
+            assert settings.DEBUG is True
+            assert 'debug_toolbar' not in settings.INSTALLED_APPS
+            assert reverse('home') == '/'
+            assert reverse('menu:catalog') == '/menu/'
+            assert resolve('/').url_name == 'home'
+            rendered = render_to_string(
+                'emails/password_reset_email.html',
+                {'protocol': 'http', 'domain': 'testserver', 'uid': 'MQ', 'token': 'abc'},
+            )
+            assert '/accounts/reset/MQ/abc/' in rendered
+        """)
+        proc = self._run_settings_import(
+            code=code,
+            DEBUG='True',
+            DJANGO_TESTING='1',
+            DB_ENGINE='django.db.backends.sqlite3',
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_debug_true_when_not_testing_mounts_debug_toolbar(self):
+        code = textwrap.dedent("""
+            import django
+            from django.conf import settings
+            from django.urls import resolve, reverse
+
+            django.setup()
+            assert settings.DEBUG is True
+            assert 'debug_toolbar' in settings.INSTALLED_APPS
+            assert reverse('home') == '/'
+            assert resolve('/__debug__/render_panel/').app_name == 'djdt'
+        """)
+        proc = self._run_settings_import(
+            code=code,
+            DEBUG='True',
+            DJANGO_TESTING='0',
+            DB_ENGINE='django.db.backends.sqlite3',
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_empty_env_vars_fall_back_to_clean_defaults(self):
+        code = textwrap.dedent("""
+            import config.constants as c
+            import config.settings as s
+
+            assert s.MIN_ORDER_AMOUNT == c.DEFAULT_MIN_ORDER_AMOUNT
+            assert s.FREE_DELIVERY_THRESHOLD == c.DEFAULT_FREE_DELIVERY_THRESHOLD
+            assert s.DELIVERY_FEE == c.DEFAULT_DELIVERY_FEE
+            assert s.RESTAURANT_ADDRESS == c.DEFAULT_RESTAURANT_ADDRESS
+            assert s.RESTAURANT_HOTLINE == c.DEFAULT_RESTAURANT_HOTLINE
+            assert s.EMAIL_PORT == 1025
+            assert s.EMAIL_TIMEOUT == 10
+            assert s.SECURE_HSTS_SECONDS == 31536000
+            assert s.DEFAULT_FROM_EMAIL == 'Double Bite <noreply@doublebite.ua>'
+            assert s.STRIPE_ORDER_SUCCESS_STATUS == 'PAID'
+            assert s.ADMIN_NAME == 'Double Bite Admin'
+            for attr in (
+                'MIN_ORDER_AMOUNT',
+                'FREE_DELIVERY_THRESHOLD',
+                'DELIVERY_FEE',
+                'RESTAURANT_ADDRESS',
+                'RESTAURANT_HOTLINE',
+            ):
+                assert not hasattr(c, attr), f'Duplicate env global {attr} in config.constants'
+        """)
+        proc = self._run_settings_import(
+            code=code,
+            MIN_ORDER_AMOUNT='',
+            FREE_DELIVERY_THRESHOLD='   ',
+            DELIVERY_FEE='',
+            RESTAURANT_ADDRESS='',
+            RESTAURANT_HOTLINE='   ',
+            EMAIL_PORT='',
+            EMAIL_TIMEOUT='',
+            SECURE_HSTS_SECONDS='',
+            DEFAULT_FROM_EMAIL='   ',
+            STRIPE_ORDER_SUCCESS_STATUS='',
+            ADMIN_NAME='',
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_invalid_decimal_env_raises_improperly_configured(self):
+        for bad_value in ('not-a-number', 'NaN', 'Infinity'):
+            proc = self._run_settings_import(MIN_ORDER_AMOUNT=bad_value)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn('ImproperlyConfigured', proc.stderr)
