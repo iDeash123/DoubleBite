@@ -3,6 +3,8 @@ import re
 from decimal import Decimal
 from typing import Any
 
+from config.constants import DEFAULT_FREE_DELIVERY_THRESHOLD
+from django.conf import settings
 from django.core.exceptions import SynchronousOnlyOperation
 from django.db import DatabaseError
 
@@ -344,7 +346,9 @@ def get_home_page_context(total_amount: Decimal | None = None) -> dict[str, Any]
     except (SynchronousOnlyOperation, DatabaseError, Exception):
         pass
 
-    free_delivery_threshold = Decimal('500.00')
+    free_delivery_threshold = getattr(
+        settings, 'FREE_DELIVERY_THRESHOLD', DEFAULT_FREE_DELIVERY_THRESHOLD
+    )
     current_total = total_amount if total_amount is not None else Decimal('0.00')
     meets_free_delivery = current_total >= free_delivery_threshold
     free_delivery_remaining = max(Decimal('0.00'), free_delivery_threshold - current_total)

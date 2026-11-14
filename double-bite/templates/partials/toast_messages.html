@@ -1,4 +1,4 @@
-<script>
+<script nonce="{{ csp_nonce }}">
 window.showToast = function(message, type, timeout) {
   window.dispatchEvent(new CustomEvent('show-toast', {
     detail: {

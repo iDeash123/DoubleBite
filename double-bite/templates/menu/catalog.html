@@ -52,8 +52,7 @@
         hx-target="#dish-grid"
         hx-swap="outerHTML"
         hx-trigger="change, input delay:300ms from:#search-input, input delay:600ms from:[name='max_price'], submit"
-        hx-push-url="true"
-        hx-on::before-request="document.getElementById('page-input').value = ''">
+        hx-push-url="true">
     
     <input type="hidden" name="category" id="category-input" value="{{ selected_category|default:'' }}">
     <input type="hidden" name="page" id="page-input" value="">
@@ -295,7 +294,7 @@
                 </a>
                 <button
                   type="button"
-                  @click="htmx.ajax('POST', '/cart/add/' + modalDish.id + '/', { target: '#cart-badge', swap: 'outerHTML' }); closeModal()"
+                  @click="htmx.ajax('POST', '/orders/cart/add/' + modalDish.id + '/', { target: '#cart-badge', swap: 'outerHTML' }); closeModal()"
                   class="py-3 px-3 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors font-medium text-center"
                 >
                   До кошика
@@ -309,4 +308,15 @@
   </div>
 
 </div>
+<script nonce="{{ csp_nonce }}">
+  document.addEventListener('DOMContentLoaded', function() {
+    var filterForm = document.getElementById('menu-filter-form');
+    if (filterForm) {
+      filterForm.addEventListener('htmx:beforeRequest', function() {
+        var pageInput = document.getElementById('page-input');
+        if (pageInput) pageInput.value = '';
+      });
+    }
+  });
+</script>
 {% endblock %}

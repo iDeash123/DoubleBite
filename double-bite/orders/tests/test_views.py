@@ -56,16 +56,14 @@ class CartViewsTest(TestCase):
         self.assertIn('2', content)
         self.assertNotIn('<!DOCTYPE html>', content)
 
-    def test_cart_direct_add_endpoint(self):
-        url = reverse('cart_add_direct', kwargs={'dish_id': self.dish2.id})
-        response = self.client.post(
-            url,
-            {'quantity': '1'},
-            HTTP_HX_REQUEST='true',
+    def test_legacy_direct_cart_endpoints_removed(self):
+        self.assertEqual(self.client.get('/cart/').status_code, 404)
+        self.assertEqual(self.client.get('/cart/drawer/').status_code, 404)
+        self.assertEqual(
+            self.client.post(f'/cart/add/{self.dish2.id}/', {'quantity': '1'}).status_code,
+            404,
         )
-        self.assertEqual(response.status_code, 200)
-        content = response.content.decode('utf-8')
-        self.assertIn('id="cart-badge"', content)
+        self.assertEqual(self.client.post('/cart/clear/').status_code, 404)
 
     def test_cart_update_and_remove_htmx_returns_cart_partial(self):
         self.client.post(
@@ -115,17 +113,10 @@ class CartViewsTest(TestCase):
         content = response.content.decode('utf-8')
         self.assertIn('Ваш кошик порожній', content)
 
-    def test_cart_clear_direct(self):
-        response = self.client.post(reverse('cart_clear_direct'), HTTP_HX_REQUEST='true')
-        self.assertEqual(response.status_code, 200)
-
     def test_cart_drawer_view(self):
         response = self.client.get(reverse('orders:cart_drawer'))
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'partials/cart_drawer.html')
-
-        direct_resp = self.client.get(reverse('cart_drawer_direct'))
-        self.assertEqual(direct_resp.status_code, 200)
 
         htmx_resp = self.client.get(reverse('orders:cart_drawer'), HTTP_HX_REQUEST='true')
         self.assertEqual(htmx_resp.status_code, 200)

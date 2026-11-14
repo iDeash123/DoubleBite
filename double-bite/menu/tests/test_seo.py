@@ -67,8 +67,8 @@ class SeoEndpointTests(TestCase):
         self.assertIn('User-agent: *', content)
         self.assertIn('Allow: /', content)
         self.assertIn('Disallow: /admin/', content)
-        self.assertIn('Disallow: /cart/', content)
         self.assertIn('Disallow: /orders/', content)
+        self.assertNotIn('Disallow: /cart/', content)
         self.assertIn('Disallow: /support/chat/', content)
         self.assertIn('Sitemap: http://testserver/sitemap.xml', content)
 
@@ -279,8 +279,8 @@ class SeoEndpointTests(TestCase):
         catalog_content = catalog_resp.content.decode('utf-8')
         self.assertIn('aria-label="Закрити"', catalog_content)
 
-        self.client.post(f'/cart/add/{self.available_dish.id}/')
-        cart_resp = self.client.get('/cart/')
+        self.client.post(f'/orders/cart/add/{self.available_dish.id}/')
+        cart_resp = self.client.get('/orders/cart/')
         self.assertEqual(cart_resp.status_code, 200)
         cart_content = cart_resp.content.decode('utf-8')
         self.assertIn('aria-label="Зменшити кількість"', cart_content)

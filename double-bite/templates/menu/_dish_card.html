@@ -86,11 +86,11 @@
         Деталі
       </button>
 
-      <form method="post" action="/cart/add/{{ dish.id }}/" class="m-0 p-0">
+      <form method="post" action="{% url 'orders:cart_add' dish.id %}" class="m-0 p-0">
         {% csrf_token %}
         <button
           type="submit"
-          hx-post="/cart/add/{{ dish.id }}/"
+          hx-post="{% url 'orders:cart_add' dish.id %}"
           hx-target="#cart-badge"
           hx-swap="outerHTML"
           class="w-full py-2.5 px-2 bg-fv-noir text-white text-[11px] font-mono uppercase tracking-wider hover:bg-black transition-colors text-center select-none font-medium flex items-center justify-center gap-1"

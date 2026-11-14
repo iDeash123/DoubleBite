@@ -1,5 +1,4 @@
 import json
-import os
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -11,8 +10,6 @@ from orders.services import CartService
 
 from support.agent.tools import execute_agent_tool
 from support.models import ChatSession
-
-os.environ['DJANGO_ALLOW_ASYNC_UNSAFE'] = 'true'
 
 User = get_user_model()
 

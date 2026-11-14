@@ -1,4 +1,6 @@
+import html
 import logging
+import re
 from collections.abc import Sequence
 from typing import Any
 
@@ -8,7 +10,21 @@ from django.template import TemplateDoesNotExist
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 
+from config.constants import DEFAULT_RESTAURANT_ADDRESS, DEFAULT_RESTAURANT_HOTLINE
+
 logger = logging.getLogger(__name__)
+
+_STYLE_SCRIPT_RE = re.compile(r'<(style|script)\b[^>]*>.*?</\1>', re.IGNORECASE | re.DOTALL)
+_HTML_COMMENT_RE = re.compile(r'<!--.*?-->', re.DOTALL)
+_MULTI_BLANK_RE = re.compile(r'\n{3,}')
+
+
+def _html_to_plain_text(html_content: str) -> str:
+    cleaned = _STYLE_SCRIPT_RE.sub('', html_content)
+    cleaned = _HTML_COMMENT_RE.sub('', cleaned)
+    text = html.unescape(strip_tags(cleaned))
+    lines = [line.strip() for line in text.splitlines()]
+    return _MULTI_BLANK_RE.sub('\n\n', '\n'.join(lines)).strip()
 
 
 def send_templated_email(
@@ -30,7 +46,9 @@ def send_templated_email(
     if not recipients:
         return 0
 
-    ctx = context or {}
+    ctx = dict(context) if context else {}
+    ctx.setdefault('restaurant_address', getattr(settings, 'RESTAURANT_ADDRESS', DEFAULT_RESTAURANT_ADDRESS))
+    ctx.setdefault('restaurant_hotline', getattr(settings, 'RESTAURANT_HOTLINE', DEFAULT_RESTAURANT_HOTLINE))
     sender = from_email or getattr(settings, 'DEFAULT_FROM_EMAIL', 'Double Bite <noreply@doublebite.ua>')
 
     prefix = template_prefix
@@ -60,7 +78,7 @@ def send_templated_email(
         return 0
 
     if not txt_content and html_content:
-        txt_content = strip_tags(html_content).strip()
+        txt_content = _html_to_plain_text(html_content)
 
     body = txt_content or ''
 

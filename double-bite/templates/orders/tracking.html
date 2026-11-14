@@ -110,7 +110,7 @@
         </div>
       {% else %}
         <div class="p-4 bg-red-50 border border-red-200 text-red-800 text-xs font-mono">
-          Це замовлення було скасовано. Якщо ви маєте запитання, зверніться до нашої служби підтримки за телефоном: <strong>+380 44 123 45 67</strong>.
+          Це замовлення було скасовано. Якщо ви маєте запитання, зверніться до нашої служби підтримки за телефоном: <strong>{{ restaurant_hotline }}</strong>.
         </div>
       {% endif %}
 
@@ -120,7 +120,7 @@
             {% csrf_token %}
             <button
               type="submit"
-              onclick="return confirm('Ви впевнені, що бажаєте скасувати замовлення?')"
+              data-confirm="Ви впевнені, що бажаєте скасувати замовлення?"
               class="px-5 py-2.5 bg-red-50 text-red-700 border border-red-200 text-xs font-mono uppercase tracking-wider hover:bg-red-100 transition-colors"
             >
               Скасувати замовлення
@@ -200,4 +200,12 @@
   </div>
   {% endpartialdef %}
 </div>
+<script nonce="{{ csp_nonce }}">
+  document.addEventListener('click', function(evt) {
+    var btn = evt.target && evt.target.closest ? evt.target.closest('button[data-confirm]') : null;
+    if (btn && !window.confirm(btn.getAttribute('data-confirm'))) {
+      evt.preventDefault();
+    }
+  });
+</script>
 {% endblock %}

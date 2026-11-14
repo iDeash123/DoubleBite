@@ -58,7 +58,7 @@ def cart_view(request: HttpRequest) -> HttpResponse:
         'min_diff': min_diff,
     }
 
-    if request.headers.get('HX-Request'):
+    if request.headers.get('HX-Request') and not request.headers.get('HX-History-Restore-Request'):
         return render_partial_or_full(request, 'orders/cart.html#cart-content', context)
 
     return render_partial_or_full(request, 'orders/cart.html', context)
@@ -371,7 +371,7 @@ def cart_drawer_view(request: HttpRequest) -> HttpResponse:
         'min_order_amount': min_order_amount,
         'meets_min_amount': summary.meets_min_amount,
     }
-    if request.headers.get('HX-Request'):
+    if request.headers.get('HX-Request') and not request.headers.get('HX-History-Restore-Request'):
         return render_partial_or_full(
             request,
             'partials/cart_drawer.html#cart-drawer-content',

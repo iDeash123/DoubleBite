@@ -54,6 +54,14 @@ def _get_history(session_uuid: Any) -> list[dict[str, Any]]:
     return [{'role': m.role, 'content': m.content} for m in msgs]
 
 
+def _ensure_session_key(request: HttpRequest) -> str:
+    session_id = request.session.session_key
+    if not session_id:
+        request.session.save()
+        session_id = request.session.session_key or 'unknown'
+    return session_id
+
+
 async def chat_stream_view(request: HttpRequest) -> HttpResponse:
     if request.method != 'POST':
         return HttpResponse('Method Not Allowed', status=405)
@@ -71,10 +79,7 @@ async def chat_stream_view(request: HttpRequest) -> HttpResponse:
         user_text = user_text[:2000]
 
     ip = _get_client_ip(request)
-    session_id = request.session.session_key
-    if not session_id:
-        await sync_to_async(request.session.save, thread_sensitive=True)()
-        session_id = request.session.session_key or 'unknown'
+    session_id = await sync_to_async(_ensure_session_key, thread_sensitive=True)(request)
 
     ip_limited = await sync_to_async(_is_rate_limited, thread_sensitive=True)(f'chat_rate_ip:{ip}', 10, 60)
     session_limited = False

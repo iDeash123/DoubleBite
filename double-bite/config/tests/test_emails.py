@@ -123,3 +123,30 @@ class TemplatedEmailServiceTests(SimpleTestCase):
         )
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].from_email, 'Double Bite Test <test@doublebite.ua>')
+
+    def test_plain_text_body_strips_style_and_script_blocks(self):
+        from config.emails import _html_to_plain_text
+
+        plain = _html_to_plain_text(
+            '<style>.btn-primary { color: #fff; font-family: Inter; }</style>'
+            '<script>window.alert("xss")</script>'
+            '<p>Дякуємо &amp; смачного!</p>'
+        )
+        self.assertEqual(plain, 'Дякуємо & смачного!')
+
+    def test_templated_email_plain_body_has_no_css_and_uses_unified_contacts(self):
+        from django.conf import settings
+
+        send_templated_email(
+            subject='Перевірка тексту',
+            template_prefix='emails/base_email',
+            context={},
+            recipient_list=['client@example.com'],
+        )
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        self.assertNotIn('.email-container', email.body)
+        self.assertNotIn('font-family:', email.body)
+        self.assertNotIn('{', email.body)
+        self.assertIn(settings.RESTAURANT_ADDRESS, email.body)
+        self.assertIn(settings.RESTAURANT_HOTLINE, email.body)

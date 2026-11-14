@@ -1,6 +1,12 @@
-from decimal import Decimal
 from typing import Any
 
+from config.constants import (
+    DEFAULT_DELIVERY_FEE,
+    DEFAULT_FREE_DELIVERY_THRESHOLD,
+    DEFAULT_MIN_ORDER_AMOUNT,
+    DEFAULT_RESTAURANT_ADDRESS,
+    DEFAULT_RESTAURANT_HOTLINE,
+)
 from django.conf import settings
 from django.core.exceptions import SynchronousOnlyOperation
 from django.db import DatabaseError
@@ -59,7 +65,13 @@ def cart_context(request: HttpRequest) -> dict[str, Any]:
         'items': LazyValue(lambda: _get_summary().items),
         'total_amount': LazyValue(lambda: _get_summary().total_amount),
         'total_quantity': LazyValue(lambda: _get_summary().total_quantity),
-        'min_order_amount': getattr(settings, 'MIN_ORDER_AMOUNT', Decimal(200)),
+        'min_order_amount': getattr(settings, 'MIN_ORDER_AMOUNT', DEFAULT_MIN_ORDER_AMOUNT),
+        'free_delivery_threshold': getattr(
+            settings, 'FREE_DELIVERY_THRESHOLD', DEFAULT_FREE_DELIVERY_THRESHOLD
+        ),
+        'delivery_fee': getattr(settings, 'DELIVERY_FEE', DEFAULT_DELIVERY_FEE),
+        'restaurant_address': getattr(settings, 'RESTAURANT_ADDRESS', DEFAULT_RESTAURANT_ADDRESS),
+        'restaurant_hotline': getattr(settings, 'RESTAURANT_HOTLINE', DEFAULT_RESTAURANT_HOTLINE),
         'meets_min_amount': LazyValue(lambda: _get_summary().meets_min_amount),
         'cart_items_count': LazyValue(lambda: _get_summary().total_quantity),
     }

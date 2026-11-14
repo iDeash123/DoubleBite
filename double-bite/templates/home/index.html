@@ -49,7 +49,7 @@
   {% include "home/partials/delivery_section.html" %}
   {% include "home/partials/about_section.html" %}
 
-  <script>
+  <script nonce="{{ csp_nonce }}">
     (function () {
       var els = document.querySelectorAll('[data-reveal]');
       if (!('IntersectionObserver' in window) || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {

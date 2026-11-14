@@ -9,7 +9,8 @@ def get_admin_ticket_url(ticket: Any, domain: str | None = None, protocol: str =
     try:
         path = reverse('admin:support_supportticket_change', args=[ticket.id])
     except Exception:
-        path = f'/admin/support/supportticket/{ticket.id}/change/'
+        admin_prefix = getattr(settings, 'DJANGO_ADMIN_URL', 'admin/').strip('/')
+        path = f'/{admin_prefix}/support/supportticket/{ticket.id}/change/'
     effective_domain = domain or getattr(settings, 'SITE_DOMAIN', None)
     if not effective_domain and getattr(settings, 'ALLOWED_HOSTS', None):
         allowed = [h for h in settings.ALLOWED_HOSTS if h and '*' not in h and h != '0.0.0.0']

@@ -1,5 +1,4 @@
 import json
-import os
 from unittest.mock import patch
 
 from asgiref.sync import sync_to_async
@@ -13,8 +12,6 @@ from support.models import (
     ChatSessionStatus,
     MessageRole,
 )
-
-os.environ['DJANGO_ALLOW_ASYNC_UNSAFE'] = 'true'
 
 User = get_user_model()
 

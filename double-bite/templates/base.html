@@ -58,7 +58,7 @@
   <script src="{% static 'js/htmx.min.js' %}"></script>
   <script defer src="{% static 'js/alpine.min.js' %}"></script>
   <script src="{% static 'js/lenis.min.js' %}"></script>
-  <script>
+  <script nonce="{{ csp_nonce }}">
     document.addEventListener('htmx:configRequest', function(evt) {
       let token = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
       if (!token) {
@@ -127,7 +127,8 @@
 
         <div class="col-span-2 grid grid-cols-3">
           <button
-            onclick="toggleGrid()"
+            type="button"
+            data-toggle-grid
             class="border-r border-fv-noir/20 flex items-center justify-center hover:bg-fv-offwhite transition-colors text-fv-noir"
             title="12-колонкова сітка"
             aria-label="12-колонкова сітка"
@@ -169,7 +170,6 @@
           <button
             type="button"
             @click="$dispatch('open-cart-drawer')"
-            onclick="window.dispatchEvent(new CustomEvent('open-cart-drawer'))"
             class="flex items-center justify-center hover:bg-fv-offwhite transition-colors text-fv-noir relative gap-1 cursor-pointer"
             title="Кошик"
             aria-label="Кошик"
@@ -192,7 +192,7 @@
         </a>
 
         <div class="flex items-center gap-2 text-xs font-mono">
-          <button onclick="toggleGrid()" class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite" title="Сітка" aria-label="12-колонкова сітка">
+          <button type="button" data-toggle-grid class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite" title="Сітка" aria-label="12-колонкова сітка">
             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
 
@@ -209,7 +209,6 @@
           <button
             type="button"
             @click="$dispatch('open-cart-drawer')"
-            onclick="window.dispatchEvent(new CustomEvent('open-cart-drawer'))"
             class="flex items-center gap-1 px-2 py-1 border border-fv-noir/20 text-fv-noir cursor-pointer"
             title="Кошик"
             aria-label="Кошик"
@@ -290,8 +289,8 @@
         <div class="lg:col-span-2 space-y-3">
           <h4 class="font-bold text-white tracking-wider uppercase mb-4">КОНТАКТИ</h4>
           <div class="space-y-2 text-white/60">
-            <p>Київ, вул. Хрещатик, 22</p>
-            <p>+380 44 123 45 67</p>
+            <p>{{ restaurant_address }}</p>
+            <p>{{ restaurant_hotline }}</p>
             <p>Щоденно: 10:00 — 22:00</p>
           </div>
         </div>
@@ -301,7 +300,7 @@
           <p class="text-white/60 text-xs leading-relaxed mb-4">
             Підпишіться на сповіщення про нові сезонні позиції меню та спеціальні сети від шеф-кухаря.
           </p>
-          <form onsubmit="event.preventDefault(); alert('Дякуємо за підписку на оновлення Double Bite.');" class="flex border border-white/20 bg-white/5 footer-newsletter-form">
+          <form class="flex border border-white/20 bg-white/5 footer-newsletter-form">
             <input
               type="email"
               placeholder="Введіть email адресу..."
@@ -331,7 +330,7 @@
   {% include "partials/cart_drawer.html" %}
   {% include "partials/toast_messages.html" %}
 
-  <script>
+  <script nonce="{{ csp_nonce }}">
     function toggleGrid() {
       const overlay = document.getElementById('grid-overlay');
       if (overlay) {
@@ -420,6 +419,17 @@
           if (el) observer.observe(el);
         });
       }
+
+      document.querySelectorAll('[data-toggle-grid]').forEach(function(btn) {
+        btn.addEventListener('click', toggleGrid);
+      });
+
+      document.querySelectorAll('.footer-newsletter-form').forEach(function(form) {
+        form.addEventListener('submit', function(evt) {
+          evt.preventDefault();
+          alert('Дякуємо за підписку на оновлення Double Bite.');
+        });
+      });
     });
   </script>
 </body>

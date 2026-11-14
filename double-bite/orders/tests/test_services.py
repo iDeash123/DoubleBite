@@ -161,7 +161,7 @@ class CartServiceTest(TestCase):
 
     def test_merge_guest_cart_via_real_login_view(self):
         client = self.client_class()
-        client.post(f'/cart/add/{self.dish1.id}/', {'quantity': '2'})
+        client.post(f'/orders/cart/add/{self.dish1.id}/', {'quantity': '2'})
 
         guest_session_key = client.session.session_key
         self.assertTrue(bool(guest_session_key))

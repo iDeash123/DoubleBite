@@ -1,4 +1,4 @@
-<script>
+<script nonce="{{ csp_nonce }}">
 function heroShowcase(initialDishes) {
   return {
     currentIndex: 0,
@@ -136,7 +136,7 @@ function heroShowcase(initialDishes) {
       const dishId = dish.id;
       if (dishId && dishId > 0) {
         if (window.htmx) {
-          htmx.ajax('POST', '/cart/add/' + dishId + '/', {
+          htmx.ajax('POST', '/orders/cart/add/' + dishId + '/', {
             target: '#cart-badge',
             swap: 'outerHTML'
           });

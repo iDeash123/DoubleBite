@@ -1,4 +1,4 @@
-<script>
+<script nonce="{{ csp_nonce }}">
 function collectionsShowcase(initialCollections) {
   return {
     activeCollectionIndex: 0,
@@ -200,7 +200,7 @@ function collectionsShowcase(initialCollections) {
       const dishId = dish.id;
       if (dishId && dishId > 0) {
         if (window.htmx) {
-          htmx.ajax('POST', '/cart/add/' + dishId + '/', {
+          htmx.ajax('POST', '/orders/cart/add/' + dishId + '/', {
             target: '#cart-badge',
             swap: 'outerHTML'
           });

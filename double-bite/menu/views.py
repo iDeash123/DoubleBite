@@ -1,6 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from config.partials import render_partial_or_full
+from django.conf import settings
 from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
@@ -81,7 +82,7 @@ def catalog_view(request: HttpRequest, category_slug: str | None = None) -> Http
         'total_dishes': paginator.count,
     }
 
-    if request.headers.get('HX-Request'):
+    if request.headers.get('HX-Request') and not request.headers.get('HX-History-Restore-Request'):
         return render_partial_or_full(request, 'menu/catalog.html#dish-grid', context)
 
     return render_partial_or_full(request, 'menu/catalog.html', context)
@@ -125,11 +126,11 @@ def dish_detail_view(
 
 def robots_txt_view(request: HttpRequest) -> HttpResponse:
     sitemap_url = request.build_absolute_uri('/sitemap.xml')
+    admin_prefix = settings.DJANGO_ADMIN_URL.strip('/')
     content = (
         "User-agent: *\n"
         "Allow: /\n"
-        "Disallow: /admin/\n"
-        "Disallow: /cart/\n"
+        f"Disallow: /{admin_prefix}/\n"
         "Disallow: /orders/\n"
         "Disallow: /support/chat/\n"
         f"Sitemap: {sitemap_url}\n"
