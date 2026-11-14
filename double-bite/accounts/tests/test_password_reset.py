@@ -202,3 +202,18 @@ class PasswordResetTests(TestCase):
         self.assertEqual(len(email.alternatives), 0)
         self.assertIn(settings.RESTAURANT_ADDRESS, email.body)
         self.assertIn(settings.RESTAURANT_HOTLINE, email.body)
+
+    @override_settings(SITE_DOMAIN='reset.doublebite.ua', SITE_PROTOCOL='https')
+    def test_password_reset_form_save_without_request_falls_back_to_site_domain(self):
+        form = CustomPasswordResetForm({'email': self.user.email})
+        self.assertTrue(form.is_valid())
+        form.save(
+            subject_template_name='emails/password_reset_subject.txt',
+            email_template_name='emails/password_reset_email.txt',
+            html_email_template_name='emails/password_reset_email.html',
+            request=None,
+        )
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        self.assertIn('https://reset.doublebite.ua/accounts/reset/', email.body)
+        self.assertIn('https://reset.doublebite.ua/accounts/reset/', email.alternatives[0][0])

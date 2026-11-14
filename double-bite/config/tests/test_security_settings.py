@@ -381,3 +381,22 @@ class SecretKeyValidationTest(SimpleTestCase):
             proc = self._run_settings_import(MIN_ORDER_AMOUNT=bad_value)
             self.assertNotEqual(proc.returncode, 0)
             self.assertIn('ImproperlyConfigured', proc.stderr)
+
+    def test_site_domain_strips_leading_dot_and_skips_wildcards_from_allowed_hosts(self):
+        proc = self._run_settings_import(
+            code="import config.settings as s; assert s.SITE_DOMAIN == 'doublebite.ua'",
+            DEBUG='True',
+            DJANGO_TESTING='1',
+            ALLOWED_HOSTS='testserver,*.doublebite.ua,.doublebite.ua',
+            SITE_DOMAIN='',
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+        proc_wildcard_only = self._run_settings_import(
+            code="import config.settings as s; assert s.SITE_DOMAIN == '127.0.0.1:8000'",
+            DEBUG='True',
+            DJANGO_TESTING='1',
+            ALLOWED_HOSTS='*.doublebite.ua,.',
+            SITE_DOMAIN='',
+        )
+        self.assertEqual(proc_wildcard_only.returncode, 0, proc_wildcard_only.stderr)

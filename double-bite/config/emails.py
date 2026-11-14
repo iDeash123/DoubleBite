@@ -31,9 +31,12 @@ def resolve_site_domain(domain: str | None = None) -> str:
     effective_domain = (domain or '').strip() or (getattr(settings, 'SITE_DOMAIN', '') or '').strip()
     if not effective_domain and getattr(settings, 'ALLOWED_HOSTS', None):
         allowed = [
-            h.strip()
+            cleaned
             for h in settings.ALLOWED_HOSTS
-            if h and h.strip() and h.strip() not in {'testserver', '*', '0.0.0.0'} and '*' not in h
+            if h
+            and '*' not in h
+            and (cleaned := h.strip().lstrip('.'))
+            and cleaned not in {'testserver', '0.0.0.0'}
         ]
         if allowed:
             effective_domain = allowed[0]

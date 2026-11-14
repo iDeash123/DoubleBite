@@ -258,6 +258,12 @@ class TemplatedEmailServiceTests(SimpleTestCase):
         with override_settings(SITE_DOMAIN='', ALLOWED_HOSTS=['testserver', '*', '0.0.0.0', 'fallback.doublebite.ua']):
             self.assertEqual(resolve_site_domain(None), 'fallback.doublebite.ua')
 
+        with override_settings(SITE_DOMAIN='', ALLOWED_HOSTS=['.doublebite.ua']):
+            self.assertEqual(resolve_site_domain(None), 'doublebite.ua')
+
+        with override_settings(SITE_DOMAIN='', ALLOWED_HOSTS=['*.doublebite.ua', 'sub.doublebite.ua']):
+            self.assertEqual(resolve_site_domain(None), 'sub.doublebite.ua')
+
         with override_settings(SITE_DOMAIN='', ALLOWED_HOSTS=['testserver', '*']):
             self.assertEqual(resolve_site_domain(None), 'localhost:8000')
 

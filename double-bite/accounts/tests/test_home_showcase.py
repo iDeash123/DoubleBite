@@ -150,4 +150,33 @@ class HomeShowcaseTest(TestCase):
         self.assertNotContains(response, '500 ₴')
         self.assertNotContains(response, '65 ₴')
 
+    def test_lazy_value_supports_ordering_comparisons(self):
+        from orders.context_processors import LazyValue
+
+        low = LazyValue(lambda: Decimal('350.00'))
+        high = LazyValue(lambda: Decimal('700.00'))
+        threshold = Decimal('500.00')
+
+        self.assertTrue(high >= threshold)
+        self.assertTrue(high >= 500)
+        self.assertFalse(low >= threshold)
+        self.assertTrue(low <= threshold)
+        self.assertTrue(high >= low)
+        self.assertTrue(low <= high)
+        self.assertTrue(low < high)
+        self.assertTrue(high > low)
+
+    def test_home_free_delivery_bar_caps_at_100_when_threshold_reached(self):
+        add_response = self.client.post(
+            reverse('orders:cart_add', args=[self.dish.id]),
+            {'quantity': 2},
+        )
+        self.assertEqual(add_response.status_code, 302)
+
+        response = self.client.get(reverse('home'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'style="width: 100%;"')
+        self.assertNotContains(response, 'style="width: 194%;"')
+        self.assertContains(response, 'Безкоштовна доставка активна для вашого замовлення')
+
 

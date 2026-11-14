@@ -74,7 +74,13 @@ elif not ALLOWED_HOSTS:
 if is_testing and 'testserver' not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append('testserver')
 
-_domain_candidates = [h for h in ALLOWED_HOSTS if h not in {'testserver', '*', '0.0.0.0'}]
+_domain_candidates = [
+    cleaned
+    for h in ALLOWED_HOSTS
+    if '*' not in h
+    and (cleaned := h.strip().lstrip('.'))
+    and cleaned not in {'testserver', '0.0.0.0'}
+]
 SITE_DOMAIN = (
     os.getenv('SITE_DOMAIN', '').strip()
     or (_domain_candidates[0] if _domain_candidates else '127.0.0.1:8000')

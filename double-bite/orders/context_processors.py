@@ -11,31 +11,48 @@ from django.conf import settings
 from django.core.exceptions import SynchronousOnlyOperation
 from django.db import DatabaseError
 from django.http import HttpRequest
-from django.utils.functional import SimpleLazyObject, empty
+from django.utils.functional import LazyObject, SimpleLazyObject, empty
 
 from .services import CartService
 
 
 class LazyValue(SimpleLazyObject):
-    def __format__(self, format_spec: str) -> str:
+    def _eval(self) -> Any:
         if self._wrapped is empty:
             self._setup()
-        return self._wrapped.__format__(format_spec)
+        return self._wrapped
+
+    def _unwrap_other(self, other: Any) -> Any:
+        if isinstance(other, LazyObject):
+            if other._wrapped is empty:
+                other._setup()
+            return other._wrapped
+        return other
+
+    def __format__(self, format_spec: str) -> str:
+        return self._eval().__format__(format_spec)
 
     def __int__(self) -> int:
-        if self._wrapped is empty:
-            self._setup()
-        return int(self._wrapped)
+        return int(self._eval())
 
     def __float__(self) -> float:
-        if self._wrapped is empty:
-            self._setup()
-        return float(self._wrapped)
+        return float(self._eval())
 
     def __round__(self, ndigits: int | None = None) -> Any:
-        if self._wrapped is empty:
-            self._setup()
-        return round(self._wrapped, ndigits) if ndigits is not None else round(self._wrapped)
+        wrapped = self._eval()
+        return round(wrapped, ndigits) if ndigits is not None else round(wrapped)
+
+    def __lt__(self, other: Any) -> bool:
+        return self._eval() < self._unwrap_other(other)
+
+    def __le__(self, other: Any) -> bool:
+        return self._eval() <= self._unwrap_other(other)
+
+    def __gt__(self, other: Any) -> bool:
+        return self._eval() > self._unwrap_other(other)
+
+    def __ge__(self, other: Any) -> bool:
+        return self._eval() >= self._unwrap_other(other)
 
 
 def cart_context(request: HttpRequest) -> dict[str, Any]:
