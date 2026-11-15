@@ -4,6 +4,7 @@ from django.core import mail
 from django.template.loader import render_to_string
 from django.test import SimpleTestCase, override_settings
 
+from config.constants import UNSPECIFIED_IPV4
 from config.emails import send_templated_email
 
 
@@ -255,7 +256,10 @@ class TemplatedEmailServiceTests(SimpleTestCase):
             self.assertEqual(resolve_site_domain(None), 'primary.doublebite.ua')
             self.assertEqual(resolve_site_domain('  '), 'primary.doublebite.ua')
 
-        with override_settings(SITE_DOMAIN='', ALLOWED_HOSTS=['testserver', '*', '0.0.0.0', 'fallback.doublebite.ua']):
+        with override_settings(
+            SITE_DOMAIN='',
+            ALLOWED_HOSTS=['testserver', '*', UNSPECIFIED_IPV4, 'fallback.doublebite.ua'],
+        ):
             self.assertEqual(resolve_site_domain(None), 'fallback.doublebite.ua')
 
         with override_settings(SITE_DOMAIN='', ALLOWED_HOSTS=['.doublebite.ua']):

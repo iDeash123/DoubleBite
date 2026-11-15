@@ -8,6 +8,8 @@ from django.conf import settings
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
+from config.constants import UNSPECIFIED_IPV4
+
 
 class SecuritySettingsTest(TestCase):
     def test_csp_header_present(self):
@@ -29,7 +31,7 @@ class SecuritySettingsTest(TestCase):
         self.assertEqual(settings.SESSION_COOKIE_SAMESITE, 'Lax')
 
     def test_allowed_hosts_no_wildcard_zero(self):
-        self.assertNotIn('0.0.0.0', settings.ALLOWED_HOSTS)
+        self.assertNotIn(UNSPECIFIED_IPV4, settings.ALLOWED_HOSTS)
 
     def test_logging_uses_rotating_file_handler(self):
         file_handler_cfg = settings.LOGGING['handlers']['file']
@@ -400,3 +402,25 @@ class SecretKeyValidationTest(SimpleTestCase):
             SITE_DOMAIN='',
         )
         self.assertEqual(proc_wildcard_only.returncode, 0, proc_wildcard_only.stderr)
+
+    def test_trusted_proxy_settings_parse_and_validate(self):
+        proc_ok = self._run_settings_import(
+            code=(
+                'import config.settings as s; '
+                'assert s.TRUST_PROXY_HEADERS is True; '
+                'assert s.TRUSTED_PROXY_IPS == ["127.0.0.1", "10.0.0.0/8"]; '
+                'assert s.NUM_PROXIES == 2'
+            ),
+            TRUST_PROXY_HEADERS='True',
+            TRUSTED_PROXY_IPS='127.0.0.1, 10.0.0.0/8',
+            NUM_PROXIES='2',
+        )
+        self.assertEqual(proc_ok.returncode, 0, proc_ok.stderr)
+
+        proc_bad_ip = self._run_settings_import(TRUSTED_PROXY_IPS='not-an-ip')
+        self.assertNotEqual(proc_bad_ip.returncode, 0)
+        self.assertIn('ImproperlyConfigured', proc_bad_ip.stderr)
+
+        proc_bad_num = self._run_settings_import(NUM_PROXIES='-1')
+        self.assertNotEqual(proc_bad_num.returncode, 0)
+        self.assertIn('ImproperlyConfigured', proc_bad_num.stderr)

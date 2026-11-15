@@ -1,3 +1,4 @@
+import ipaddress
 import os
 from decimal import Decimal, InvalidOperation
 
@@ -8,6 +9,8 @@ DEFAULT_FREE_DELIVERY_THRESHOLD = Decimal('500.00')
 DEFAULT_DELIVERY_FEE = Decimal('65.00')
 DEFAULT_RESTAURANT_ADDRESS = 'вул. Володимирська, 42, Київ'
 DEFAULT_RESTAURANT_HOTLINE = '+380 44 123 45 67'
+UNSPECIFIED_IPV4 = str(ipaddress.IPv4Address(0))
+DISALLOWED_ALLOWED_HOSTS = frozenset({'testserver', UNSPECIFIED_IPV4})
 
 
 def env_bool(name: str, default: bool = False) -> bool:

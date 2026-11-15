@@ -1,19 +1,12 @@
+import ipaddress
 import mimetypes
 import os
 import sys
 from pathlib import Path
 
-mimetypes.add_type('image/webp', '.webp')
-mimetypes.add_type('font/woff2', '.woff2')
-
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.csp import CSP
 from dotenv import load_dotenv
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-load_dotenv(BASE_DIR / '.env')
-load_dotenv(BASE_DIR.parent / '.env')
 
 from config.constants import (
     DEFAULT_DELIVERY_FEE,
@@ -21,12 +14,21 @@ from config.constants import (
     DEFAULT_MIN_ORDER_AMOUNT,
     DEFAULT_RESTAURANT_ADDRESS,
     DEFAULT_RESTAURANT_HOTLINE,
+    DISALLOWED_ALLOWED_HOSTS,
     env_bool,
     env_decimal,
     env_int,
     env_str,
     normalize_admin_url,
 )
+
+mimetypes.add_type('image/webp', '.webp')
+mimetypes.add_type('font/woff2', '.woff2')
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+load_dotenv(BASE_DIR / '.env')
+load_dotenv(BASE_DIR.parent / '.env')
 
 MIN_ORDER_AMOUNT = env_decimal('MIN_ORDER_AMOUNT', DEFAULT_MIN_ORDER_AMOUNT)
 FREE_DELIVERY_THRESHOLD = env_decimal('FREE_DELIVERY_THRESHOLD', DEFAULT_FREE_DELIVERY_THRESHOLD)
@@ -62,9 +64,8 @@ ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', '').split(',') if
 if not is_testing and not DEBUG:
     if (
         not ALLOWED_HOSTS
-        or 'testserver' in ALLOWED_HOSTS
         or '*' in ALLOWED_HOSTS
-        or '0.0.0.0' in ALLOWED_HOSTS
+        or any(host in DISALLOWED_ALLOWED_HOSTS for host in ALLOWED_HOSTS)
     ):
         raise ImproperlyConfigured(
             'ALLOWED_HOSTS must be explicitly configured without testserver or wildcards when DEBUG=False'
@@ -79,7 +80,7 @@ _domain_candidates = [
     for h in ALLOWED_HOSTS
     if '*' not in h
     and (cleaned := h.strip().lstrip('.'))
-    and cleaned not in {'testserver', '0.0.0.0'}
+    and cleaned not in DISALLOWED_ALLOWED_HOSTS
 ]
 SITE_DOMAIN = (
     os.getenv('SITE_DOMAIN', '').strip()
@@ -143,8 +144,24 @@ SECURE_CSP = {
     'base-uri': [CSP.SELF],
 }
 
+TRUST_PROXY_HEADERS = env_bool('TRUST_PROXY_HEADERS', False)
+TRUSTED_PROXY_IPS = [
+    ip.strip()
+    for ip in os.getenv('TRUSTED_PROXY_IPS', '').split(',')
+    if ip.strip()
+]
+for _proxy_entry in TRUSTED_PROXY_IPS:
+    try:
+        ipaddress.ip_network(_proxy_entry, strict=False)
+    except ValueError as exc:
+        raise ImproperlyConfigured(f'Invalid TRUSTED_PROXY_IPS entry: {_proxy_entry!r}') from exc
+
+NUM_PROXIES = env_int('NUM_PROXIES', 0)
+if NUM_PROXIES < 0:
+    raise ImproperlyConfigured('NUM_PROXIES must be non-negative')
+
 if not DEBUG:
-    if env_bool('TRUST_PROXY_HEADERS', False):
+    if TRUST_PROXY_HEADERS:
         SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_SSL_REDIRECT = env_bool('SECURE_SSL_REDIRECT', True)
     SESSION_COOKIE_SECURE = True
@@ -168,7 +185,12 @@ INTERNAL_IPS = [
 ]
 
 DEBUG_TOOLBAR_CONFIG = {
-    'SHOW_TOOLBAR_CALLBACK': lambda request: DEBUG and not is_testing and not request.headers.get('HX-Request') and not request.GET.get('no_toolbar'),
+    'SHOW_TOOLBAR_CALLBACK': (
+        lambda request: DEBUG
+        and not is_testing
+        and not request.headers.get('HX-Request')
+        and not request.GET.get('no_toolbar')
+    ),
 }
 
 ROOT_URLCONF = 'config.urls'

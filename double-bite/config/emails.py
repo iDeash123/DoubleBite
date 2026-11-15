@@ -10,7 +10,11 @@ from django.template import TemplateDoesNotExist
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 
-from config.constants import DEFAULT_RESTAURANT_ADDRESS, DEFAULT_RESTAURANT_HOTLINE
+from config.constants import (
+    DEFAULT_RESTAURANT_ADDRESS,
+    DEFAULT_RESTAURANT_HOTLINE,
+    DISALLOWED_ALLOWED_HOSTS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +40,7 @@ def resolve_site_domain(domain: str | None = None) -> str:
             if h
             and '*' not in h
             and (cleaned := h.strip().lstrip('.'))
-            and cleaned not in {'testserver', '0.0.0.0'}
+            and cleaned not in DISALLOWED_ALLOWED_HOSTS
         ]
         if allowed:
             effective_domain = allowed[0]
