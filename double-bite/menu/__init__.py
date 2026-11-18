@@ -1,4 +1,9 @@
+import logging
+
+logger = logging.getLogger('menu')
+
 try:
+    from django.db import DatabaseError, InterfaceError
     from django.db.backends.ddl_references import Statement
     from pgvector.django import HnswIndex, VectorExtension, VectorField
 
@@ -9,7 +14,7 @@ try:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT 1 FROM pg_extension WHERE extname = %s", ['vector'])
                 return bool(cursor.fetchone())
-        except Exception:
+        except (DatabaseError, InterfaceError):
             return False
 
     def is_vector_extension_available(connection) -> bool:
@@ -22,7 +27,7 @@ try:
                     return True
                 cursor.execute("SELECT 1 FROM pg_available_extensions WHERE name = %s", ['vector'])
                 return bool(cursor.fetchone())
-        except Exception:
+        except (DatabaseError, InterfaceError):
             return False
 
     if not getattr(VectorExtension, '_safe_patched', False):
@@ -33,8 +38,8 @@ try:
                 return
             try:
                 _orig_ext_forwards(self, app_label, schema_editor, from_state, to_state)
-            except Exception:
-                pass
+            except (DatabaseError, InterfaceError) as exc:
+                logger.warning('Skipping pgvector extension setup: %s', exc)
 
         VectorExtension.database_forwards = _safe_ext_forwards
         VectorExtension._safe_patched = True

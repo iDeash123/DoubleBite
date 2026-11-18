@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load l10n %}
 
 {% block title %}Мій кошик — Double Bite™ | Оформлення замовлення{% endblock %}
 {% block meta_description %}Перегляд вибраних страв у кошику ресторану Double Bite.{% endblock %}
@@ -34,11 +35,13 @@
             <div class="bg-white p-4 sm:p-6 border border-fv-noir/15 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 {% if not item.is_available %}opacity-60 bg-fv-offwhite/50{% endif %}">
               <div class="flex items-center gap-4 flex-1">
                 <div class="w-20 h-20 bg-fv-offwhite border border-fv-noir/10 flex-shrink-0 flex items-center justify-center overflow-hidden">
-                  {% if item.dish.image %}
-                    <img src="{% if item.dish.image.url %}{{ item.dish.image.url }}{% else %}{{ item.dish.image }}{% endif %}" alt="{{ item.dish.title }}" class="w-full h-full object-contain mix-blend-multiply">
-                  {% else %}
-                    <span class="text-[9px] font-mono text-fv-slate uppercase">Double Bite</span>
-                  {% endif %}
+                  {% with img_url=item.dish.image.url %}
+                    {% if item.dish.image and img_url %}
+                      <img src="{{ img_url }}" alt="{{ item.dish.title }}" class="w-full h-full object-contain mix-blend-multiply">
+                    {% else %}
+                      <span class="text-[9px] font-mono text-fv-slate uppercase">Double Bite</span>
+                    {% endif %}
+                  {% endwith %}
                 </div>
 
                 <div class="space-y-1">
@@ -46,7 +49,7 @@
                     {{ item.dish.category.name }}
                   </div>
                   <h2 class="font-sans font-bold text-base text-fv-noir">
-                    <a href="{% url 'menu:dish_detail' item.dish.slug %}" class="hover:underline">
+                    <a href="{{ item.dish.get_absolute_url }}" class="hover:underline">
                       {{ item.dish.title }}
                     </a>
                   </h2>
@@ -154,7 +157,7 @@
             </div>
             <div class="flex justify-between text-fv-slate">
               <span>Доставка:</span>
-              <span class="text-emerald-700 font-medium uppercase">Безкоштовно</span>
+              <span class="{% if meets_free_delivery %}text-emerald-700 uppercase{% else %}text-fv-noir{% endif %} font-medium">{% if meets_free_delivery %}Безкоштовно{% else %}{{ delivery_fee|unlocalize }} грн{% endif %}</span>
             </div>
 
             <div class="pt-3 border-t border-fv-noir/10 flex justify-between items-baseline">
@@ -196,10 +199,10 @@
       </div>
     {% endif %}
     {% if request.META.HTTP_HX_REQUEST %}
-    <span id="cart-badge" hx-swap-oob="true" class="inline-flex items-center justify-center min-w-[18px] h-4.5 px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
+    <span id="cart-badge" hx-swap-oob="true" class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
       {{ total_quantity|default:0 }}
     </span>
-    <span id="cart-badge-mobile" hx-swap-oob="true" class="inline-flex items-center justify-center min-w-[18px] h-4.5 px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
+    <span id="cart-badge-mobile" hx-swap-oob="true" class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
       {{ total_quantity|default:0 }}
     </span>
     {% endif %}

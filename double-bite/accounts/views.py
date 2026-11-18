@@ -1,6 +1,5 @@
 import logging
 import smtplib
-from decimal import Decimal
 from typing import Any
 
 from allauth.account.internal.flows.email_verification import (
@@ -33,7 +32,6 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.views import View
-from django.views.generic import TemplateView
 
 from .forms import (
     CustomPasswordResetForm,
@@ -44,7 +42,7 @@ from .forms import (
     UserRegistrationForm,
 )
 from .models import DeliveryAddress
-from .selectors import get_home_page_context, get_user_profile_context
+from .selectors import get_user_profile_context
 
 logger = logging.getLogger('accounts')
 User = get_user_model()
@@ -92,18 +90,6 @@ def _parse_address_pk(raw_pk: str | None) -> int | None:
     except (TypeError, ValueError):
         return None
     return pk if pk > 0 else None
-
-
-class HomeView(TemplateView):
-    template_name = 'home/index.html'
-
-    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
-        context = super().get_context_data(**kwargs)
-        total_amount = context.get('total_amount', Decimal('0.00')) or Decimal(
-            '0.00'
-        )
-        context.update(get_home_page_context(total_amount=total_amount))
-        return context
 
 
 class RegisterView(View):

@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Any
 
 from config.constants import (
@@ -77,18 +78,50 @@ def cart_context(request: HttpRequest) -> dict[str, Any]:
         request._cached_cart_summary_obj = summary
         return summary
 
+    free_delivery_threshold = getattr(
+        settings, 'FREE_DELIVERY_THRESHOLD', DEFAULT_FREE_DELIVERY_THRESHOLD
+    )
+    threshold_dec = (
+        free_delivery_threshold
+        if isinstance(free_delivery_threshold, Decimal)
+        else Decimal(str(free_delivery_threshold))
+    )
+
+    def _meets_free_delivery() -> bool:
+        if threshold_dec <= Decimal('0.00'):
+            return True
+        total = _get_summary().total_amount or Decimal('0.00')
+        return total >= threshold_dec
+
+    def _free_delivery_remaining() -> Decimal:
+        if threshold_dec <= Decimal('0.00'):
+            return Decimal('0.00')
+        total = _get_summary().total_amount or Decimal('0.00')
+        return max(Decimal('0.00'), threshold_dec - total)
+
+    def _free_delivery_percent() -> int:
+        if threshold_dec <= Decimal('0.00'):
+            return 100
+        total = _get_summary().total_amount or Decimal('0.00')
+        if total >= threshold_dec:
+            return 100
+        if total <= Decimal('0.00'):
+            return 0
+        return min(100, max(0, int((total * 100) // threshold_dec)))
+
     return {
         'cart': LazyValue(_get_cart),
         'items': LazyValue(lambda: _get_summary().items),
         'total_amount': LazyValue(lambda: _get_summary().total_amount),
         'total_quantity': LazyValue(lambda: _get_summary().total_quantity),
         'min_order_amount': getattr(settings, 'MIN_ORDER_AMOUNT', DEFAULT_MIN_ORDER_AMOUNT),
-        'free_delivery_threshold': getattr(
-            settings, 'FREE_DELIVERY_THRESHOLD', DEFAULT_FREE_DELIVERY_THRESHOLD
-        ),
+        'free_delivery_threshold': free_delivery_threshold,
         'delivery_fee': getattr(settings, 'DELIVERY_FEE', DEFAULT_DELIVERY_FEE),
         'restaurant_address': getattr(settings, 'RESTAURANT_ADDRESS', '') or DEFAULT_RESTAURANT_ADDRESS,
         'restaurant_hotline': getattr(settings, 'RESTAURANT_HOTLINE', '') or DEFAULT_RESTAURANT_HOTLINE,
         'meets_min_amount': LazyValue(lambda: _get_summary().meets_min_amount),
+        'meets_free_delivery': LazyValue(_meets_free_delivery),
+        'free_delivery_remaining': LazyValue(_free_delivery_remaining),
+        'free_delivery_percent': LazyValue(_free_delivery_percent),
         'cart_items_count': LazyValue(lambda: _get_summary().total_quantity),
     }

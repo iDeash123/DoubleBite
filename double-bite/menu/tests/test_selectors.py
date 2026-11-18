@@ -174,3 +174,48 @@ class MenuSelectorsTest(TestCase):
         self.assertIn('price', first)
         self.assertIn('options', first)
         self.assertTrue(len(first['options']) >= 1)
+
+    def test_filter_dishes_exclude_allergens_cyrillic_case_insensitive(self):
+        dish_nuts_titlecase = Dish.objects.create(
+            category=self.cat_pizza,
+            title='Горіхова Піца',
+            slug='nut-pizza-titlecase',
+            price=Decimal('290.00'),
+            weight_grams=440,
+            allergens='Горіхи, лактоза',
+            is_available=True,
+        )
+        dish_nuts_lowercase = Dish.objects.create(
+            category=self.cat_pizza,
+            title='Тарт з фундуком',
+            slug='hazelnut-tart',
+            price=Decimal('210.00'),
+            weight_grams=200,
+            allergens='горіхи',
+            is_available=True,
+        )
+
+        excluded_from_lower = list(filter_dishes(exclude_allergens=['горіхи']))
+        self.assertNotIn(dish_nuts_titlecase, excluded_from_lower)
+        self.assertNotIn(dish_nuts_lowercase, excluded_from_lower)
+        self.assertIn(self.dish1, excluded_from_lower)
+
+        excluded_from_title = list(filter_dishes(exclude_allergens=['Горіхи']))
+        self.assertNotIn(dish_nuts_titlecase, excluded_from_title)
+        self.assertNotIn(dish_nuts_lowercase, excluded_from_title)
+        self.assertIn(self.dish1, excluded_from_title)
+
+    def test_filter_dishes_prefetch_options_query_behavior(self):
+        qs_no_prefetch = filter_dishes(category_slug='pizza', prefetch_options=False)
+        self.assertEqual(qs_no_prefetch._prefetch_related_lookups, ())
+        with self.assertNumQueries(1):
+            dishes_no_prefetch = list(qs_no_prefetch)
+        self.assertEqual(len(dishes_no_prefetch), 2)
+
+        qs_prefetch = filter_dishes(category_slug='pizza', prefetch_options=True)
+        self.assertEqual(qs_prefetch._prefetch_related_lookups, ('options',))
+        with self.assertNumQueries(2):
+            dishes_prefetch = list(qs_prefetch)
+            all_options = [list(d.options.all()) for d in dishes_prefetch]
+        self.assertEqual(len(dishes_prefetch), 2)
+        self.assertTrue(any(len(opts) == 1 for opts in all_options))

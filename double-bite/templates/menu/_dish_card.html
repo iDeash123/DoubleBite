@@ -1,9 +1,11 @@
+{% load l10n %}
 <article class="bg-white p-5 sm:p-6 border border-fv-noir/10 flex flex-col justify-between hover:border-fv-noir/30 transition-all group relative">
+  {% with img_url=dish.image.url %}
   <div>
     <div class="bg-fv-offwhite aspect-square p-4 flex items-center justify-center overflow-hidden relative mb-4">
-      {% if dish.image %}
+      {% if dish.image and img_url %}
         <img
-          src="{% if dish.image.url %}{{ dish.image.url }}{% else %}{{ dish.image }}{% endif %}"
+          src="{{ img_url }}"
           alt="{{ dish.title }}"
           {% if forloop.counter <= 4 %}loading="eager" fetchpriority="high"{% else %}loading="lazy"{% endif %}
           decoding="async"
@@ -33,7 +35,7 @@
         {{ dish.category.name }}
       </div>
       <h3 class="font-sans font-bold text-base text-fv-noir group-hover:text-black transition-colors leading-snug">
-        <a href="{% url 'menu:dish_detail' dish.slug %}" class="hover:underline">
+        <a href="{{ dish.get_absolute_url }}" class="hover:underline">
           {{ dish.title }}
         </a>
       </h3>
@@ -73,13 +75,15 @@
           title: '{{ dish.title|escapejs }}',
           slug: '{{ dish.slug|escapejs }}',
           description: '{{ dish.description|escapejs }}',
-          price: '{{ dish.price }}',
+          price: '{{ dish.price|unlocalize }}',
           weight: '{{ dish.weight_grams }}',
           calories: '{{ dish.calories }}',
           allergens: '{{ dish.allergens|escapejs }}',
-          image: '{% if dish.image.url %}{{ dish.image.url|escapejs }}{% else %}{{ dish.image|escapejs }}{% endif %}',
+          image: '{% if img_url %}{{ img_url|escapejs }}{% endif %}',
           category: '{{ dish.category.name|escapejs }}',
-          detailUrl: '{% url 'menu:dish_detail' dish.slug %}'
+          detailUrl: '{{ dish.get_absolute_url|escapejs }}',
+          options: [{% for opt in dish.options.all %}{ id: '{{ opt.id }}', name: '{{ opt.name|escapejs }}', priceDelta: '{{ opt.price_delta|unlocalize }}' }{% if not forloop.last %}, {% endif %}{% endfor %}],
+          opener: $el
         })"
         class="py-2.5 px-2 bg-fv-offwhite text-fv-noir text-[11px] font-mono uppercase tracking-wider hover:bg-fv-lightgray transition-colors border border-fv-noir/15 text-center select-none"
       >
@@ -100,4 +104,5 @@
       </form>
     </div>
   </div>
+  {% endwith %}
 </article>

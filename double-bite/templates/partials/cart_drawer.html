@@ -26,7 +26,7 @@
        x-transition:leave-start="opacity-100"
        x-transition:leave-end="opacity-0"
        @click="closeDrawer()"
-       class="absolute inset-0 bg-black/40 backdrop-blur-xs transition-opacity"></div>
+       class="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity"></div>
 
   <div x-show="drawerOpen"
        x-transition:enter="transform transition ease-in-out duration-300"
@@ -67,17 +67,19 @@
           {% for item in items %}
             <div class="pt-3 first:pt-0 flex gap-3 {% if not item.is_available %}opacity-50{% endif %}">
               <div class="w-16 h-16 bg-fv-offwhite p-1.5 border border-fv-noir/10 flex items-center justify-center shrink-0">
-                {% if item.dish.image %}
-                  <img src="{% if item.dish.image.url %}{{ item.dish.image.url }}{% else %}{{ item.dish.image }}{% endif %}" alt="{{ item.dish.title }}" class="w-full h-full object-contain mix-blend-multiply">
-                {% else %}
-                  <span class="text-[8px] font-mono text-fv-slate">DB</span>
-                {% endif %}
+                {% with img_url=item.dish.image.url %}
+                  {% if item.dish.image and img_url %}
+                    <img src="{{ img_url }}" alt="{{ item.dish.title }}" class="w-full h-full object-contain mix-blend-multiply">
+                  {% else %}
+                    <span class="text-[8px] font-mono text-fv-slate">DB</span>
+                  {% endif %}
+                {% endwith %}
               </div>
               <div class="flex-1 flex flex-col justify-between">
                 <div>
                   <div class="flex justify-between items-start">
                     <h4 class="text-xs font-bold text-fv-noir font-sans leading-tight">
-                      <a href="{% url 'menu:dish_detail' item.dish.slug %}" class="hover:underline">
+                      <a href="{{ item.dish.get_absolute_url }}" class="hover:underline">
                         {{ item.dish.title }}
                       </a>
                     </h4>
@@ -131,7 +133,7 @@
           </div>
           <div class="flex justify-between text-xs font-mono text-fv-slate">
             <span>Доставка</span>
-            <span class="text-emerald-700 font-bold uppercase">Безкоштовно</span>
+            <span class="{% if meets_free_delivery %}text-emerald-700 uppercase{% else %}text-fv-noir{% endif %} font-bold">{% if meets_free_delivery %}Безкоштовно{% else %}{{ delivery_fee|unlocalize }} грн{% endif %}</span>
           </div>
 
           {% if not meets_min_amount %}
@@ -165,10 +167,10 @@
       <span id="cart-drawer-count" hx-swap-oob="true" class="text-xs font-mono bg-fv-offwhite px-2 py-0.5 border border-fv-noir/10 text-fv-slate">
         {{ total_quantity|default:0 }} од.
       </span>
-      <span id="cart-badge" hx-swap-oob="true" class="inline-flex items-center justify-center min-w-[18px] h-4.5 px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
+      <span id="cart-badge" hx-swap-oob="true" class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
         {{ total_quantity|default:0 }}
       </span>
-      <span id="cart-badge-mobile" hx-swap-oob="true" class="inline-flex items-center justify-center min-w-[18px] h-4.5 px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
+      <span id="cart-badge-mobile" hx-swap-oob="true" class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
         {{ total_quantity|default:0 }}
       </span>
       {% endif %}

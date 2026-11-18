@@ -1,3 +1,4 @@
+{% load l10n %}
 <script nonce="{{ csp_nonce }}">
 function deliveryCalculator() {
   return {
@@ -132,13 +133,13 @@ function deliveryCalculator() {
             <b>{{ total_amount|default:'0' }} / {{ free_delivery_threshold|default:500|floatformat:'-2u' }} ₴</b>
           </div>
           <div class="db-freebar__track">
-            <div class="db-freebar__fill" style="width: {% if meets_free_delivery or total_amount >= free_delivery_threshold|default:500 %}100{% else %}{% widthratio total_amount|default:0 free_delivery_threshold|default:500 100 %}{% endif %}%;"></div>
+            <div class="db-freebar__fill" style="width: {% if meets_free_delivery %}100{% else %}{{ free_delivery_percent|default:0 }}{% endif %}%;"></div>
           </div>
           <div class="db-freebar__note">
-            {% if meets_free_delivery or total_amount >= free_delivery_threshold|default:500 %}
+            {% if meets_free_delivery %}
               <span class="is-ok">Безкоштовна доставка активна для вашого замовлення</span>
             {% else %}
-              Додайте ще <strong>{{ free_delivery_remaining|default:free_delivery_threshold|default:'500' }} ₴</strong> до кошика для безкоштовної доставки.
+              Додайте ще <strong>{{ free_delivery_remaining|default:free_delivery_threshold|default:'500'|unlocalize }} ₴</strong> до кошика для безкоштовної доставки.
             {% endif %}
           </div>
         </div>

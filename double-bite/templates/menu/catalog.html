@@ -11,16 +11,139 @@
 <div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-8 sm:py-12" x-data="{
   modalOpen: false,
   modalDish: {},
+  modalSelectedOptionId: '',
+  modalOptionDelta: 0,
+  modalQuantity: 1,
+  modalSubmitting: false,
+  modalOpener: null,
+  get modalUnitPrice() {
+    const base = parseFloat(this.modalDish.price || 0) || 0;
+    const delta = parseFloat(this.modalOptionDelta || 0) || 0;
+    return base + delta;
+  },
+  get modalTotalPrice() {
+    return (this.modalUnitPrice * this.modalQuantity).toFixed(2);
+  },
+  setModalOption(id, delta) {
+    this.modalSelectedOptionId = id ? String(id) : '';
+    this.modalOptionDelta = parseFloat(delta || 0) || 0;
+  },
+  incrementModalQty() {
+    if (this.modalQuantity < 99) this.modalQuantity++;
+  },
+  decrementModalQty() {
+    if (this.modalQuantity > 1) this.modalQuantity--;
+  },
+  formatOptionDelta(delta) {
+    const val = parseFloat(delta || 0);
+    if (!Number.isFinite(val) || val === 0) return '0.00 грн';
+    const absFormatted = Math.abs(val).toFixed(2);
+    return val > 0 ? ('+' + absFormatted + ' грн') : ('-' + absFormatted + ' грн');
+  },
   openModal(dish) {
-    this.modalDish = dish;
+    this.modalOpener = (dish && dish.opener) || document.activeElement;
+    this.modalDish = dish || {};
+    this.modalSelectedOptionId = '';
+    this.modalOptionDelta = 0;
+    this.modalQuantity = 1;
+    this.modalSubmitting = false;
     this.modalOpen = true;
+    document.body.classList.add('overflow-hidden');
+    if (window.__lenis) window.__lenis.stop();
     window.dispatchEvent(new CustomEvent('modal-opened'));
+    this.$nextTick(() => {
+      if (this.$refs.modalCloseBtn) {
+        this.$refs.modalCloseBtn.focus();
+      }
+    });
   },
   closeModal() {
+    if (!this.modalOpen) return;
     this.modalOpen = false;
+    document.body.classList.remove('overflow-hidden');
+    if (window.__lenis) window.__lenis.start();
     window.dispatchEvent(new CustomEvent('modal-closed'));
+    const opener = this.modalOpener;
+    this.modalOpener = null;
+    this.$nextTick(() => {
+      if (opener && typeof opener.focus === 'function' && document.contains(opener)) {
+        opener.focus();
+      }
+    });
   },
-  category: '{{ selected_category|default:'' }}',
+  trapFocus(event) {
+    if (!this.modalOpen || !this.$refs.modalPanel) return;
+    const selector = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex=\x22-1\x22])';
+    const focusables = Array.from(this.$refs.modalPanel.querySelectorAll(selector)).filter((el) => el.offsetParent !== null);
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (event.shiftKey) {
+      if (document.activeElement === first || !this.$refs.modalPanel.contains(document.activeElement)) {
+        event.preventDefault();
+        last.focus();
+      }
+    } else if (document.activeElement === last || !this.$refs.modalPanel.contains(document.activeElement)) {
+      event.preventDefault();
+      first.focus();
+    }
+  },
+  addModalToCart(evt) {
+    if (!this.modalDish || !this.modalDish.id || this.modalSubmitting || !window.htmx) return;
+    const dishId = this.modalDish.id;
+    const dishTitle = this.modalDish.title || 'Страву';
+    const targetUrl = '/orders/cart/add/' + dishId + '/';
+    const rootEl = this.$el || document.body;
+    const sourceEl = (evt && evt.currentTarget) || rootEl;
+    this.modalSubmitting = true;
+    let handled = false;
+    const finish = (ok, errMsg) => {
+      if (handled) return;
+      handled = true;
+      this.modalSubmitting = false;
+      rootEl.removeEventListener('htmx:afterRequest', onAfter);
+      if (ok) {
+        if (window.showToast) {
+          window.showToast('«' + dishTitle + '» додано до кошика', 'success');
+        }
+        this.closeModal();
+      } else if (window.showToast) {
+        window.showToast(errMsg || 'Не вдалося додати страву до кошика.', 'error');
+      }
+    };
+    const onAfter = (e) => {
+      const detail = e && e.detail;
+      if (!detail || !detail.pathInfo || detail.pathInfo.requestPath !== targetUrl) return;
+      const xhr = detail.xhr;
+      const ok = Boolean(xhr && xhr.status >= 200 && xhr.status < 300);
+      const msg = xhr && xhr.status >= 400 && xhr.responseText ? xhr.responseText : '';
+      finish(ok, msg);
+    };
+    rootEl.addEventListener('htmx:afterRequest', onAfter);
+    const req = htmx.ajax('POST', targetUrl, {
+      source: sourceEl,
+      target: '#cart-badge',
+      swap: 'outerHTML',
+      values: {
+        quantity: this.modalQuantity,
+        option_id: this.modalSelectedOptionId
+      }
+    });
+    if (req && typeof req.then === 'function') {
+      req.then(
+        () => {
+          if (!handled) {
+            this.modalSubmitting = false;
+            rootEl.removeEventListener('htmx:afterRequest', onAfter);
+          }
+        },
+        () => {
+          finish(false, 'Помилка зʼєднання. Спробуйте ще раз.');
+        }
+      );
+    }
+  },
+  category: '{{ selected_category|default:''|escapejs }}',
   setCategory(slug) {
     this.category = slug;
     const input = document.getElementById('category-input');
@@ -42,7 +165,7 @@
         </h1>
       </div>
       <div class="text-xs font-mono text-fv-slate">
-        <span>Всього позицій у меню: <strong class="text-fv-noir">{{ total_dishes }}</strong></span>
+        <span id="total-dishes">Всього позицій у меню: <strong class="text-fv-noir">{{ total_dishes }}</strong></span>
       </div>
     </div>
   </div>
@@ -51,7 +174,7 @@
         hx-get="{% url 'menu:catalog' %}"
         hx-target="#dish-grid"
         hx-swap="outerHTML"
-        hx-trigger="change, input delay:300ms from:#search-input, input delay:600ms from:[name='max_price'], submit"
+        hx-trigger="change from:select, change from:input[type='checkbox'], change from:#category-input, input delay:300ms from:#search-input, input delay:600ms from:[name='max_price'], submit"
         hx-push-url="true">
     
     <input type="hidden" name="category" id="category-input" value="{{ selected_category|default:'' }}">
@@ -100,7 +223,7 @@
           value="{{ max_price }}"
           placeholder="Макс. ціна (грн)"
           min="0"
-          step="10"
+          step="1"
           class="w-full px-3 py-2.5 text-xs font-mono bg-fv-offwhite border border-fv-noir/20 focus:outline-none focus:border-fv-noir text-fv-noir placeholder:text-fv-slate"
         >
       </div>
@@ -108,8 +231,7 @@
       <div class="md:col-span-2">
         <select
           name="sort"
-          class="w-full px-3 py-2.5 text-xs font-mono bg-fv-offwhite border border-fv-noir/20 focus:outline-none focus:border-fv-noir text-fv-noir appearance-none cursor-pointer"
-          style="background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23888' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E\"); background-repeat: no-repeat; background-position: right 0.6rem center; background-size: 1rem; padding-right: 2rem;"
+          class="w-full px-3 py-2.5 pr-8 text-xs font-mono bg-fv-offwhite border border-fv-noir/20 focus:outline-none focus:border-fv-noir text-fv-noir appearance-none cursor-pointer db-select-arrow"
         >
           <option value="default"     {% if sort == 'default'     %}selected{% endif %}>За замовчуванням</option>
           <option value="price_asc"   {% if sort == 'price_asc'   %}selected{% endif %}>Ціна: від низької</option>
@@ -153,6 +275,9 @@
 
   {% partialdef dish-grid inline %}
   <div id="dish-grid">
+    {% if request.headers.hx_request and not request.headers.hx_history_restore_request %}
+      <span id="total-dishes" hx-swap-oob="true">Всього позицій у меню: <strong class="text-fv-noir">{{ total_dishes }}</strong></span>
+    {% endif %}
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
       {% for dish in dishes %}
         {% include "menu/_dish_card.html" %}
@@ -172,6 +297,10 @@
 
       {% if page_obj.has_previous %}
         <a href="?{% query_transform page=page_obj.previous_page_number %}"
+           hx-get="?{% query_transform page=page_obj.previous_page_number %}"
+           hx-target="#dish-grid"
+           hx-swap="outerHTML"
+           hx-push-url="true"
            class="px-3 py-2 border border-fv-noir/20 text-fv-noir hover:bg-fv-noir hover:text-white transition-colors"
            aria-label="Попередня сторінка">←</a>
       {% else %}
@@ -183,6 +312,10 @@
           <span class="px-3 py-2 bg-fv-noir text-white border border-fv-noir" aria-current="page">{{ num }}</span>
         {% elif num == 1 or num == paginator.num_pages or num >= page_obj.number|add:"-2" and num <= page_obj.number|add:"2" %}
           <a href="?{% query_transform page=num %}"
+             hx-get="?{% query_transform page=num %}"
+             hx-target="#dish-grid"
+             hx-swap="outerHTML"
+             hx-push-url="true"
              class="px-3 py-2 border border-fv-noir/20 text-fv-noir hover:bg-fv-noir hover:text-white transition-colors">{{ num }}</a>
         {% elif num == page_obj.number|add:"-3" or num == page_obj.number|add:"3" %}
           <span class="px-3 py-2 text-fv-slate">…</span>
@@ -191,6 +324,10 @@
 
       {% if page_obj.has_next %}
         <a href="?{% query_transform page=page_obj.next_page_number %}"
+           hx-get="?{% query_transform page=page_obj.next_page_number %}"
+           hx-target="#dish-grid"
+           hx-swap="outerHTML"
+           hx-push-url="true"
            class="px-3 py-2 border border-fv-noir/20 text-fv-noir hover:bg-fv-noir hover:text-white transition-colors"
            aria-label="Наступна сторінка">→</a>
       {% else %}
@@ -209,6 +346,7 @@
     x-show="modalOpen"
     x-cloak
     @keydown.escape.window="closeModal()"
+    @keydown.tab="trapFocus($event)"
     class="fixed inset-0 z-[70] overflow-y-auto"
     aria-labelledby="modal-title"
     role="dialog"
@@ -223,13 +361,14 @@
         x-transition:leave="ease-in duration-200"
         x-transition:leave-start="opacity-100"
         x-transition:leave-end="opacity-0"
-        class="fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity"
+        class="fixed inset-0 bg-black/50 backdrop-blur-sm transition-opacity"
         @click="closeModal()"
       ></div>
 
       <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
 
       <div
+        x-ref="modalPanel"
         x-show="modalOpen"
         x-transition:enter="ease-out duration-300"
         x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
@@ -241,7 +380,7 @@
       >
         <div class="flex justify-between items-center px-6 py-4 border-b border-fv-noir/10">
           <span class="font-mono text-xs uppercase tracking-widest text-fv-slate" x-text="modalDish.category"></span>
-          <button @click="closeModal()" class="text-fv-slate hover:text-fv-noir transition-colors" aria-label="Закрити">
+          <button type="button" x-ref="modalCloseBtn" @click="closeModal()" class="text-fv-slate hover:text-fv-noir transition-colors" aria-label="Закрити">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
             </svg>
@@ -277,12 +416,64 @@
                   <span class="text-fv-noir font-medium" x-text="modalDish.allergens"></span>
                 </div>
               </div>
+
+              <div class="space-y-2 pt-3" x-show="modalDish.options && modalDish.options.length > 0">
+                <span class="font-mono text-[11px] uppercase tracking-wider text-fv-slate block">Опція / модифікатор</span>
+                <div class="grid grid-cols-1 gap-1.5">
+                  <button
+                    type="button"
+                    @click="setModalOption('', '0')"
+                    :class="modalSelectedOptionId === '' ? 'border-fv-noir bg-fv-noir text-white' : 'border-fv-noir/20 bg-white text-fv-noir hover:bg-fv-offwhite'"
+                    class="p-2.5 border text-left font-mono transition-colors flex justify-between items-center text-xs"
+                  >
+                    <span class="font-medium">Стандарт</span>
+                    <span class="text-[11px] opacity-80 font-semibold">Базова</span>
+                  </button>
+                  <template x-for="opt in (modalDish.options || [])" :key="opt.id">
+                    <button
+                      type="button"
+                      @click="setModalOption(opt.id, opt.priceDelta)"
+                      :class="modalSelectedOptionId === String(opt.id) ? 'border-fv-noir bg-fv-noir text-white' : 'border-fv-noir/20 bg-white text-fv-noir hover:bg-fv-offwhite'"
+                      class="p-2.5 border text-left font-mono transition-colors flex justify-between items-center text-xs"
+                    >
+                      <span class="font-medium" x-text="opt.name"></span>
+                      <span class="text-[11px] opacity-80 font-semibold" x-text="formatOptionDelta(opt.priceDelta)"></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
             </div>
 
             <div class="pt-4 space-y-3">
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-xs font-mono text-fv-slate uppercase">Кількість:</span>
+                <div class="flex items-center border border-fv-noir/20 bg-white">
+                  <button
+                    type="button"
+                    @click="decrementModalQty()"
+                    class="w-9 h-9 flex items-center justify-center text-fv-noir hover:bg-fv-offwhite transition-colors text-base font-mono"
+                    aria-label="Зменшити кількість"
+                  >
+                    -
+                  </button>
+                  <span class="w-9 h-9 flex items-center justify-center font-mono font-bold text-sm text-fv-noir" x-text="modalQuantity"></span>
+                  <button
+                    type="button"
+                    @click="incrementModalQty()"
+                    class="w-9 h-9 flex items-center justify-center text-fv-noir hover:bg-fv-offwhite transition-colors text-base font-mono"
+                    aria-label="Збільшити кількість"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
               <div class="flex justify-between items-baseline">
                 <span class="text-xs font-mono text-fv-slate uppercase">Вартість:</span>
-                <span class="font-mono font-bold text-xl text-fv-noir" x-text="modalDish.price + ' грн'"></span>
+                <div class="text-right">
+                  <span class="font-mono font-bold text-xl text-fv-noir" x-text="modalTotalPrice + ' грн'"></span>
+                  <span class="block font-mono text-[11px] text-fv-slate" x-show="modalQuantity > 1" x-text="modalUnitPrice.toFixed(2) + ' грн / од.'"></span>
+                </div>
               </div>
 
               <div class="grid grid-cols-2 gap-3">
@@ -294,8 +485,10 @@
                 </a>
                 <button
                   type="button"
-                  @click="htmx.ajax('POST', '/orders/cart/add/' + modalDish.id + '/', { target: '#cart-badge', swap: 'outerHTML' }); closeModal()"
-                  class="py-3 px-3 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors font-medium text-center"
+                  :disabled="modalSubmitting"
+                  :class="modalSubmitting ? 'opacity-60 cursor-not-allowed' : 'hover:bg-black'"
+                  @click="addModalToCart($event)"
+                  class="py-3 px-3 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider transition-colors font-medium text-center"
                 >
                   До кошика
                 </button>
@@ -315,6 +508,18 @@
       filterForm.addEventListener('htmx:beforeRequest', function() {
         var pageInput = document.getElementById('page-input');
         if (pageInput) pageInput.value = '';
+      });
+      filterForm.addEventListener('htmx:configRequest', function(evt) {
+        var pageInput = document.getElementById('page-input');
+        if (pageInput) pageInput.value = '';
+        var params = evt.detail && evt.detail.parameters;
+        if (!params) return;
+        Object.keys(params).forEach(function(key) {
+          var val = params[key];
+          if (val === null || val === undefined || String(val).trim() === '') {
+            delete params[key];
+          }
+        });
       });
     }
   });

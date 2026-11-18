@@ -76,6 +76,7 @@
 <body class="bg-fv-offwhite text-fv-noir font-sans antialiased selection:bg-fv-noir selection:text-white relative min-h-screen flex flex-col">
   <div style="display:none">{% csrf_token %}</div>
 
+  {% if debug %}
   <div id="grid-overlay" class="fixed inset-0 pointer-events-none z-50 overflow-hidden hidden">
     <div class="max-w-[1440px] mx-auto h-full px-4 sm:px-8 relative border-x border-red-500/20">
       <div class="grid grid-cols-12 gap-6 h-full">
@@ -97,6 +98,7 @@
       </div>
     </div>
   </div>
+  {% endif %}
 
   <header x-data class="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-fv-noir/15 select-none">
     <div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-3">
@@ -125,7 +127,8 @@
           ПРО НАС
         </a>
 
-        <div class="col-span-2 grid grid-cols-3">
+        <div class="col-span-2 grid {% if debug %}grid-cols-3{% else %}grid-cols-2{% endif %}">
+          {% if debug %}
           <button
             type="button"
             data-toggle-grid
@@ -138,6 +141,7 @@
               <circle cx="12" cy="12" r="3"></circle>
             </svg>
           </button>
+          {% endif %}
 
           {% if user.is_authenticated %}
             <a
@@ -179,7 +183,7 @@
               <line x1="3" y1="6" x2="21" y2="6"></line>
               <path d="M16 10a4 4 0 0 1-8 0"></path>
             </svg>
-            <span id="cart-badge" class="inline-flex items-center justify-center min-w-[18px] h-4.5 px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
+            <span id="cart-badge" class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
               {{ cart_items_count|default:0 }}
             </span>
           </button>
@@ -192,9 +196,11 @@
         </a>
 
         <div class="flex items-center gap-2 text-xs font-mono">
+          {% if debug %}
           <button type="button" data-toggle-grid class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite" title="Сітка" aria-label="12-колонкова сітка">
             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
+          {% endif %}
 
           {% if user.is_authenticated %}
             <a href="{% url 'accounts:profile' %}" class="p-1.5 border border-fv-noir/20 text-fv-noir hover:bg-fv-offwhite" title="Профіль" aria-label="Особистий кабінет">
@@ -214,7 +220,7 @@
             aria-label="Кошик"
           >
             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/></svg>
-            <span id="cart-badge-mobile" class="inline-flex items-center justify-center min-w-[18px] h-4.5 px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
+            <span id="cart-badge-mobile" class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
               {{ cart_items_count|default:0 }}
             </span>
           </button>
@@ -269,10 +275,10 @@
           <h4 class="font-bold text-white tracking-wider uppercase mb-4">МЕНЮ СТРАВ</h4>
           <ul class="space-y-2 text-white/60">
             <li><a href="/menu/" class="hover:text-white transition-colors">Всі страви</a></li>
-            <li><a href="/#collections" class="hover:text-white transition-colors">Авторські бургери</a></li>
-            <li><a href="/#collections" class="hover:text-white transition-colors">Неаполітанська піца</a></li>
-            <li><a href="/#collections" class="hover:text-white transition-colors">Свіжі боули &amp; салати</a></li>
-            <li><a href="/#collections" class="hover:text-white transition-colors">Десерти &amp; напої</a></li>
+            <li><a href="/menu/?category=burgers" class="hover:text-white transition-colors">Авторські бургери</a></li>
+            <li><a href="/menu/?category=pizza" class="hover:text-white transition-colors">Неаполітанська піца</a></li>
+            <li><a href="/menu/?category=bowls-salads" class="hover:text-white transition-colors">Свіжі боули &amp; салати</a></li>
+            <li><a href="/menu/?category=desserts" class="hover:text-white transition-colors">Десерти &amp; напої</a></li>
           </ul>
         </div>
 
@@ -331,12 +337,14 @@
   {% include "partials/toast_messages.html" %}
 
   <script nonce="{{ csp_nonce }}">
+    {% if debug %}
     function toggleGrid() {
       const overlay = document.getElementById('grid-overlay');
       if (overlay) {
         overlay.classList.toggle('hidden');
       }
     }
+    {% endif %}
 
     document.addEventListener('DOMContentLoaded', function() {
       var lenisInstance = null;
@@ -420,14 +428,19 @@
         });
       }
 
+      {% if debug %}
       document.querySelectorAll('[data-toggle-grid]').forEach(function(btn) {
         btn.addEventListener('click', toggleGrid);
       });
+      {% endif %}
 
       document.querySelectorAll('.footer-newsletter-form').forEach(function(form) {
         form.addEventListener('submit', function(evt) {
           evt.preventDefault();
-          alert('Дякуємо за підписку на оновлення Double Bite.');
+          if (window.showToast) {
+            window.showToast('Дякуємо за підписку на оновлення Double Bite.', 'success');
+          }
+          form.reset();
         });
       });
     });

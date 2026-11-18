@@ -9,38 +9,19 @@
 
 {% block og_title %}{{ dish.title }} — Double Bite{% endblock %}
 {% block og_description %}{{ dish.description|default:dish.title|truncatewords:25 }}{% endblock %}
-{% block og_image %}{% if dish.image %}{% if '://' in dish.image.url %}{{ dish.image.url }}{% else %}{{ request.scheme }}://{{ request.get_host }}{{ dish.image.url }}{% endif %}{% else %}{{ request.scheme }}://{{ request.get_host }}{% static 'favicon/favicon.png' %}{% endif %}{% endblock %}
+{% block og_image %}{% with img_url=dish.image.url %}{% if dish.image and img_url %}{% if '://' in img_url %}{{ img_url }}{% else %}{{ request.scheme }}://{{ request.get_host }}{{ img_url }}{% endif %}{% else %}{{ request.scheme }}://{{ request.get_host }}{% static 'favicon/favicon.png' %}{% endif %}{% endwith %}{% endblock %}
 {% block og_url %}{{ request.scheme }}://{{ request.get_host }}{{ dish.get_absolute_url }}{% endblock %}
 
 {% block structured_data %}
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "Product",
-  "name": "{{ dish.title|escapejs }}",
-  "description": "{{ dish.description|default:dish.title|escapejs }}",
-  "url": "{{ request.scheme }}://{{ request.get_host }}{{ dish.get_absolute_url }}",
-  "image": "{% if dish.image %}{% if '://' in dish.image.url %}{{ dish.image.url }}{% else %}{{ request.scheme }}://{{ request.get_host }}{{ dish.image.url }}{% endif %}{% else %}{{ request.scheme }}://{{ request.get_host }}{% static 'favicon/favicon.png' %}{% endif %}",
-  "offers": {
-    "@type": "Offer",
-    "price": "{{ dish.price|unlocalize }}",
-    "priceCurrency": "UAH",
-    "availability": "{% if dish.is_available %}https://schema.org/InStock{% else %}https://schema.org/OutOfStock{% endif %}"
-  },
-  "nutrition": {
-    "@type": "NutritionInformation",
-    "calories": "{{ dish.calories }} cal"
-  }
-}
-</script>
+{{ dish_json_ld|json_script:"dish-ld-json" }}
 {% endblock %}
 
 {% block content %}
 <div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-8 sm:py-12"
      x-data="{
        basePrice: parseFloat('{{ dish.price|unlocalize }}'),
-       selectedOptionId: '{% if options %}{{ options.0.id }}{% endif %}',
-       optionDelta: {% if options %}parseFloat('{{ options.0.price_delta|unlocalize }}'){% else %}0{% endif %},
+       selectedOptionId: '',
+       optionDelta: 0,
        quantity: 1,
        get unitPrice() {
          return this.basePrice + this.optionDelta;
@@ -50,7 +31,7 @@
        },
        setOption(id, delta) {
          this.selectedOptionId = id;
-         this.optionDelta = parseFloat(delta);
+         this.optionDelta = parseFloat(delta || 0) || 0;
        },
        increment() {
          if (this.quantity < 99) this.quantity++;
@@ -77,22 +58,24 @@
     
     <div class="lg:col-span-7">
       <div class="bg-fv-offwhite aspect-square p-8 sm:p-12 border border-fv-noir/15 flex items-center justify-center relative overflow-hidden group">
-        {% if dish.image %}
-          <img
-            src="{% if dish.image.url %}{{ dish.image.url }}{% else %}{{ dish.image }}{% endif %}"
-            alt="{{ dish.title }}"
-            loading="lazy"
-            decoding="async"
-            class="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-700"
-          >
-        {% else %}
-          <div class="flex flex-col items-center justify-center text-fv-slate/40">
-            <svg class="w-20 h-20 stroke-current" fill="none" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
-            </svg>
-            <span class="font-mono text-xs uppercase tracking-widest mt-2 text-fv-slate/60">Double Bite</span>
-          </div>
-        {% endif %}
+        {% with img_url=dish.image.url %}
+          {% if dish.image and img_url %}
+            <img
+              src="{{ img_url }}"
+              alt="{{ dish.title }}"
+              loading="lazy"
+              decoding="async"
+              class="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-700"
+            >
+          {% else %}
+            <div class="flex flex-col items-center justify-center text-fv-slate/40">
+              <svg class="w-20 h-20 stroke-current" fill="none" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+              </svg>
+              <span class="font-mono text-xs uppercase tracking-widest mt-2 text-fv-slate/60">Double Bite</span>
+            </div>
+          {% endif %}
+        {% endwith %}
 
         <div class="absolute top-4 left-4 flex flex-col gap-1.5 z-10">
           {% if dish.is_vegetarian %}
@@ -164,6 +147,15 @@
             Оберіть модифікатор / розмір
           </label>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <button
+              type="button"
+              @click="setOption('', '0')"
+              :class="selectedOptionId === '' ? 'border-fv-noir bg-fv-noir text-white' : 'border-fv-noir/20 bg-white text-fv-noir hover:bg-fv-offwhite'"
+              class="p-3 border text-left font-mono transition-colors flex justify-between items-center"
+            >
+              <span class="text-xs font-medium">Стандарт</span>
+              <span class="text-[11px] opacity-80 font-semibold">Базова</span>
+            </button>
             {% for opt in options %}
               <button
                 type="button"
@@ -173,7 +165,7 @@
               >
                 <span class="text-xs font-medium">{{ opt.name }}</span>
                 <span class="text-[11px] opacity-80 font-semibold">
-                  {% if opt.price_delta > 0 %}+{{ opt.price_delta }} грн{% else %}0.00 грн{% endif %}
+                  {% if opt.price_delta > 0 %}+{{ opt.price_delta|unlocalize }} грн{% elif opt.price_delta < 0 %}{{ opt.price_delta|unlocalize }} грн{% else %}0.00 грн{% endif %}
                 </span>
               </button>
             {% endfor %}

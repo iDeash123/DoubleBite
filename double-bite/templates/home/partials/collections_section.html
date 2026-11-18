@@ -80,7 +80,7 @@ function collectionsShowcase(initialCollections) {
       {
         index: 3,
         tag: '03 · FRESH BOWLS',
-        slug: 'bowls',
+        slug: 'bowls-salads',
         title: 'Свіжі Боули & Салати',
         subtitle: 'Дикий лосось · Стигле авокадо Hass · Органічна кіноа',
         description: 'Легкі та нутрієнтно насичені композиції зі свіжою рибою, суперфудами, бобами едамаме та авторськими цитрусовими дресингами.',
@@ -195,21 +195,56 @@ function collectionsShowcase(initialCollections) {
     selectCollection(index) {
       this.activeCollectionIndex = index;
     },
-    addToCart(dish) {
+    addToCart(dish, evt) {
       if (!dish) return;
-      const dishId = dish.id;
-      if (dishId && dishId > 0) {
-        if (window.htmx) {
-          htmx.ajax('POST', '/orders/cart/add/' + dishId + '/', {
-            target: '#cart-badge',
-            swap: 'outerHTML'
-          });
-        }
-      } else {
-        window.dispatchEvent(new CustomEvent('open-cart-drawer'));
+      const dishId = Number(dish.id);
+      if (!Number.isFinite(dishId) || dishId <= 0) {
+        const slug = this.currentCollection && this.currentCollection.slug
+          ? '?category=' + encodeURIComponent(this.currentCollection.slug)
+          : '';
+        window.location.assign('/menu/' + slug);
+        return;
       }
-      if (window.showToast) {
-        window.showToast('«' + (dish.title || 'Страву') + '» додано до замовлення', 'success');
+      if (!window.htmx) return;
+      const dishTitle = dish.title || 'Страву';
+      const targetUrl = '/orders/cart/add/' + dishId + '/';
+      const rootEl = this.$el || document.body;
+      const sourceEl = (evt && evt.currentTarget) || rootEl;
+      let handled = false;
+      const notify = (ok, errMsg) => {
+        if (handled) return;
+        handled = true;
+        rootEl.removeEventListener('htmx:afterRequest', onAfter);
+        if (!window.showToast) return;
+        if (ok) {
+          window.showToast('«' + dishTitle + '» додано до замовлення', 'success');
+        } else {
+          window.showToast(errMsg || 'Не вдалося додати страву до замовлення.', 'error');
+        }
+      };
+      const onAfter = (e) => {
+        const detail = e && e.detail;
+        if (!detail || !detail.pathInfo || detail.pathInfo.requestPath !== targetUrl) return;
+        const xhr = detail.xhr;
+        const ok = Boolean(xhr && xhr.status >= 200 && xhr.status < 300);
+        const msg = xhr && xhr.status >= 400 && xhr.responseText ? xhr.responseText : '';
+        notify(ok, msg);
+      };
+      rootEl.addEventListener('htmx:afterRequest', onAfter);
+      const req = htmx.ajax('POST', targetUrl, {
+        source: sourceEl,
+        target: '#cart-badge',
+        swap: 'outerHTML'
+      });
+      if (req && typeof req.then === 'function') {
+        req.then(
+          () => {
+            if (!handled) rootEl.removeEventListener('htmx:afterRequest', onAfter);
+          },
+          () => {
+            notify(false, 'Помилка зʼєднання. Спробуйте ще раз.');
+          }
+        );
       }
     }
   };
@@ -271,7 +306,7 @@ function collectionsShowcase(initialCollections) {
                     <img :src="dish.image" :alt="dish.title" width="600" height="750" loading="lazy" decoding="async">
                     <span class="db-dish__price" x-text="dish.price + ' ₴'"></span>
                     <span class="db-dish__specs" x-text="dish.weight_grams + ' г · ' + dish.calories + ' ккал'"></span>
-                    <button type="button" class="db-dish__add" @click="addToCart(dish)" :aria-label="'Додати в кошик: ' + dish.title" title="В кошик">
+                    <button type="button" class="db-dish__add" @click="addToCart(dish, $event)" :aria-label="'Додати в кошик: ' + dish.title" title="В кошик">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                     </button>
                   </div>

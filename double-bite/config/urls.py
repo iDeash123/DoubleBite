@@ -1,4 +1,4 @@
-from accounts.views import CustomPasswordResetView, HomeView, RegisterView
+from accounts.views import CustomPasswordResetView, RegisterView
 from django.conf import settings
 from django.contrib import admin
 from django.contrib.sitemaps.views import sitemap
@@ -6,7 +6,7 @@ from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.urls import include, path
 from django.views.static import serve
 from menu.sitemaps import CategorySitemap, DishSitemap, StaticViewSitemap
-from menu.views import robots_txt_view
+from menu.views import HomeView, robots_txt_view
 
 sitemaps = {
     'static': StaticViewSitemap,

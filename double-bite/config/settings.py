@@ -135,7 +135,7 @@ SECURE_CSP = {
     'default-src': [CSP.SELF],
     'script-src': [CSP.SELF, CSP.NONCE, CSP.UNSAFE_EVAL, 'https://js.stripe.com'],
     'style-src': [CSP.SELF, CSP.UNSAFE_INLINE],
-    'img-src': [CSP.SELF, 'data:', 'https://images.unsplash.com', 'https://*.stripe.com'],
+    'img-src': [CSP.SELF, 'data:', 'https://*.stripe.com'],
     'font-src': [CSP.SELF, 'data:'],
     'connect-src': [CSP.SELF, 'https://api.stripe.com'],
     'frame-src': [CSP.SELF, 'https://checkout.stripe.com', 'https://js.stripe.com'],

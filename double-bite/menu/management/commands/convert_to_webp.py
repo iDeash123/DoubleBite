@@ -8,6 +8,14 @@ from PIL import Image
 class Command(BaseCommand):
     help = 'Конвертує всі зображення страв у media/dishes/ у формат WebP'
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--delete-originals',
+            action='store_true',
+            default=False,
+            help='Видалити вихідні JPG/PNG файли після успішної конвертації у WebP',
+        )
+
     def handle(self, *args, **options):
         dishes_dir = Path(settings.MEDIA_ROOT) / 'dishes'
         if not dishes_dir.exists():
@@ -21,6 +29,7 @@ class Command(BaseCommand):
 
         converted_count = 0
         total_saved_bytes = 0
+        delete_originals = bool(options.get('delete_originals'))
 
         self.stdout.write(f'Знайдено {len(image_files)} зображень для перевірки...')
 
@@ -42,10 +51,15 @@ class Command(BaseCommand):
 
                 webp_size = webp_path.stat().st_size
                 saved = orig_size - webp_size
-                total_saved_bytes += max(0, saved)
+                total_saved_bytes += saved
                 converted_count += 1
-                self.stdout.write(f'  [OK] {img_path.name} -> {webp_path.name} ({orig_size // 1024}KB -> {webp_size // 1024}KB)')
-            except Exception as e:
+                if delete_originals and webp_path.exists() and webp_size > 0:
+                    img_path.unlink(missing_ok=True)
+                self.stdout.write(
+                    f'  [OK] {img_path.name} -> {webp_path.name} '
+                    f'({orig_size // 1024}KB -> {webp_size // 1024}KB)'
+                )
+            except (OSError, ValueError, Image.DecompressionBombError) as e:
                 self.stdout.write(self.style.ERROR(f'  [ERROR] {img_path.name}: {e}'))
 
         self.stdout.write(

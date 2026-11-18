@@ -18,11 +18,41 @@ Management command: load_snapshot
   python manage.py load_snapshot snapshots/snapshot_20240924_180000_initial.json --only menu
 """
 
+import io
 import json
 from pathlib import Path
 
+from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
+from django.db import connection, transaction
+from django.db.models import Q
+
+DISH_UPDATE_FIELDS = frozenset(
+    {
+        "category_id",
+        "title",
+        "slug",
+        "description",
+        "price",
+        "image",
+        "weight_grams",
+        "calories",
+        "allergens",
+        "is_vegetarian",
+        "is_spicy",
+        "is_available",
+    }
+)
+USER_UPDATE_FIELDS = frozenset(
+    {
+        "email",
+        "first_name",
+        "last_name",
+        "phone",
+        "role",
+        "is_active",
+    }
+)
 
 
 class Command(BaseCommand):
@@ -53,6 +83,12 @@ class Command(BaseCommand):
             default=False,
             help="Показать что будет загружено, но не сохранять в БД",
         )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            default=False,
+            help="Пропустити підтвердження та дозволити примусове очищення",
+        )
 
     def handle(self, *args, **options):
         from accounts.models import DeliveryAddress, User
@@ -76,14 +112,24 @@ class Command(BaseCommand):
         only = options["only"]
         replace = options["replace"]
         dry_run = options["dry_run"]
+        force = options["force"]
 
         if dry_run:
             self.stdout.write(self.style.WARNING("⚠  DRY-RUN: данные НЕ будут сохранены\n"))
 
         if replace and not dry_run:
-            self._confirm_replace()
+            if (
+                only == "accounts"
+                and not force
+                and Order.objects.filter(user__isnull=False, user__is_superuser=False).exists()
+            ):
+                raise CommandError(
+                    "Існують замовлення користувачів. Для примусового очищення вкажіть --force."
+                )
+            self._confirm_replace(force=force)
 
         stats = {}
+        loaded_app_labels: list[str] = []
 
         with transaction.atomic():
             if dry_run:
@@ -112,6 +158,7 @@ class Command(BaseCommand):
                     DishOption, data.get("dish_options", []),
                     update_fields=["dish_id", "name", "price_delta"],
                 )
+                loaded_app_labels.append("menu")
 
             # ── ACCOUNTS ──────────────────────────────────────────────
             if only in ("accounts", "all"):
@@ -127,6 +174,7 @@ class Command(BaseCommand):
                         "apartment", "floor", "intercom", "is_default",
                     ],
                 )
+                loaded_app_labels.append("accounts")
 
             # ── ORDERS ────────────────────────────────────────────────
             if only in ("orders", "all"):
@@ -161,14 +209,28 @@ class Command(BaseCommand):
                         "price", "quantity", "selected_options",
                     ],
                 )
+                loaded_app_labels.append("orders")
+
+        self._reset_sequences(loaded_app_labels)
 
         self.stdout.write(self.style.SUCCESS("\n✓ Загрузка завершена:\n"))
         for key, (created, updated) in stats.items():
             self.stdout.write(f"  {key:<22} создано: {created}  обновлено: {updated}")
 
+        dishes_stats = stats.get("dishes")
+        if dishes_stats and (dishes_stats[0] + dishes_stats[1]) > 0:
+            self.stdout.write(
+                self.style.WARNING(
+                    "\n⚠ Увага: поле Dish.embedding має значення None для завантажених страв. "
+                    "Перебудуйте векторні ембедінги перед використанням семантичного пошуку."
+                )
+            )
+
     # ── Helpers ───────────────────────────────────────────────────────
 
-    def _confirm_replace(self):
+    def _confirm_replace(self, force: bool = False):
+        if force:
+            return
         self.stdout.write(self.style.WARNING(
             "\n⚠  ВНИМАНИЕ: флаг --replace удалит существующие данные в таблицах!\n"
         ))
@@ -176,16 +238,37 @@ class Command(BaseCommand):
         if answer != "y":
             raise CommandError("Отменено пользователем.")
 
+    def _reset_sequences(self, app_labels: list[str]) -> None:
+        if not app_labels:
+            return
+        sql_buf = io.StringIO()
+        call_command("sqlsequencereset", *app_labels, stdout=sql_buf, no_color=True)
+        sql_text = sql_buf.getvalue().strip()
+        if not sql_text:
+            return
+        statements = [
+            stmt.strip()
+            for stmt in sql_text.split(";")
+            if stmt.strip() and stmt.strip().upper() not in ("BEGIN", "COMMIT")
+        ]
+        if not statements:
+            return
+        with connection.cursor() as cursor:
+            for stmt in statements:
+                cursor.execute(stmt)
+
     def _load_model(self, Model, rows, update_fields):
         """update_or_create по pk для обычных моделей."""
+        allowed_fields = set(update_fields)
         created = updated = 0
         for row in rows:
-            pk = row.pop("id", None)
+            pk = row.get("id")
             if pk is None:
                 continue
+            clean_defaults = {k: v for k, v in row.items() if k in allowed_fields}
             _, was_created = Model.objects.update_or_create(
                 pk=pk,
-                defaults=row,
+                defaults=clean_defaults,
             )
             if was_created:
                 created += 1
@@ -202,15 +285,12 @@ class Command(BaseCommand):
         from menu.models import Dish
 
         created = updated = 0
-        skip_fields = {"embedding", "created_at", "updated_at"}
-
         for row in rows:
-            pk = row.pop("id", None)
+            pk = row.get("id")
             if pk is None:
                 continue
 
-            # Убираем поля которые не нужно восстанавливать
-            clean = {k: v for k, v in row.items() if k not in skip_fields}
+            clean = {k: v for k, v in row.items() if k in DISH_UPDATE_FIELDS}
 
             _obj, was_created = Dish.objects.update_or_create(
                 pk=pk,
@@ -225,25 +305,32 @@ class Command(BaseCommand):
     def _load_users(self, rows):
         """
         Загружает пользователей без паролей.
-        Суперпользователи не перезаписываются.
+        Суперпользователи и персонал не перезаписываются и не создаются из JSON.
         """
         from accounts.models import User
 
         created = updated = 0
         for row in rows:
-            pk = row.pop("id", None)
+            pk = row.get("id")
             if pk is None:
                 continue
 
-            is_superuser = row.get("is_superuser", False)
-
-            # Не трогаем существующих суперпользователей
-            if is_superuser and User.objects.filter(pk=pk).exists():
+            if User.objects.filter(pk=pk).filter(Q(is_superuser=True) | Q(is_staff=True)).exists():
                 continue
+
+            clean = {k: v for k, v in row.items() if k in USER_UPDATE_FIELDS}
+            email = clean.get("email")
+            if email and User.objects.filter(email__iexact=email).filter(
+                Q(is_superuser=True) | Q(is_staff=True)
+            ).exists():
+                continue
+
+            clean["is_superuser"] = False
+            clean["is_staff"] = False
 
             obj, was_created = User.objects.update_or_create(
                 pk=pk,
-                defaults=row,
+                defaults=clean,
             )
             if was_created:
                 obj.set_unusable_password()

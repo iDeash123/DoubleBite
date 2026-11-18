@@ -1,7 +1,7 @@
 import json
 import re
-import xml.etree.ElementTree as ET
 from decimal import Decimal
+from html.parser import HTMLParser
 from pathlib import Path
 
 from django.conf import settings
@@ -9,6 +9,41 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from menu.models import Category, Dish
+
+
+class _SitemapXMLParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack: list[str] = []
+        self.has_urlset = False
+        self.urlset_attrs: dict[str, str | None] = {}
+        self.locations: list[str] = []
+        self._in_loc = False
+        self._loc_parts: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if not self.stack and tag == 'urlset':
+            self.has_urlset = True
+            self.urlset_attrs = dict(attrs)
+        if tag == 'loc' and self.stack and self.stack[-1] == 'url':
+            self._in_loc = True
+            self._loc_parts = []
+        self.stack.append(tag)
+
+    def handle_data(self, data):
+        if self._in_loc:
+            self._loc_parts.append(data)
+
+    def handle_endtag(self, tag):
+        if not self.stack or self.stack[-1] != tag:
+            raise AssertionError(f'Mismatched closing tag </{tag}>; stack={self.stack}')
+        self.stack.pop()
+        if tag == 'loc' and self._in_loc:
+            loc_text = ''.join(self._loc_parts).strip()
+            if loc_text:
+                self.locations.append(loc_text)
+            self._in_loc = False
+            self._loc_parts = []
 
 
 class SeoEndpointTests(TestCase):
@@ -67,7 +102,9 @@ class SeoEndpointTests(TestCase):
         self.assertIn('User-agent: *', content)
         self.assertIn('Allow: /', content)
         self.assertIn('Disallow: /admin/', content)
+        self.assertIn('Disallow: /accounts/', content)
         self.assertIn('Disallow: /orders/', content)
+        self.assertIn('Disallow: /support/', content)
         self.assertNotIn('Disallow: /cart/', content)
         self.assertIn('Disallow: /support/chat/', content)
         self.assertIn('Sitemap: http://testserver/sitemap.xml', content)
@@ -79,11 +116,16 @@ class SeoEndpointTests(TestCase):
             response['Content-Type'].startswith('application/xml')
             or response['Content-Type'].startswith('text/xml')
         )
-        root = ET.fromstring(response.content)
-        self.assertTrue(root.tag.endswith('urlset'))
-        namespaces = {'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
-        loc_elements = root.findall('ns:url/ns:loc', namespaces)
-        locations = [elem.text.strip() for elem in loc_elements if elem.text]
+        parser = _SitemapXMLParser()
+        parser.feed(response.content.decode('utf-8'))
+        parser.close()
+        self.assertTrue(parser.has_urlset)
+        self.assertEqual(
+            parser.urlset_attrs.get('xmlns'),
+            'http://www.sitemaps.org/schemas/sitemap/0.9',
+        )
+        self.assertEqual(parser.stack, [])
+        locations = parser.locations
 
         home_url = 'http://testserver/'
         catalog_url = f'http://testserver{reverse("menu:catalog")}'
@@ -197,7 +239,11 @@ class SeoEndpointTests(TestCase):
         response = self.client.get(dish_url)
         self.assertEqual(response.status_code, 200)
         content = response.content.decode('utf-8')
-        match = re.search(r'<script type="application/ld\+json">(.*?)</script>', content, re.DOTALL)
+        match = re.search(
+            r'<script id="dish-ld-json" type="application/json">(.*?)</script>',
+            content,
+            re.DOTALL,
+        )
         self.assertIsNotNone(match)
         data = json.loads(match.group(1).strip())
         self.assertEqual(data.get('@context'), 'https://schema.org')
@@ -256,10 +302,11 @@ class SeoEndpointTests(TestCase):
         cat_resp = self.client.get(f'/menu/{self.active_category.slug}/')
         self.assertEqual(cat_resp.status_code, 200)
         cat_content = cat_resp.content.decode('utf-8')
-        self.assertIn(
-            f'<meta property="og:title" content="{self.active_category.name} з доставкою — Double Bite | Меню ресторану">',
-            cat_content,
+        expected_cat_og = (
+            f'<meta property="og:title" content="{self.active_category.name} '
+            'з доставкою — Double Bite | Меню ресторану">'
         )
+        self.assertIn(expected_cat_og, cat_content)
         self.assertIn('<meta property="og:description"', cat_content)
 
     def test_accessibility_and_semantic_html(self):

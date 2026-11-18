@@ -1,10 +1,14 @@
 from decimal import Decimal
+from importlib import import_module
+from unittest.mock import patch
 
+from django.apps import apps as django_apps
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, connection
 from django.test import TestCase
+from django.urls import resolve
 
-from menu.models import Category, Dish, DishOption
+from menu.models import Category, Dish, DishOption, transliterate_to_ascii
 
 
 class CategoryModelTest(TestCase):
@@ -174,3 +178,145 @@ class DishOptionModelTest(TestCase):
         )
         with self.assertRaises(ValidationError):
             option.save()
+
+
+class AsciiSlugAndImageFieldTest(TestCase):
+    def setUp(self):
+        self.category = Category.objects.create(
+            name='Піца',
+            slug='pizza',
+        )
+
+    def test_transliterate_to_ascii_ukrainian_example(self):
+        self.assertEqual(transliterate_to_ascii('Кальцоне з рікотою'), 'Kaltsone z rikotoiu')
+
+    def test_cyrillic_category_auto_slug_collision_and_url(self):
+        cat1 = Category.objects.create(name='Кальцоне з рікотою')
+        self.assertEqual(cat1.slug, 'kaltsone-z-rikotoiu')
+        self.assertTrue(cat1.slug.isascii())
+        url = cat1.get_absolute_url()
+        self.assertEqual(url, '/menu/kaltsone-z-rikotoiu/')
+        self.assertEqual(resolve(url).url_name, 'dish_detail')
+
+        cat2 = Category.objects.create(name='Кальцоне з рікотою')
+        self.assertEqual(cat2.slug, 'kaltsone-z-rikotoiu-2')
+        self.assertEqual(cat2.get_absolute_url(), '/menu/kaltsone-z-rikotoiu-2/')
+
+    def test_cyrillic_dish_auto_slug_collision_and_url(self):
+        dish1 = Dish.objects.create(
+            category=self.category,
+            title='Кальцоне з рікотою',
+            price=Decimal('240.00'),
+            weight_grams=420,
+        )
+        self.assertEqual(dish1.slug, 'kaltsone-z-rikotoiu')
+        self.assertTrue(dish1.slug.isascii())
+        url1 = dish1.get_absolute_url()
+        self.assertEqual(url1, '/menu/pizza/kaltsone-z-rikotoiu/')
+        self.assertEqual(resolve(url1).url_name, 'category_dish_detail')
+
+        dish2 = Dish.objects.create(
+            category=self.category,
+            title='Кальцоне з рікотою',
+            price=Decimal('255.00'),
+            weight_grams=430,
+        )
+        self.assertEqual(dish2.slug, 'kaltsone-z-rikotoiu-2')
+        self.assertEqual(dish2.get_absolute_url(), '/menu/pizza/kaltsone-z-rikotoiu-2/')
+
+    def test_explicit_non_ascii_slug_fails_validation(self):
+        cat = Category(name='Тест', slug='піца')
+        with self.assertRaises(ValidationError):
+            cat.save()
+
+        dish = Dish(
+            category=self.category,
+            title='Тест',
+            slug='кальцоне',
+            price=Decimal('200.00'),
+            weight_grams=300,
+        )
+        with self.assertRaises(ValidationError):
+            dish.save()
+
+    def test_migration_0005_transliterates_non_ascii_slugs_uniquely(self):
+        migration_0005 = import_module('menu.migrations.0005_ascii_slugs_and_indexes')
+
+        cat_existing = Category.objects.create(name='Кальцоне база', slug='kaltsone')
+        cat_cyrillic = Category.objects.create(name='Кальцоне', slug='temp-cat-slug')
+        Category.objects.filter(pk=cat_cyrillic.pk).update(slug='кальцоне')
+
+        dish_existing = Dish.objects.create(
+            category=self.category,
+            title='Кальцоне з рікотою база',
+            slug='kaltsone-z-rikotoiu',
+            price=Decimal('240.00'),
+            weight_grams=400,
+        )
+        dish_cyrillic = Dish.objects.create(
+            category=self.category,
+            title='Кальцоне з рікотою',
+            slug='temp-dish-slug',
+            price=Decimal('250.00'),
+            weight_grams=410,
+        )
+        Dish.objects.filter(pk=dish_cyrillic.pk).update(slug='Кальцоне з рікотою')
+
+        migration_0005.transliterate_existing_slugs(django_apps, connection.schema_editor())
+
+        cat_existing.refresh_from_db()
+        cat_cyrillic.refresh_from_db()
+        dish_existing.refresh_from_db()
+        dish_cyrillic.refresh_from_db()
+
+        self.assertEqual(cat_existing.slug, 'kaltsone')
+        self.assertEqual(cat_cyrillic.slug, 'kaltsone-2')
+        self.assertEqual(dish_existing.slug, 'kaltsone-z-rikotoiu')
+        self.assertEqual(dish_cyrillic.slug, 'kaltsone-z-rikotoiu-2')
+
+    def test_dish_image_field_rejects_data_uri_and_caches_exists(self):
+        dish_data = Dish(
+            category=self.category,
+            title='Data URI Dish',
+            slug='data-uri-dish',
+            price=Decimal('190.00'),
+            weight_grams=300,
+            image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',
+        )
+        self.assertEqual(dish_data.image.url, '')
+        self.assertEqual(dish_data.image.path, '')
+
+        dish_file = Dish(
+            category=self.category,
+            title='Cached Image Dish',
+            slug='cached-image-dish',
+            price=Decimal('210.00'),
+            weight_grams=320,
+            image='dishes/cached-image.jpg',
+        )
+        with (
+            patch.object(dish_file.image.storage, 'exists', return_value=True) as mock_exists,
+            patch.object(
+                dish_file.image.storage,
+                'url',
+                return_value='/media/dishes/cached-image.webp',
+            ) as mock_url,
+        ):
+            first_url = dish_file.image.url
+            second_url = dish_file.image.url
+            third_url = dish_file.image.url
+
+        self.assertEqual(first_url, '/media/dishes/cached-image.webp')
+        self.assertEqual(second_url, '/media/dishes/cached-image.webp')
+        self.assertEqual(third_url, '/media/dishes/cached-image.webp')
+        self.assertLessEqual(mock_exists.call_count, 1)
+        self.assertEqual(mock_exists.call_count, 1)
+        mock_url.assert_called_once_with('dishes/cached-image.webp')
+
+    def test_model_indexes_configured(self):
+        cat_index_names = {idx.name for idx in Category._meta.indexes}
+        self.assertIn('cat_active_order_idx', cat_index_names)
+        dish_index_names = {idx.name for idx in Dish._meta.indexes}
+        self.assertIn('dish_avail_cat_idx', dish_index_names)
+        for field_name in ('price', 'calories', 'is_vegetarian', 'is_spicy', 'is_available'):
+            self.assertTrue(Dish._meta.get_field(field_name).db_index)

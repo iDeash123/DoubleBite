@@ -19,11 +19,12 @@ Management command: dump_snapshot
 """
 
 import json
+import re
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 
 def _default(obj):
@@ -65,6 +66,12 @@ class Command(BaseCommand):
 
         from menu.models import Category, Dish, DishOption
 
+        tag_value = options["tag"]
+        if tag_value and not re.fullmatch(r"[A-Za-z0-9_-]+", tag_value):
+            raise CommandError(
+                "Некоректний тег снапшоту. Дозволені лише латинські літери, цифри, '_' та '-'."
+            )
+
         # --- Определяем папку для сохранения ---
         if options["output"]:
             snapshots_dir = Path(options["output"])
@@ -75,13 +82,15 @@ class Command(BaseCommand):
             project_root = manage_py.parents[4]
             snapshots_dir = project_root / "snapshots"
 
-        snapshots_dir.mkdir(parents=True, exist_ok=True)
-
         # --- Формируем имя файла ---
         ts = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
-        tag = f"_{options['tag']}" if options["tag"] else ""
+        tag = f"_{tag_value}" if tag_value else ""
         filename = f"snapshot_{ts}{tag}.json"
         filepath = snapshots_dir / filename
+        if not filepath.resolve().is_relative_to(snapshots_dir.resolve()):
+            raise CommandError("Некоректний шлях файлу снапшоту.")
+
+        snapshots_dir.mkdir(parents=True, exist_ok=True)
 
         # --- Собираем данные ---
         self.stdout.write("Собираю данные...")

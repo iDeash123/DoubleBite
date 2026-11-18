@@ -2,11 +2,20 @@ import json
 import os
 from decimal import Decimal
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.staticfiles import finders
 from django.test import AsyncClient, Client, TestCase, override_settings
-from django.urls import reverse
+from django.urls import resolve, reverse
+from orders.context_processors import LazyValue
+
 from menu.models import Category, Dish
+from menu.selectors import (
+    DEFAULT_COLLECTIONS_DATA,
+    DEFAULT_HERO_DISHES,
+    get_home_page_context,
+)
+from menu.views import HomeView
 
 User = get_user_model()
 
@@ -31,6 +40,10 @@ class HomeShowcaseTest(TestCase):
             is_available=True,
         )
 
+    def test_home_url_routes_to_menu_home_view(self):
+        match = resolve(reverse('home'))
+        self.assertIs(match.func.view_class, HomeView)
+
     def test_home_page_template_and_hero_render(self):
         response = self.client.get(reverse('home'))
         self.assertEqual(response.status_code, 200)
@@ -54,12 +67,80 @@ class HomeShowcaseTest(TestCase):
         data = json.loads(response.context['hero_dishes_json'])
         self.assertEqual(len(data), 4)
 
-    def test_hero_dishes_match_database_dish(self):
+    def test_hero_dishes_match_database_dish_without_modulo_fallback(self):
         response = self.client.get(reverse('home'))
         hero_dishes = response.context['hero_dishes']
         wagyu = next(d for d in hero_dishes if d['title'] == 'Truffle Wagyu Burger')
         self.assertEqual(wagyu['id'], self.dish.id)
         self.assertEqual(wagyu['slug'], self.dish.slug)
+
+        unmatched_hero = [d for d in hero_dishes if d['title'] != 'Truffle Wagyu Burger']
+        self.assertEqual(len(unmatched_hero), 3)
+        for item in unmatched_hero:
+            self.assertIsNone(item['id'])
+
+        collections_data = response.context['collections_data']
+        burgers_col = next(c for c in collections_data if c['slug'] == 'burgers')
+        self.assertEqual(burgers_col['dishes'][0]['id'], self.dish.id)
+        for extra_item in burgers_col['dishes'][1:]:
+            self.assertIsNone(extra_item['id'])
+
+        for other_col in collections_data:
+            if other_col['slug'] != 'burgers':
+                for item in other_col['dishes']:
+                    self.assertIsNone(item['id'])
+
+    def test_no_unsplash_urls_in_showcase_or_csp(self):
+        self.assertNotIn('unsplash.com', json.dumps(DEFAULT_HERO_DISHES).lower())
+        self.assertNotIn('unsplash.com', json.dumps(DEFAULT_COLLECTIONS_DATA).lower())
+        img_src = settings.SECURE_CSP.get('img-src', [])
+        self.assertFalse(any('unsplash.com' in str(src).lower() for src in img_src))
+
+        ctx = get_home_page_context()
+        self.assertNotIn('unsplash.com', ctx['hero_dishes_json'].lower())
+        self.assertNotIn('unsplash.com', ctx['collections_json'].lower())
+
+        response = self.client.get(reverse('home'))
+        self.assertNotIn('unsplash.com', response.content.decode('utf-8').lower())
+
+    def test_collections_use_bowls_salads_slug_and_existing_static_images(self):
+        slugs = [c['slug'] for c in DEFAULT_COLLECTIONS_DATA]
+        self.assertIn('bowls-salads', slugs)
+        self.assertNotIn('bowls', slugs)
+
+        image_urls = [d['image'] for d in DEFAULT_HERO_DISHES]
+        for col in DEFAULT_COLLECTIONS_DATA:
+            image_urls.extend(item['image'] for item in col['dishes'])
+
+        static_prefix = getattr(settings, 'STATIC_URL', '/static/') or '/static/'
+        for img_url in image_urls:
+            self.assertIn('/images/showcase/', img_url)
+            relative = img_url.removeprefix(static_prefix).lstrip('/')
+            resolved = finders.find(relative)
+            self.assertIsNotNone(resolved, f'Static showcase asset {relative} not found')
+            self.assertTrue(os.path.exists(resolved), f'File {resolved} does not exist')
+
+    def test_inactive_category_dishes_excluded_from_home_showcase(self):
+        inactive_cat = Category.objects.create(
+            name='Архівна піца',
+            slug='pizza',
+            display_order=2,
+            is_active=False,
+        )
+        inactive_dish = Dish.objects.create(
+            category=inactive_cat,
+            title='Quattro Formaggi al Tartufo',
+            slug='quattro-formaggi-inactive',
+            price=Decimal('420.00'),
+            weight_grams=460,
+            is_available=True,
+        )
+        ctx = get_home_page_context()
+        self.assertNotIn(inactive_dish, ctx['featured_dishes'])
+        pizza_hero = next(
+            d for d in ctx['hero_dishes'] if d['title'] == 'Quattro Formaggi al Tartufo'
+        )
+        self.assertIsNone(pizza_hero['id'])
 
     def test_live_gastro_ticker_content(self):
         response = self.client.get(reverse('home'))
@@ -123,14 +204,30 @@ class HomeShowcaseTest(TestCase):
             self.assertTrue(os.path.exists(resolved), f'File {resolved} does not exist on disk')
             self.assertGreater(os.path.getsize(resolved), 10000, f'File {resolved} is too small')
 
-    def test_get_home_page_context_selector(self):
-        from accounts.selectors import get_home_page_context
+    def test_get_home_page_context_selector_and_partial_delivery_math(self):
+        ctx_full = get_home_page_context(total_amount=Decimal('600.00'))
+        self.assertTrue(ctx_full['meets_free_delivery'])
+        self.assertEqual(ctx_full['free_delivery_remaining'], Decimal('0.00'))
+        self.assertEqual(ctx_full['free_delivery_percent'], 100)
+        self.assertEqual(len(ctx_full['hero_dishes']), 4)
+        self.assertEqual(len(ctx_full['collections_data']), 5)
 
-        ctx = get_home_page_context(total_amount=Decimal('600.00'))
-        self.assertTrue(ctx['meets_free_delivery'])
-        self.assertEqual(ctx['free_delivery_remaining'], Decimal('0.00'))
-        self.assertEqual(len(ctx['hero_dishes']), 4)
-        self.assertEqual(len(ctx['collections_data']), 5)
+        with override_settings(FREE_DELIVERY_THRESHOLD=Decimal('500.00')):
+            ctx_half = get_home_page_context(total_amount=Decimal('250.00'))
+            self.assertFalse(ctx_half['meets_free_delivery'])
+            self.assertEqual(ctx_half['free_delivery_remaining'], Decimal('250.00'))
+            self.assertEqual(ctx_half['free_delivery_percent'], 50)
+
+            ctx_empty = get_home_page_context(total_amount=Decimal('0.00'))
+            self.assertFalse(ctx_empty['meets_free_delivery'])
+            self.assertEqual(ctx_empty['free_delivery_remaining'], Decimal('500.00'))
+            self.assertEqual(ctx_empty['free_delivery_percent'], 0)
+
+        with override_settings(FREE_DELIVERY_THRESHOLD=Decimal('0.00')):
+            ctx_zero_thresh = get_home_page_context(total_amount=Decimal('0.00'))
+            self.assertTrue(ctx_zero_thresh['meets_free_delivery'])
+            self.assertEqual(ctx_zero_thresh['free_delivery_remaining'], Decimal('0.00'))
+            self.assertEqual(ctx_zero_thresh['free_delivery_percent'], 100)
 
     @override_settings(
         FREE_DELIVERY_THRESHOLD=Decimal('750.00'),
@@ -151,8 +248,6 @@ class HomeShowcaseTest(TestCase):
         self.assertNotContains(response, '65 ₴')
 
     def test_lazy_value_supports_ordering_comparisons(self):
-        from orders.context_processors import LazyValue
-
         low = LazyValue(lambda: Decimal('350.00'))
         high = LazyValue(lambda: Decimal('700.00'))
         threshold = Decimal('500.00')
@@ -166,6 +261,30 @@ class HomeShowcaseTest(TestCase):
         self.assertTrue(low < high)
         self.assertTrue(high > low)
 
+    @override_settings(FREE_DELIVERY_THRESHOLD=Decimal('500.00'))
+    def test_home_free_delivery_bar_partial_cart_is_dynamic(self):
+        half_dish = Dish.objects.create(
+            category=self.category,
+            title='Half Threshold Burger',
+            slug='half-threshold-burger',
+            price=Decimal('250.00'),
+            weight_grams=250,
+            is_available=True,
+        )
+        add_response = self.client.post(
+            reverse('orders:cart_add', args=[half_dish.id]),
+            {'quantity': 1},
+        )
+        self.assertEqual(add_response.status_code, 302)
+
+        response = self.client.get(reverse('home'))
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(bool(response.context['meets_free_delivery']))
+        self.assertEqual(Decimal(str(response.context['free_delivery_remaining'])), Decimal('250.00'))
+        self.assertEqual(int(response.context['free_delivery_percent']), 50)
+        self.assertContains(response, 'style="width: 50%;"')
+        self.assertContains(response, '250.00 ₴')
+
     def test_home_free_delivery_bar_caps_at_100_when_threshold_reached(self):
         add_response = self.client.post(
             reverse('orders:cart_add', args=[self.dish.id]),
@@ -178,5 +297,3 @@ class HomeShowcaseTest(TestCase):
         self.assertContains(response, 'style="width: 100%;"')
         self.assertNotContains(response, 'style="width: 194%;"')
         self.assertContains(response, 'Безкоштовна доставка активна для вашого замовлення')
-
-
