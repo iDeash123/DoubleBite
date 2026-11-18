@@ -1,3 +1,4 @@
+import smtplib
 from unittest.mock import patch
 
 from config import emails as config_emails
@@ -5,6 +6,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.core import mail
+from django.core.cache import cache
 from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils.encoding import force_bytes
@@ -17,6 +19,7 @@ User = get_user_model()
 
 class PasswordResetTests(TestCase):
     def setUp(self):
+        cache.clear()
         self.client = Client()
         self.user = User.objects.create_user(
             email='resetuser@example.com',
@@ -26,6 +29,9 @@ class PasswordResetTests(TestCase):
             phone='+380501112233',
         )
         mail.outbox.clear()
+
+    def tearDown(self):
+        cache.clear()
 
     def test_password_reset_form_view_renders_200(self):
         response = self.client.get(reverse('accounts:password_reset'))
@@ -55,6 +61,15 @@ class PasswordResetTests(TestCase):
         self.assertIn('JetBrains Mono', html)
         self.assertIn('Double Bite', html)
 
+    def test_password_reset_post_case_insensitive_email(self):
+        response = self.client.post(
+            reverse('accounts:password_reset'),
+            {'email': '  ResetUser@Example.COM  '},
+        )
+        self.assertRedirects(response, reverse('accounts:password_reset_done'))
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, [self.user.email])
+
     def test_password_reset_post_nonexistent_email_does_not_send_email(self):
         response = self.client.post(
             reverse('accounts:password_reset'),
@@ -62,6 +77,24 @@ class PasswordResetTests(TestCase):
         )
         self.assertRedirects(response, reverse('accounts:password_reset_done'))
         self.assertEqual(len(mail.outbox), 0)
+
+    def test_password_reset_handles_smtp_exception_without_500(self):
+        with (
+            patch(
+                'config.emails.send_templated_email',
+                side_effect=smtplib.SMTPException('SMTP connection refused'),
+            ),
+            self.assertLogs('accounts', level='ERROR') as logs,
+        ):
+            response = self.client.post(
+                reverse('accounts:password_reset'),
+                {'email': self.user.email},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'accounts/password_reset.html')
+        self.assertContains(response, 'Не вдалося надіслати лист для відновлення пароля')
+        self.assertTrue(any('Помилка надсилання листа' in entry for entry in logs.output))
 
     def test_password_reset_done_view_renders_200(self):
         response = self.client.get(reverse('accounts:password_reset_done'))
@@ -119,28 +152,32 @@ class PasswordResetTests(TestCase):
     def test_registration_sends_welcome_email(self):
         mail.outbox.clear()
         register_url = reverse('accounts:register')
-        response = self.client.post(
-            register_url,
-            {
-                'email': 'newregistered@example.com',
-                'first_name': 'Іван',
-                'last_name': 'Франко',
-                'phone': '+380509998877',
-                'password': 'StrongPass12345!',
-                'password_confirm': 'StrongPass12345!',
-            },
-        )
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(len(mail.outbox), 1)
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                register_url,
+                {
+                    'email': 'newregistered@example.com',
+                    'first_name': 'Іван',
+                    'last_name': 'Франко',
+                    'phone': '+380509998877',
+                    'password': 'StrongPass12345!',
+                    'password_confirm': 'StrongPass12345!',
+                },
+            )
+        self.assertRedirects(response, reverse('account_email_verification_sent'))
+        self.assertEqual(len(mail.outbox), 2)
 
-        welcome_email = mail.outbox[0]
-        self.assertEqual(welcome_email.subject, 'Ласкаво просимо до Double Bite!')
+        welcome_email = next(
+            msg for msg in mail.outbox if msg.subject == 'Ласкаво просимо до Double Bite!'
+        )
         self.assertEqual(welcome_email.to, ['newregistered@example.com'])
         self.assertIn('Double Bite', welcome_email.body)
         self.assertEqual(len(welcome_email.alternatives), 1)
         self.assertEqual(welcome_email.alternatives[0][1], 'text/html')
-        self.assertIn('#F6F6F6', welcome_email.alternatives[0][0])
-        self.assertIn('#262626', welcome_email.alternatives[0][0])
+        html = welcome_email.alternatives[0][0]
+        self.assertIn('#F6F6F6', html)
+        self.assertIn('#262626', html)
+        self.assertIn('border-radius: 8px', html)
 
     def test_password_reset_renders_default_contacts_in_html_and_txt(self):
         response = self.client.post(

@@ -57,7 +57,11 @@
           </label>
           <div class="px-4 py-3 bg-fv-offwhite border border-fv-noir/10 text-xs font-mono text-fv-noir flex items-center justify-between">
             <span>{{ user.get_role_display }}</span>
-            <span class="text-[10px] uppercase font-mono px-2 py-0.5 bg-fv-noir text-white">Активний</span>
+            {% if user.is_active %}
+              <span class="text-[10px] uppercase font-mono px-2 py-0.5 bg-fv-noir text-white">Активний</span>
+            {% else %}
+              <span class="text-[10px] uppercase font-mono px-2 py-0.5 bg-red-50 text-red-700 border border-red-200">Неактивний</span>
+            {% endif %}
           </div>
         </div>
       </div>
@@ -65,6 +69,14 @@
       <form method="post" class="space-y-4 pt-4 border-t border-fv-noir/10">
         {% csrf_token %}
         <input type="hidden" name="action" value="update_profile">
+
+        {% if user_form.non_field_errors %}
+          <div class="p-4 bg-red-50 border border-red-500 text-red-700 text-xs font-mono">
+            {% for error in user_form.non_field_errors %}
+              <div>{{ error }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
 
         <div>
           <label for="{{ user_form.first_name.id_for_label }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1.5 font-medium">
@@ -104,16 +116,66 @@
         </button>
       </form>
 
-      <div class="pt-4 border-t border-fv-noir/10">
-        <form method="post" action="{% url 'accounts:logout' %}">
-          {% csrf_token %}
-          <button
-            type="submit"
-            class="w-full py-3.5 border border-fv-noir/30 text-fv-noir text-xs font-mono uppercase tracking-wider hover:border-fv-noir hover:bg-fv-offwhite transition-colors rounded-none"
+      <div class="pt-6 border-t border-fv-noir/10 space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-xs font-mono uppercase tracking-widest text-fv-noir font-bold">Безпека та акаунти</h3>
+          <span class="text-[10px] font-mono uppercase tracking-widest text-fv-slate">ПАРОЛЬ ТА OAUTH</span>
+        </div>
+
+        <div class="space-y-2 text-xs font-mono">
+          {% if user.has_usable_password %}
+            <a
+              href="{% url 'account_change_password' %}"
+              class="block w-full py-3 px-4 border border-fv-noir/20 text-fv-noir uppercase tracking-wider hover:border-fv-noir hover:bg-fv-offwhite transition-colors rounded-none text-center"
+            >
+              Змінити пароль
+            </a>
+          {% else %}
+            <a
+              href="{% url 'account_set_password' %}"
+              class="block w-full py-3 px-4 border border-fv-noir/20 text-fv-noir uppercase tracking-wider hover:border-fv-noir hover:bg-fv-offwhite transition-colors rounded-none text-center"
+            >
+              Встановити пароль
+            </a>
+          {% endif %}
+          <a
+            href="{% url 'account_email' %}"
+            class="block w-full py-3 px-4 border border-fv-noir/20 text-fv-noir uppercase tracking-wider hover:border-fv-noir hover:bg-fv-offwhite transition-colors rounded-none text-center"
           >
-            Вийти з кабінету
-          </button>
-        </form>
+            Керувати email-адресами
+          </a>
+        </div>
+
+        <div class="pt-4 border-t border-fv-noir/10 space-y-3">
+          <div class="flex items-center justify-between text-xs font-mono">
+            <span class="text-fv-slate uppercase tracking-wider">Підключені OAuth</span>
+            <a href="{% url 'socialaccount_connections' %}" class="font-bold text-fv-noir hover:underline underline-offset-4 uppercase tracking-wider">
+              Керувати →
+            </a>
+          </div>
+          {% if user.socialaccount_set.all %}
+            <ul class="space-y-2">
+              {% for social_account in user.socialaccount_set.all %}
+                <li class="px-3 py-2 bg-fv-offwhite border border-fv-noir/10 flex items-center justify-between gap-2 text-xs font-mono">
+                  <span class="font-bold text-fv-noir uppercase">{{ social_account.provider }}</span>
+                  <span class="text-fv-slate break-all">
+                    {% if social_account.extra_data.email %}
+                      {{ social_account.extra_data.email }}
+                    {% elif social_account.extra_data.login %}
+                      @{{ social_account.extra_data.login }}
+                    {% else %}
+                      {{ social_account.uid }}
+                    {% endif %}
+                  </span>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="text-xs font-mono text-fv-slate">
+              Сторонні OAuth-акаунти не підключені.
+            </p>
+          {% endif %}
+        </div>
       </div>
     </div>
 
@@ -128,32 +190,203 @@
         {% if addresses %}
           <div class="space-y-4 mb-8">
             {% for address in addresses %}
-              <div class="p-5 border border-fv-noir/15 bg-fv-offwhite/60 flex items-start justify-between gap-4 hover:border-fv-noir/40 transition-colors">
-                <div>
-                  <div class="flex items-center gap-2 mb-1.5">
-                    <span class="text-sm font-bold font-sans text-fv-noir tracking-tight">{{ address.title }}</span>
-                    {% if address.is_default %}
-                      <span class="px-2 py-0.5 text-[10px] font-mono bg-fv-noir text-white uppercase tracking-wider">
-                        Основна
-                      </span>
-                    {% endif %}
+              <div class="p-5 border border-fv-noir/15 bg-fv-offwhite/60 hover:border-fv-noir/40 transition-colors">
+                <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                  <div>
+                    <div class="flex items-center gap-2 mb-1.5">
+                      <span class="text-sm font-bold font-sans text-fv-noir tracking-tight">{{ address.title }}</span>
+                      {% if address.is_default %}
+                        <span class="px-2 py-0.5 text-[10px] font-mono bg-fv-noir text-white uppercase tracking-wider">
+                          Основна
+                        </span>
+                      {% endif %}
+                    </div>
+                    <p class="text-xs font-sans text-fv-noir/80 leading-relaxed">
+                      {{ address.format_full_address }}
+                    </p>
                   </div>
-                  <p class="text-xs font-sans text-fv-noir/80 leading-relaxed">
-                    {{ address.city }}, {{ address.street }} {{ address.building }}
-                    {% if address.apartment %}, кв. {{ address.apartment }}{% endif %}
-                    {% if address.floor %}, поверх {{ address.floor }}{% endif %}
-                    {% if address.intercom %}, домофон {{ address.intercom }}{% endif %}
-                  </p>
+                  <div class="flex flex-wrap items-center gap-2 shrink-0">
+                    {% if not address.is_default %}
+                      <form action="{% url 'accounts:address_set_default' address.pk %}" method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="set_default_address">
+                        <button
+                          type="submit"
+                          class="px-3 py-1 text-xs font-mono uppercase text-fv-noir hover:text-white hover:bg-fv-noir border border-fv-noir/30 transition-colors rounded-none"
+                        >
+                          Зробити основною
+                        </button>
+                      </form>
+                    {% endif %}
+                    <form action="{% url 'accounts:delete_address' address.pk %}" method="post">
+                      {% csrf_token %}
+                      <button
+                        type="submit"
+                        class="px-3 py-1 text-xs font-mono uppercase text-red-600 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 transition-colors rounded-none"
+                      >
+                        Видалити
+                      </button>
+                    </form>
+                  </div>
                 </div>
-                <form action="{% url 'accounts:delete_address' address.pk %}" method="post">
-                  {% csrf_token %}
-                  <button
-                    type="submit"
-                    class="px-3 py-1 text-xs font-mono uppercase text-red-600 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 transition-colors rounded-none"
-                  >
-                    Видалити
-                  </button>
-                </form>
+
+                <details class="mt-4 pt-4 border-t border-fv-noir/10"{% if editing_address and editing_address.pk == address.pk %} open{% endif %}>
+                  <summary class="text-xs font-mono uppercase tracking-wider text-fv-noir cursor-pointer hover:underline">
+                    Редагувати адресу
+                  </summary>
+                  <form action="{% url 'accounts:address_edit' address.pk %}" method="post" class="mt-4 space-y-3">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="edit_address">
+                    {% if editing_address and editing_address.pk == address.pk and edit_address_form and edit_address_form.non_field_errors %}
+                      <div class="p-3 bg-red-50 border border-red-500 text-red-700 text-xs font-mono">
+                        {% for error in edit_address_form.non_field_errors %}
+                          <div>{{ error }}</div>
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label for="edit-title-{{ address.pk }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1 font-medium">
+                          Назва
+                        </label>
+                        <input
+                          id="edit-title-{{ address.pk }}"
+                          type="text"
+                          name="title"
+                          value="{% if editing_address and editing_address.pk == address.pk and edit_address_form %}{{ edit_address_form.title.value|default:'' }}{% else %}{{ address.title }}{% endif %}"
+                          required
+                          class="w-full px-4 py-2.5 border border-fv-noir/20 bg-white text-xs font-mono text-fv-noir focus:border-fv-noir outline-none rounded-none transition-colors"
+                        >
+                        {% if editing_address and editing_address.pk == address.pk and edit_address_form and edit_address_form.title.errors %}
+                          <div class="mt-1 text-xs text-red-600 font-mono">{{ edit_address_form.title.errors.0 }}</div>
+                        {% endif %}
+                      </div>
+                      <div>
+                        <label for="edit-city-{{ address.pk }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1 font-medium">
+                          Місто
+                        </label>
+                        <input
+                          id="edit-city-{{ address.pk }}"
+                          type="text"
+                          name="city"
+                          value="{% if editing_address and editing_address.pk == address.pk and edit_address_form %}{{ edit_address_form.city.value|default:'' }}{% else %}{{ address.city }}{% endif %}"
+                          required
+                          class="w-full px-4 py-2.5 border border-fv-noir/20 bg-white text-xs font-mono text-fv-noir focus:border-fv-noir outline-none rounded-none transition-colors"
+                        >
+                        {% if editing_address and editing_address.pk == address.pk and edit_address_form and edit_address_form.city.errors %}
+                          <div class="mt-1 text-xs text-red-600 font-mono">{{ edit_address_form.city.errors.0 }}</div>
+                        {% endif %}
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div class="sm:col-span-2">
+                        <label for="edit-street-{{ address.pk }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1 font-medium">
+                          Вулиця *
+                        </label>
+                        <input
+                          id="edit-street-{{ address.pk }}"
+                          type="text"
+                          name="street"
+                          value="{% if editing_address and editing_address.pk == address.pk and edit_address_form %}{{ edit_address_form.street.value|default:'' }}{% else %}{{ address.street }}{% endif %}"
+                          required
+                          class="w-full px-4 py-2.5 border border-fv-noir/20 bg-white text-xs font-mono text-fv-noir focus:border-fv-noir outline-none rounded-none transition-colors"
+                        >
+                        {% if editing_address and editing_address.pk == address.pk and edit_address_form and edit_address_form.street.errors %}
+                          <div class="mt-1 text-xs text-red-600 font-mono">{{ edit_address_form.street.errors.0 }}</div>
+                        {% endif %}
+                      </div>
+                      <div>
+                        <label for="edit-building-{{ address.pk }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1 font-medium">
+                          Будинок *
+                        </label>
+                        <input
+                          id="edit-building-{{ address.pk }}"
+                          type="text"
+                          name="building"
+                          value="{% if editing_address and editing_address.pk == address.pk and edit_address_form %}{{ edit_address_form.building.value|default:'' }}{% else %}{{ address.building }}{% endif %}"
+                          required
+                          class="w-full px-4 py-2.5 border border-fv-noir/20 bg-white text-xs font-mono text-fv-noir focus:border-fv-noir outline-none rounded-none transition-colors"
+                        >
+                        {% if editing_address and editing_address.pk == address.pk and edit_address_form and edit_address_form.building.errors %}
+                          <div class="mt-1 text-xs text-red-600 font-mono">{{ edit_address_form.building.errors.0 }}</div>
+                        {% endif %}
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-3">
+                      <div>
+                        <label for="edit-apartment-{{ address.pk }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1 font-medium">
+                          Квартира
+                        </label>
+                        <input
+                          id="edit-apartment-{{ address.pk }}"
+                          type="text"
+                          name="apartment"
+                          value="{% if editing_address and editing_address.pk == address.pk and edit_address_form %}{{ edit_address_form.apartment.value|default:'' }}{% else %}{{ address.apartment }}{% endif %}"
+                          class="w-full px-4 py-2.5 border border-fv-noir/20 bg-white text-xs font-mono text-fv-noir focus:border-fv-noir outline-none rounded-none transition-colors"
+                        >
+                        {% if editing_address and editing_address.pk == address.pk and edit_address_form and edit_address_form.apartment.errors %}
+                          <div class="mt-1 text-xs text-red-600 font-mono">{{ edit_address_form.apartment.errors.0 }}</div>
+                        {% endif %}
+                      </div>
+                      <div>
+                        <label for="edit-floor-{{ address.pk }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1 font-medium">
+                          Поверх
+                        </label>
+                        <input
+                          id="edit-floor-{{ address.pk }}"
+                          type="text"
+                          name="floor"
+                          value="{% if editing_address and editing_address.pk == address.pk and edit_address_form %}{{ edit_address_form.floor.value|default:'' }}{% else %}{{ address.floor }}{% endif %}"
+                          class="w-full px-4 py-2.5 border border-fv-noir/20 bg-white text-xs font-mono text-fv-noir focus:border-fv-noir outline-none rounded-none transition-colors"
+                        >
+                        {% if editing_address and editing_address.pk == address.pk and edit_address_form and edit_address_form.floor.errors %}
+                          <div class="mt-1 text-xs text-red-600 font-mono">{{ edit_address_form.floor.errors.0 }}</div>
+                        {% endif %}
+                      </div>
+                      <div>
+                        <label for="edit-intercom-{{ address.pk }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1 font-medium">
+                          Домофон
+                        </label>
+                        <input
+                          id="edit-intercom-{{ address.pk }}"
+                          type="text"
+                          name="intercom"
+                          value="{% if editing_address and editing_address.pk == address.pk and edit_address_form %}{{ edit_address_form.intercom.value|default:'' }}{% else %}{{ address.intercom }}{% endif %}"
+                          class="w-full px-4 py-2.5 border border-fv-noir/20 bg-white text-xs font-mono text-fv-noir focus:border-fv-noir outline-none rounded-none transition-colors"
+                        >
+                        {% if editing_address and editing_address.pk == address.pk and edit_address_form and edit_address_form.intercom.errors %}
+                          <div class="mt-1 text-xs text-red-600 font-mono">{{ edit_address_form.intercom.errors.0 }}</div>
+                        {% endif %}
+                      </div>
+                    </div>
+
+                    <div class="flex items-center gap-2 pt-1">
+                      <input
+                        id="edit-is-default-{{ address.pk }}"
+                        type="checkbox"
+                        name="is_default"
+                        {% if editing_address and editing_address.pk == address.pk and edit_address_form %}{% if edit_address_form.is_default.value %}checked{% endif %}{% elif address.is_default %}checked{% endif %}
+                        class="h-4 w-4 text-fv-noir border-fv-noir/30 rounded-none focus:ring-0"
+                      >
+                      <label for="edit-is-default-{{ address.pk }}" class="text-xs font-mono text-fv-noir cursor-pointer">
+                        Основна адреса доставки
+                      </label>
+                    </div>
+                    {% if editing_address and editing_address.pk == address.pk and edit_address_form and edit_address_form.is_default.errors %}
+                      <div class="mt-1 text-xs text-red-600 font-mono">{{ edit_address_form.is_default.errors.0 }}</div>
+                    {% endif %}
+
+                    <button
+                      type="submit"
+                      class="w-full py-3 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors rounded-none"
+                    >
+                      Зберегти адресу
+                    </button>
+                  </form>
+                </details>
               </div>
             {% endfor %}
           </div>
@@ -172,18 +405,32 @@
             {% csrf_token %}
             <input type="hidden" name="action" value="add_address">
 
+            {% if address_form.non_field_errors %}
+              <div class="p-4 bg-red-50 border border-red-500 text-red-700 text-xs font-mono">
+                {% for error in address_form.non_field_errors %}
+                  <div>{{ error }}</div>
+                {% endfor %}
+              </div>
+            {% endif %}
+
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label for="{{ address_form.title.id_for_label }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1.5 font-medium">
                   Назва (напр. Дім, Офіс)
                 </label>
                 {{ address_form.title }}
+                {% if address_form.title.errors %}
+                  <div class="mt-1 text-xs text-red-600 font-mono">{{ address_form.title.errors.0 }}</div>
+                {% endif %}
               </div>
               <div>
                 <label for="{{ address_form.city.id_for_label }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1.5 font-medium">
                   Місто
                 </label>
                 {{ address_form.city }}
+                {% if address_form.city.errors %}
+                  <div class="mt-1 text-xs text-red-600 font-mono">{{ address_form.city.errors.0 }}</div>
+                {% endif %}
               </div>
             </div>
 
@@ -193,12 +440,18 @@
                   Вулиця *
                 </label>
                 {{ address_form.street }}
+                {% if address_form.street.errors %}
+                  <div class="mt-1 text-xs text-red-600 font-mono">{{ address_form.street.errors.0 }}</div>
+                {% endif %}
               </div>
               <div>
                 <label for="{{ address_form.building.id_for_label }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1.5 font-medium">
                   Будинок *
                 </label>
                 {{ address_form.building }}
+                {% if address_form.building.errors %}
+                  <div class="mt-1 text-xs text-red-600 font-mono">{{ address_form.building.errors.0 }}</div>
+                {% endif %}
               </div>
             </div>
 
@@ -208,26 +461,40 @@
                   Квартира
                 </label>
                 {{ address_form.apartment }}
+                {% if address_form.apartment.errors %}
+                  <div class="mt-1 text-xs text-red-600 font-mono">{{ address_form.apartment.errors.0 }}</div>
+                {% endif %}
               </div>
               <div>
                 <label for="{{ address_form.floor.id_for_label }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1.5 font-medium">
                   Поверх
                 </label>
                 {{ address_form.floor }}
+                {% if address_form.floor.errors %}
+                  <div class="mt-1 text-xs text-red-600 font-mono">{{ address_form.floor.errors.0 }}</div>
+                {% endif %}
               </div>
               <div>
                 <label for="{{ address_form.intercom.id_for_label }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1.5 font-medium">
                   Домофон
                 </label>
                 {{ address_form.intercom }}
+                {% if address_form.intercom.errors %}
+                  <div class="mt-1 text-xs text-red-600 font-mono">{{ address_form.intercom.errors.0 }}</div>
+                {% endif %}
               </div>
             </div>
 
-            <div class="flex items-center gap-2 pt-2">
-              {{ address_form.is_default }}
-              <label for="{{ address_form.is_default.id_for_label }}" class="text-xs font-mono text-fv-noir cursor-pointer">
-                Зробити основною адресою доставки
-              </label>
+            <div>
+              <div class="flex items-center gap-2 pt-2">
+                {{ address_form.is_default }}
+                <label for="{{ address_form.is_default.id_for_label }}" class="text-xs font-mono text-fv-noir cursor-pointer">
+                  Зробити основною адресою доставки
+                </label>
+              </div>
+              {% if address_form.is_default.errors %}
+                <div class="mt-1 text-xs text-red-600 font-mono">{{ address_form.is_default.errors.0 }}</div>
+              {% endif %}
             </div>
 
             <button

@@ -60,9 +60,6 @@ ignore = [
 # - V4: support/* (including vector_search.py B905, test_agent.py B904, test_chat_markdown.py S603/S607)
 # - V5: enable full "S" group and remove global BLE001/S110 ignores
 [tool.ruff.lint.per-file-ignores]
-"double-bite/accounts/views.py" = ["E402", "E501"]
-"double-bite/accounts/forms.py" = ["E501"]
-"double-bite/accounts/selectors.py" = ["E501"]
 "double-bite/menu/management/commands/convert_to_webp.py" = ["E501"]
 "double-bite/menu/management/commands/seed_db.py" = ["E501", "S310"]
 "double-bite/menu/tests/test_seed_db.py" = ["E501"]

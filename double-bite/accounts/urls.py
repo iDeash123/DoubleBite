@@ -2,6 +2,8 @@ from django.urls import path
 
 from .views import (
     AddressDeleteView,
+    AddressEditView,
+    AddressSetDefaultView,
     CustomPasswordResetCompleteView,
     CustomPasswordResetConfirmView,
     CustomPasswordResetDoneView,
@@ -19,9 +21,39 @@ urlpatterns = [
     path('login/', LoginView.as_view(), name='login'),
     path('logout/', LogoutView.as_view(), name='logout'),
     path('profile/', ProfileView.as_view(), name='profile'),
-    path('address/<int:pk>/delete/', AddressDeleteView.as_view(), name='delete_address'),
-    path('password_reset/', CustomPasswordResetView.as_view(), name='password_reset'),
-    path('password_reset/done/', CustomPasswordResetDoneView.as_view(), name='password_reset_done'),
-    path('reset/<uidb64>/<token>/', CustomPasswordResetConfirmView.as_view(), name='password_reset_confirm'),
-    path('reset/done/', CustomPasswordResetCompleteView.as_view(), name='password_reset_complete'),
+    path(
+        'address/<int:pk>/edit/',
+        AddressEditView.as_view(),
+        name='address_edit',
+    ),
+    path(
+        'address/<int:pk>/set-default/',
+        AddressSetDefaultView.as_view(),
+        name='address_set_default',
+    ),
+    path(
+        'address/<int:pk>/delete/',
+        AddressDeleteView.as_view(),
+        name='delete_address',
+    ),
+    path(
+        'password_reset/',
+        CustomPasswordResetView.as_view(),
+        name='password_reset',
+    ),
+    path(
+        'password_reset/done/',
+        CustomPasswordResetDoneView.as_view(),
+        name='password_reset_done',
+    ),
+    path(
+        'reset/<uidb64>/<token>/',
+        CustomPasswordResetConfirmView.as_view(),
+        name='password_reset_confirm',
+    ),
+    path(
+        'reset/done/',
+        CustomPasswordResetCompleteView.as_view(),
+        name='password_reset_complete',
+    ),
 ]

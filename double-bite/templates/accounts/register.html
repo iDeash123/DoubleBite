@@ -32,6 +32,7 @@
 
         <form method="post" class="space-y-6">
           {% csrf_token %}
+          <input type="hidden" name="next" value="{{ next|default:'' }}">
 
           <div>
             <label for="{{ form.email.id_for_label }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-2 font-medium">
@@ -110,8 +111,9 @@
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <form method="post" action="{% provider_login_url 'google' %}">
+          <form method="post" action="{% provider_login_url 'google' next=next %}">
             {% csrf_token %}
+            {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
             <button
               type="submit"
               class="w-full py-3.5 px-4 bg-white border border-[#E5E5E5] hover:border-fv-noir/30 text-fv-noir text-xs font-mono uppercase tracking-wider flex items-center justify-center gap-2.5 transition-all shadow-xs rounded-none"
@@ -126,8 +128,9 @@
             </button>
           </form>
 
-          <form method="post" action="{% provider_login_url 'github' %}">
+          <form method="post" action="{% provider_login_url 'github' next=next %}">
             {% csrf_token %}
+            {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
             <button
               type="submit"
               class="w-full py-3.5 px-4 bg-fv-noir hover:bg-black text-white text-xs font-mono uppercase tracking-wider flex items-center justify-center gap-2.5 transition-all shadow-xs rounded-none"
@@ -142,7 +145,7 @@
 
         <div class="mt-8 pt-6 border-t border-fv-noir/10 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono text-fv-slate">
           <span>Вже маєте зареєстрований акаунт?</span>
-          <a href="{% url 'accounts:login' %}" class="font-bold text-fv-noir hover:underline underline-offset-4 uppercase tracking-wider">
+          <a href="{% url 'accounts:login' %}{% if next %}?next={{ next|urlencode }}{% endif %}" class="font-bold text-fv-noir hover:underline underline-offset-4 uppercase tracking-wider">
             Увійти в систему →
           </a>
         </div>
