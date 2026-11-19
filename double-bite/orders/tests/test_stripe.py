@@ -1,13 +1,24 @@
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import stripe
 from django.contrib.auth import get_user_model
-from django.test import Client, RequestFactory, TestCase, override_settings
+from django.core import mail
+from django.db import connection, connections
+from django.test import (
+    Client,
+    RequestFactory,
+    TestCase,
+    TransactionTestCase,
+    override_settings,
+)
 from django.urls import reverse
 from menu.models import Category, Dish
 
+from orders.middleware import PRE_LOGIN_GUEST_TOKEN_SESSION_KEY
 from orders.models import (
     Order,
     OrderItem,
@@ -237,23 +248,31 @@ class StripeServiceTest(TestCase):
     def test_handle_checkout_session_amount_mismatch_returns_none(self):
         self.order.stripe_session_id = 'cs_test_mismatch'
         self.order.save()
+        mail.outbox.clear()
 
         session_data = {
             'id': 'cs_test_mismatch',
             'payment_status': 'paid',
             'amount_total': 10000,
             'currency': 'uah',
+            'payment_intent': 'pi_mismatch_1',
             'client_reference_id': self.order.order_number,
             'metadata': {'order_number': self.order.order_number},
         }
-        result = StripeService.handle_checkout_session_completed(session_data)
+        with self.captureOnCommitCallbacks(execute=True):
+            result = StripeService.handle_checkout_session_completed(session_data)
         self.assertIsNone(result)
         self.order.refresh_from_db()
         self.assertEqual(self.order.payment_status, PaymentStatus.PENDING)
+        self.assertTrue(self.order.requires_manual_refund)
+        self.assertIn('невідповідність суми або валюти', self.order.notes)
+        self.assertEqual(self.order.stripe_payment_intent_id, 'pi_mismatch_1')
+        self.assertEqual(len(mail.outbox), 0)
 
     def test_handle_checkout_session_currency_mismatch_returns_none(self):
         self.order.stripe_session_id = 'cs_test_currency'
         self.order.save()
+        mail.outbox.clear()
 
         session_data = {
             'id': 'cs_test_currency',
@@ -263,10 +282,72 @@ class StripeServiceTest(TestCase):
             'client_reference_id': self.order.order_number,
             'metadata': {'order_number': self.order.order_number},
         }
-        result = StripeService.handle_checkout_session_completed(session_data)
+        with self.captureOnCommitCallbacks(execute=True):
+            result = StripeService.handle_checkout_session_completed(session_data)
         self.assertIsNone(result)
         self.order.refresh_from_db()
         self.assertEqual(self.order.payment_status, PaymentStatus.PENDING)
+        self.assertTrue(self.order.requires_manual_refund)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_handle_checkout_session_missing_amount_or_currency_sets_manual_refund(self):
+        for idx, extra_fields in enumerate([
+            {'amount_total': None, 'currency': 'uah'},
+            {'amount_total': 56000, 'currency': ''},
+            {'amount_total': 56000, 'currency': None},
+        ]):
+            order = Order.objects.create(
+                user=self.user,
+                customer_name='Оксана',
+                customer_phone='+380509998877',
+                delivery_address='Київ',
+                payment_method=PaymentMethod.ONLINE,
+                total_amount=Decimal('560.00'),
+                stripe_session_id=f'cs_missing_{idx}',
+            )
+            mail.outbox.clear()
+            session_data = {
+                'id': f'cs_missing_{idx}',
+                'payment_status': 'paid',
+                'client_reference_id': order.order_number,
+                'metadata': {'order_number': order.order_number},
+                **extra_fields,
+            }
+            with self.captureOnCommitCallbacks(execute=True):
+                result = StripeService.handle_checkout_session_completed(session_data)
+            self.assertIsNone(result)
+            order.refresh_from_db()
+            self.assertTrue(order.requires_manual_refund)
+            self.assertEqual(order.payment_status, PaymentStatus.PENDING)
+            self.assertEqual(len(mail.outbox), 0)
+
+    def test_handle_checkout_session_cancelled_order_sets_manual_refund_without_receipt(self):
+        self.order.status = OrderStatus.CANCELLED
+        self.order.payment_status = PaymentStatus.PENDING
+        self.order.stripe_session_id = 'cs_cancelled_race'
+        self.order.save()
+        mail.outbox.clear()
+
+        session_data = {
+            'id': 'cs_cancelled_race',
+            'payment_status': 'paid',
+            'amount_total': 56000,
+            'currency': 'uah',
+            'payment_intent': 'pi_cancelled_race_1',
+            'client_reference_id': self.order.order_number,
+            'metadata': {'order_number': self.order.order_number},
+        }
+        with self.captureOnCommitCallbacks(execute=True):
+            result = StripeService.handle_checkout_session_completed(session_data)
+
+        self.assertIsNotNone(result)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.CANCELLED)
+        self.assertEqual(self.order.payment_status, PaymentStatus.PENDING)
+        self.assertTrue(self.order.requires_manual_refund)
+        self.assertEqual(self.order.stripe_payment_intent_id, 'pi_cancelled_race_1')
+        self.assertIn('оплата надійшла після скасування замовлення', self.order.notes)
+        self.assertEqual(len(mail.outbox), 0)
 
     def test_handle_checkout_session_idempotent_if_already_paid(self):
         self.order.stripe_session_id = 'cs_test_idempotent'
@@ -327,12 +408,113 @@ class StripeServiceTest(TestCase):
 
         mock_refund_create.assert_called_once_with(
             payment_intent='pi_to_refund_123',
+            idempotency_key=f'refund-order-{self.order.pk}',
             api_key='sk_test_fake_secret_key',
         )
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, OrderStatus.CANCELLED)
         self.assertEqual(self.order.payment_status, PaymentStatus.REFUNDED)
         self.assertFalse(self.order.requires_manual_refund)
+
+    @override_settings(STRIPE_SECRET_KEY='sk_test_isolated_key')
+    @patch('stripe.checkout.Session.retrieve')
+    @patch('stripe.checkout.Session.create')
+    def test_create_checkout_session_never_mutates_global_key_and_reuses_open_session(
+        self,
+        mock_session_create,
+        mock_session_retrieve,
+    ):
+        original_api_key = stripe.api_key
+        stripe.api_key = 'sk_original_global_unchanged'
+        try:
+            created = MagicMock(id='cs_first_123', url='https://checkout.stripe.com/first')
+            mock_session_create.return_value = created
+
+            session1 = StripeService.create_checkout_session(self.order)
+            self.assertEqual(session1.id, 'cs_first_123')
+            self.assertEqual(stripe.api_key, 'sk_original_global_unchanged')
+            _, kwargs1 = mock_session_create.call_args
+            self.assertEqual(kwargs1['api_key'], 'sk_test_isolated_key')
+            self.assertEqual(kwargs1['idempotency_key'], f'checkout-order-{self.order.pk}')
+
+            mock_session_retrieve.return_value = MagicMock(
+                id='cs_first_123',
+                status='open',
+                url='https://checkout.stripe.com/reused',
+            )
+            reused = StripeService.create_checkout_session(self.order)
+            self.assertEqual(reused.url, 'https://checkout.stripe.com/reused')
+            mock_session_retrieve.assert_called_once_with(
+                'cs_first_123',
+                api_key='sk_test_isolated_key',
+            )
+            mock_session_create.assert_called_once()
+
+            mock_session_retrieve.return_value = MagicMock(
+                id='cs_first_123',
+                status='expired',
+                url=None,
+            )
+            retried = MagicMock(id='cs_second_456', url='https://checkout.stripe.com/second')
+            mock_session_create.return_value = retried
+            session2 = StripeService.create_checkout_session(self.order)
+            self.assertEqual(session2.id, 'cs_second_456')
+            _, kwargs2 = mock_session_create.call_args
+            self.assertEqual(
+                kwargs2['idempotency_key'],
+                f'checkout-order-{self.order.pk}-retry-cs_first_123',
+            )
+            self.assertEqual(stripe.api_key, 'sk_original_global_unchanged')
+        finally:
+            stripe.api_key = original_api_key
+
+    @override_settings(STRIPE_SECRET_KEY='sk_test_guest_urls')
+    @patch('stripe.checkout.Session.create')
+    def test_create_checkout_session_appends_access_token_for_guest_order(
+        self,
+        mock_session_create,
+    ):
+        mock_session_create.return_value = MagicMock(
+            id='cs_guest_url_1',
+            url='https://checkout.stripe.com/guest',
+        )
+        guest_order = Order.objects.create(
+            user=None,
+            guest_token='guest-url-token-1',
+            customer_name='Гість',
+            customer_phone='+380501112233',
+            customer_email='guest.stripe@example.com',
+            delivery_address='Київ',
+            payment_method=PaymentMethod.ONLINE,
+            total_amount=Decimal('250.00'),
+        )
+        StripeService.create_checkout_session(guest_order)
+        _, kwargs = mock_session_create.call_args
+        self.assertEqual(kwargs['customer_email'], 'guest.stripe@example.com')
+        self.assertIn(f'&t={guest_order.access_token}', kwargs['success_url'])
+        self.assertIn(f'?t={guest_order.access_token}', kwargs['cancel_url'])
+
+    def test_handle_charge_refunded_zero_amount_phantom_ignored(self):
+        self.order.stripe_payment_intent_id = 'pi_zero_phantom'
+        self.order.payment_status = PaymentStatus.PAID
+        self.order.status = OrderStatus.PAID
+        self.order.save()
+        mail.outbox.clear()
+
+        charge = {
+            'payment_intent': 'pi_zero_phantom',
+            'refunded': False,
+            'amount': 0,
+            'amount_refunded': 0,
+            'metadata': {'order_number': self.order.order_number},
+        }
+        with self.captureOnCommitCallbacks(execute=True):
+            StripeService.handle_charge_refunded(charge)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, PaymentStatus.PAID)
+        self.assertEqual(self.order.status, OrderStatus.PAID)
+        self.assertEqual(len(mail.outbox), 0)
 
     @override_settings(STRIPE_SECRET_KEY='sk_test_fake_secret_key')
     @patch('stripe.Refund.create')
@@ -406,15 +588,9 @@ class StripeCheckoutFlowTest(TestCase):
         self.assertIsNotNone(order)
         self.assertEqual(order.payment_method, PaymentMethod.ONLINE)
 
-    @override_settings(STRIPE_SECRET_KEY='sk_test_fake_secret_key')
-    @patch('orders.services.StripeService.create_checkout_session')
-    def test_checkout_post_stripe_method_redirects_to_stripe_session(self, mock_create_session):
+    def test_checkout_post_legacy_stripe_method_rejected(self):
         self.client.force_login(self.user)
         self.client.post(reverse('orders:cart_add', kwargs={'dish_id': self.dish.id}))
-
-        mock_session = MagicMock()
-        mock_session.url = 'https://checkout.stripe.com/pay/cs_stripe_url'
-        mock_create_session.return_value = mock_session
 
         response = self.client.post(
             reverse('orders:checkout'),
@@ -426,8 +602,9 @@ class StripeCheckoutFlowTest(TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, 'https://checkout.stripe.com/pay/cs_stripe_url')
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Order.objects.filter(user=self.user).exists())
+        self.assertIn('payment_method', response.context['form'].errors)
 
     def test_checkout_post_cash_redirects_to_tracking(self):
         self.client.force_login(self.user)
@@ -448,6 +625,21 @@ class StripeCheckoutFlowTest(TestCase):
         self.assertEqual(order.payment_method, PaymentMethod.CASH)
         self.assertRedirects(response, reverse('orders:tracking', kwargs={'order_number': order.order_number}))
 
+    def test_direct_stripe_checkout_get_returns_405(self):
+        order = Order.objects.create(
+            user=self.user,
+            customer_name='Михайло',
+            customer_phone='+380503332211',
+            delivery_address='Київ',
+            payment_method=PaymentMethod.ONLINE,
+            total_amount=Decimal('220.00'),
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number})
+        )
+        self.assertEqual(response.status_code, 405)
+
     @override_settings(STRIPE_SECRET_KEY='sk_test_fake_secret_key')
     @patch('orders.services.StripeService.create_checkout_session')
     def test_direct_stripe_checkout_view(self, mock_create_session):
@@ -464,7 +656,9 @@ class StripeCheckoutFlowTest(TestCase):
         mock_create_session.return_value = mock_session
 
         self.client.force_login(self.user)
-        response = self.client.get(reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number}))
+        response = self.client.post(
+            reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number})
+        )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, 'https://checkout.stripe.com/pay/direct_link')
 
@@ -479,10 +673,34 @@ class StripeCheckoutFlowTest(TestCase):
             total_amount=Decimal('220.00'),
         )
         self.client.force_login(self.user)
-        response = self.client.get(reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number}))
+        response = self.client.post(
+            reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number})
+        )
         self.assertRedirects(response, reverse('orders:tracking', kwargs={'order_number': order.order_number}))
 
-    def test_direct_stripe_checkout_forbidden_for_other_user(self):
+    def test_direct_stripe_checkout_rejects_cash_and_card_orders(self):
+        self.client.force_login(self.user)
+        for method in (PaymentMethod.CASH, PaymentMethod.CARD):
+            order = Order.objects.create(
+                user=self.user,
+                customer_name='Михайло',
+                customer_phone='+380503332211',
+                delivery_address='Київ',
+                payment_method=method,
+                status=OrderStatus.PENDING,
+                total_amount=Decimal('220.00'),
+            )
+            with patch('orders.services.StripeService.create_checkout_session') as mock_create:
+                response = self.client.post(
+                    reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number})
+                )
+            mock_create.assert_not_called()
+            self.assertRedirects(
+                response,
+                reverse('orders:tracking', kwargs={'order_number': order.order_number}),
+            )
+
+    def test_direct_stripe_checkout_returns_404_for_other_user(self):
         other_user = User.objects.create_user(
             email='other@doublebite.ua',
             password='Password123!',
@@ -496,10 +714,12 @@ class StripeCheckoutFlowTest(TestCase):
             total_amount=Decimal('220.00'),
         )
         self.client.force_login(other_user)
-        response = self.client.get(reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number}))
-        self.assertEqual(response.status_code, 403)
+        response = self.client.post(
+            reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number})
+        )
+        self.assertEqual(response.status_code, 404)
 
-    def test_direct_stripe_checkout_forbidden_for_anonymous_when_order_has_user(self):
+    def test_direct_stripe_checkout_returns_404_for_anonymous_when_order_has_user(self):
         order = Order.objects.create(
             user=self.user,
             customer_name='Михайло',
@@ -508,33 +728,36 @@ class StripeCheckoutFlowTest(TestCase):
             payment_method=PaymentMethod.ONLINE,
             total_amount=Decimal('220.00'),
         )
-        # Anonymous client without login
-        response = self.client.get(reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number}))
-        self.assertEqual(response.status_code, 403)
+        response = self.client.post(
+            reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number})
+        )
+        self.assertEqual(response.status_code, 404)
 
-    def test_direct_stripe_checkout_forbidden_for_anonymous_when_session_mismatch(self):
+    def test_direct_stripe_checkout_returns_404_for_anonymous_when_guest_token_mismatch(self):
         order = Order.objects.create(
             user=None,
-            session_key='session_abc_123',
+            guest_token='guest_token_abc_123',
             customer_name='Гість',
             customer_phone='+380503332211',
             delivery_address='Київ',
             payment_method=PaymentMethod.ONLINE,
             total_amount=Decimal('220.00'),
         )
-        response = self.client.get(reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number}))
-        self.assertEqual(response.status_code, 403)
+        response = self.client.post(
+            reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number})
+        )
+        self.assertEqual(response.status_code, 404)
 
     @override_settings(STRIPE_SECRET_KEY='sk_test_fake_secret_key')
     @patch('orders.services.StripeService.create_checkout_session')
-    def test_direct_stripe_checkout_allowed_for_guest_with_matching_session(self, mock_create_session):
+    def test_direct_stripe_checkout_allowed_for_guest_with_matching_token(self, mock_create_session):
         session = self.client.session
+        session['guest_token'] = 'guest_token_match_999'
         session.save()
-        session_key = session.session_key
 
         order = Order.objects.create(
             user=None,
-            session_key=session_key,
+            guest_token='guest_token_match_999',
             customer_name='Гість',
             customer_phone='+380503332211',
             delivery_address='Київ',
@@ -545,7 +768,9 @@ class StripeCheckoutFlowTest(TestCase):
         mock_session.url = 'https://checkout.stripe.com/pay/guest_link'
         mock_create_session.return_value = mock_session
 
-        response = self.client.get(reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number}))
+        response = self.client.post(
+            reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number})
+        )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, 'https://checkout.stripe.com/pay/guest_link')
 
@@ -560,20 +785,25 @@ class StripeCheckoutFlowTest(TestCase):
             payment_method=PaymentMethod.ONLINE,
             total_amount=Decimal('220.00'),
         )
-        response = self.client.get(reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number}))
+        response = self.client.post(
+            reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number})
+        )
         self.assertRedirects(response, reverse('orders:tracking', kwargs={'order_number': order.order_number}))
 
     @override_settings(STRIPE_SECRET_KEY='sk_test_fake_secret_key')
     @patch('orders.services.StripeService.create_checkout_session')
-    def test_direct_stripe_checkout_allowed_for_authenticated_user_with_pre_login_session(self, mock_create_session):
+    def test_direct_stripe_checkout_allowed_for_authenticated_user_with_pre_login_guest_token(
+        self,
+        mock_create_session,
+    ):
         self.client.force_login(self.user)
         session = self.client.session
-        session['_pre_login_session_key'] = 'guest_prior_session_123'
+        session[PRE_LOGIN_GUEST_TOKEN_SESSION_KEY] = 'guest_prior_token_123'
         session.save()
 
         order = Order.objects.create(
             user=None,
-            session_key='guest_prior_session_123',
+            guest_token='guest_prior_token_123',
             customer_name='Гість-Михайло',
             customer_phone='+380503332211',
             delivery_address='Київ',
@@ -584,7 +814,9 @@ class StripeCheckoutFlowTest(TestCase):
         mock_session.url = 'https://checkout.stripe.com/pay/guest_prelogin_link'
         mock_create_session.return_value = mock_session
 
-        response = self.client.get(reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number}))
+        response = self.client.post(
+            reverse('orders:stripe_checkout', kwargs={'order_number': order.order_number})
+        )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, 'https://checkout.stripe.com/pay/guest_prelogin_link')
 
@@ -840,3 +1072,213 @@ class StripeWebhookTest(TestCase):
             HTTP_STRIPE_SIGNATURE='t=123,v1=valid_sig',
         )
         self.assertEqual(response.status_code, 200)
+
+    @override_settings(STRIPE_WEBHOOK_SECRET='whsec_test_secret')
+    @patch('stripe.Webhook.construct_event')
+    def test_webhook_async_payment_failed_and_expired_do_not_write_cs_to_pi(
+        self,
+        mock_construct,
+    ):
+        for idx, event_type in enumerate(
+            ('checkout.session.async_payment_failed', 'checkout.session.expired')
+        ):
+            order = Order.objects.create(
+                user=self.user,
+                customer_name='Тарас Шевченко',
+                customer_phone='+380501112233',
+                delivery_address='Київ',
+                payment_method=PaymentMethod.ONLINE,
+                status=OrderStatus.PENDING,
+                payment_status=PaymentStatus.PENDING,
+                stripe_session_id=f'cs_fail_{idx}',
+                total_amount=Decimal('300.00'),
+            )
+            mock_event = {
+                'id': f'evt_cs_fail_{idx}',
+                'type': event_type,
+                'data': {
+                    'object': {
+                        'id': f'cs_fail_{idx}',
+                        'object': 'checkout.session',
+                        'client_reference_id': order.order_number,
+                        'metadata': {'order_number': order.order_number},
+                    }
+                },
+            }
+            mock_construct.return_value = mock_event
+            response = self.client.post(
+                self.webhook_url,
+                data=json.dumps(mock_event),
+                content_type='application/json',
+                HTTP_STRIPE_SIGNATURE='t=123,v1=valid_sig',
+            )
+            self.assertEqual(response.status_code, 200)
+            order.refresh_from_db()
+            self.assertEqual(order.payment_status, PaymentStatus.FAILED)
+            self.assertEqual(order.stripe_payment_intent_id, '')
+
+    @override_settings(STRIPE_WEBHOOK_SECRET='whsec_test_secret')
+    @patch('stripe.Webhook.construct_event')
+    def test_webhook_full_refund_cancels_order_status(self, mock_construct):
+        self.order.stripe_payment_intent_id = 'pi_full_refund_cancel'
+        self.order.status = OrderStatus.PREPARING
+        self.order.payment_status = PaymentStatus.PAID
+        self.order.save()
+
+        mock_event = {
+            'id': 'evt_full_refund_cancel',
+            'type': 'charge.refunded',
+            'data': {
+                'object': {
+                    'payment_intent': 'pi_full_refund_cancel',
+                    'refunded': True,
+                    'amount': 45000,
+                    'amount_refunded': 45000,
+                    'metadata': {'order_number': self.order.order_number},
+                }
+            },
+        }
+        mock_construct.return_value = mock_event
+
+        response = self.client.post(
+            self.webhook_url,
+            data=json.dumps(mock_event),
+            content_type='application/json',
+            HTTP_STRIPE_SIGNATURE='t=123,v1=valid_sig',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, PaymentStatus.REFUNDED)
+        self.assertEqual(self.order.status, OrderStatus.CANCELLED)
+
+
+class StripeWebhookConcurrencyTest(TransactionTestCase):
+    def setUp(self):
+        self.webhook_url = reverse('orders:stripe_webhook')
+        self.order = Order.objects.create(
+            user=None,
+            guest_token='race-guest-token',
+            customer_name='Гонка Вебхуків',
+            customer_phone='+380501112233',
+            delivery_address='Київ',
+            payment_method=PaymentMethod.ONLINE,
+            status=OrderStatus.PENDING,
+            payment_status=PaymentStatus.PENDING,
+            stripe_session_id='cs_concurrent_race_1',
+            total_amount=Decimal('450.00'),
+        )
+
+    @override_settings(STRIPE_WEBHOOK_SECRET='whsec_test_secret')
+    def test_concurrent_duplicate_webhook_runs_handler_exactly_once(self):
+        mock_event = {
+            'id': 'evt_concurrent_race_001',
+            'type': 'checkout.session.completed',
+            'data': {
+                'object': {
+                    'id': 'cs_concurrent_race_1',
+                    'payment_status': 'paid',
+                    'amount_total': 45000,
+                    'currency': 'uah',
+                    'client_reference_id': self.order.order_number,
+                    'payment_intent': 'pi_concurrent_race_1',
+                    'metadata': {'order_number': self.order.order_number},
+                }
+            },
+        }
+
+        workers = 4
+        barrier = threading.Barrier(workers)
+
+        with (
+            patch('stripe.Webhook.construct_event', return_value=mock_event),
+            patch(
+                'orders.services.StripeService.handle_checkout_session_completed',
+                wraps=StripeService.handle_checkout_session_completed,
+            ) as mock_handle,
+        ):
+            def send_webhook(_idx: int) -> int:
+                try:
+                    client = Client()
+                    barrier.wait(timeout=10)
+                    resp = client.post(
+                        self.webhook_url,
+                        data=json.dumps(mock_event),
+                        content_type='application/json',
+                        HTTP_STRIPE_SIGNATURE='t=123,v1=valid_sig',
+                    )
+                    return resp.status_code
+                finally:
+                    connections.close_all()
+
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                statuses = list(pool.map(send_webhook, range(workers)))
+
+        self.assertEqual(statuses, [200] * workers)
+        self.assertEqual(mock_handle.call_count, 1)
+        self.assertEqual(
+            ProcessedStripeEvent.objects.filter(event_id='evt_concurrent_race_001').count(),
+            1,
+        )
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, PaymentStatus.PAID)
+
+
+class CancelOrderTransactionIsolationTest(TransactionTestCase):
+    @override_settings(STRIPE_SECRET_KEY='sk_test_cancel_isolation')
+    def test_cancel_order_calls_stripe_refund_outside_atomic_block(self):
+        order = Order.objects.create(
+            user=None,
+            guest_token='cancel-iso-token',
+            customer_name='Ізоляція Транзакції',
+            customer_phone='+380501112233',
+            delivery_address='Київ',
+            payment_method=PaymentMethod.ONLINE,
+            status=OrderStatus.PAID,
+            payment_status=PaymentStatus.PAID,
+            stripe_payment_intent_id='pi_cancel_outside_atomic',
+            total_amount=Decimal('400.00'),
+        )
+        observed_in_atomic = []
+
+        def check_not_in_atomic(**kwargs):
+            observed_in_atomic.append(connection.in_atomic_block)
+            return MagicMock(id='re_test_outside_atomic')
+
+        with patch('stripe.Refund.create', side_effect=check_not_in_atomic) as mock_refund:
+            OrderService.cancel_order(order)
+
+        mock_refund.assert_called_once_with(
+            payment_intent='pi_cancel_outside_atomic',
+            idempotency_key=f'refund-order-{order.pk}',
+            api_key='sk_test_cancel_isolation',
+        )
+        self.assertEqual(observed_in_atomic, [False])
+        order.refresh_from_db()
+        self.assertEqual(order.status, OrderStatus.CANCELLED)
+        self.assertEqual(order.payment_status, PaymentStatus.REFUNDED)
+        self.assertFalse(order.requires_manual_refund)
+
+    @override_settings(STRIPE_SECRET_KEY='sk_test_cancel_cash_card')
+    @patch('stripe.Refund.create')
+    def test_cancel_paid_cash_and_card_orders_never_calls_stripe_or_manual_refund(
+        self,
+        mock_refund_create,
+    ):
+        for method in (PaymentMethod.CASH, PaymentMethod.CARD):
+            order = Order.objects.create(
+                user=None,
+                guest_token=f'cancel-{method.lower()}',
+                customer_name='Оплата Курєру',
+                customer_phone='+380501112233',
+                delivery_address='Київ',
+                payment_method=method,
+                status=OrderStatus.PAID,
+                payment_status=PaymentStatus.PAID,
+                total_amount=Decimal('350.00'),
+            )
+            OrderService.cancel_order(order)
+            order.refresh_from_db()
+            self.assertEqual(order.status, OrderStatus.CANCELLED)
+            self.assertFalse(order.requires_manual_refund)
+
+        mock_refund_create.assert_not_called()

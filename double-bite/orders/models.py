@@ -3,10 +3,12 @@ import secrets
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from config.transactions import schedule_on_commit
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
+from django.db.models import Q
 from menu.models import Dish
 
 from .exceptions import InvalidStatusTransitionError
@@ -24,24 +26,21 @@ class OrderStatus(models.TextChoices):
 
 
 class PaymentMethod(models.TextChoices):
-    ONLINE = 'ONLINE', 'Оплата онлайн (Stripe)'
-    STRIPE = 'STRIPE', 'Картка онлайн (Stripe)'
-    CARD = 'CARD', 'Картка'
-    CASH = 'CASH', 'Готівка'
+    ONLINE = 'ONLINE', 'Онлайн-оплата карткою (Stripe)'
+    CASH = 'CASH', "Готівкою кур'єру"
+    CARD = 'CARD', "Терміналом кур'єру"
 
     @classmethod
     def is_online(cls, method: str | None) -> bool:
-        return method in (cls.ONLINE, cls.STRIPE, 'ONLINE', 'STRIPE')
+        return method in (cls.ONLINE, 'ONLINE')
 
 
 class PaymentStatus(models.TextChoices):
     PENDING = 'PENDING', 'Очікує оплати'
     PAID = 'PAID', 'Оплачено'
-    COMPLETED = 'COMPLETED', 'Оплачено'
     FAILED = 'FAILED', 'Помилка оплати'
     REFUNDED = 'REFUNDED', 'Повернено'
     PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED', 'Частково повернено'
-
 
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
@@ -63,10 +62,11 @@ class Cart(models.Model):
         related_name='carts',
         verbose_name='Користувач',
     )
-    session_key = models.CharField(
-        'Ключ сесії',
-        max_length=40,
+    guest_token = models.CharField(
+        'Токен гостя',
+        max_length=64,
         blank=True,
+        default='',
         db_index=True,
     )
     created_at = models.DateTimeField('Створено', auto_now_add=True)
@@ -76,6 +76,18 @@ class Cart(models.Model):
         verbose_name = 'Кошик'
         verbose_name_plural = 'Кошики'
         ordering = ('-updated_at',)
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user'],
+                condition=Q(user__isnull=False),
+                name='unique_cart_per_user',
+            ),
+            models.UniqueConstraint(
+                fields=['guest_token'],
+                condition=Q(user__isnull=True) & ~Q(guest_token=''),
+                name='unique_guest_cart_per_token',
+            ),
+        ]
 
     @property
     def total_quantity(self) -> int:
@@ -83,7 +95,7 @@ class Cart(models.Model):
             return 0
         return sum(
             item.quantity or 0
-            for item in self.items.select_related('dish', 'dish__category').all()
+            for item in self.items.all()
             if item.is_available
         )
 
@@ -94,14 +106,14 @@ class Cart(models.Model):
         return sum(
             (
                 item.total_price
-                for item in self.items.select_related('dish', 'dish__category').all()
+                for item in self.items.all()
                 if item.is_available
             ),
             Decimal('0.00'),
         )
 
     def __str__(self) -> str:
-        owner = self.user.email if self.user else f"Гість ({self.session_key[:8]})"
+        owner = self.user.email if self.user else f"Гість ({self.guest_token[:8]})"
         return f"Кошик #{self.id} — {owner}"
 
 
@@ -142,21 +154,30 @@ class CartItem(models.Model):
             if not self.dish_id or not self.dish:
                 return Decimal('0.00')
             base = getattr(self.dish, 'price', None)
-            if base is None:
+            if base is None or isinstance(base, bool):
                 return Decimal('0.00')
-        except ObjectDoesNotExist:
+            base_dec = Decimal(str(base))
+            if not base_dec.is_finite():
+                return Decimal('0.00')
+        except (ObjectDoesNotExist, InvalidOperation, TypeError, ValueError):
             return Decimal('0.00')
 
         delta = Decimal('0.00')
         if isinstance(self.selected_options, list):
             for opt in self.selected_options:
-                if isinstance(opt, dict):
-                    val = opt.get('price_delta', 0)
-                    try:
-                        delta += Decimal(str(val))
-                    except (InvalidOperation, TypeError):
-                        pass
-        return max(Decimal('0.00'), base + delta)
+                if not isinstance(opt, dict):
+                    continue
+                val = opt.get('price_delta', 0)
+                if val is None or isinstance(val, bool):
+                    continue
+                try:
+                    opt_delta = Decimal(str(val))
+                except (InvalidOperation, TypeError, ValueError):
+                    continue
+                if not opt_delta.is_finite():
+                    continue
+                delta += opt_delta
+        return max(Decimal('0.00'), base_dec + delta)
 
     @property
     def total_price(self) -> Decimal:
@@ -204,10 +225,11 @@ class Order(models.Model):
         related_name='orders',
         verbose_name='Користувач',
     )
-    session_key = models.CharField(
-        'Ключ сесії гостя',
-        max_length=40,
+    guest_token = models.CharField(
+        'Токен гостя',
+        max_length=64,
         blank=True,
+        default='',
         db_index=True,
     )
     access_token = models.CharField(
@@ -220,6 +242,7 @@ class Order(models.Model):
     )
     customer_name = models.CharField("Ім'я клієнта", max_length=100)
     customer_phone = models.CharField('Телефон клієнта', max_length=20)
+    customer_email = models.EmailField('Email клієнта', blank=True, default='')
     delivery_address = models.TextField('Адреса доставки')
     status = models.CharField(
         'Статус замовлення',
@@ -232,7 +255,7 @@ class Order(models.Model):
         'Спосіб оплати',
         max_length=20,
         choices=PaymentMethod.choices,
-        default=PaymentMethod.CARD,
+        default=PaymentMethod.ONLINE,
     )
     payment_status = models.CharField(
         'Статус оплати',
@@ -290,6 +313,14 @@ class Order(models.Model):
         return phone
 
     def can_transition_to(self, target_status: str) -> bool:
+        if self.status == OrderStatus.PENDING:
+            if self.is_online_payment:
+                return target_status in {OrderStatus.PAID, OrderStatus.CANCELLED}
+            return target_status in {
+                OrderStatus.PAID,
+                OrderStatus.PREPARING,
+                OrderStatus.CANCELLED,
+            }
         return target_status in ALLOWED_TRANSITIONS.get(self.status, set())
 
     def transition_to(self, target_status: str) -> None:
@@ -300,25 +331,28 @@ class Order(models.Model):
                     f"Неприпустимий перехід статусу з {locked_order.status} до {target_status}."
                 )
             locked_order.status = target_status
-            if target_status == OrderStatus.PAID and locked_order.payment_status != PaymentStatus.PAID:
-                locked_order.payment_status = PaymentStatus.COMPLETED
+            if target_status == OrderStatus.PAID:
+                locked_order.payment_status = PaymentStatus.PAID
+            elif (
+                target_status == OrderStatus.DELIVERED
+                and not locked_order.is_online_payment
+                and locked_order.payment_status == PaymentStatus.PENDING
+            ):
+                locked_order.payment_status = PaymentStatus.PAID
             locked_order.save(update_fields=['status', 'payment_status', 'updated_at'])
             self.status = locked_order.status
             self.payment_status = locked_order.payment_status
             self.updated_at = locked_order.updated_at
 
-        if target_status in (
-            OrderStatus.PREPARING,
-            OrderStatus.ON_WAY,
-            OrderStatus.DELIVERED,
-            OrderStatus.CANCELLED,
-        ):
-            try:
+            if target_status in (
+                OrderStatus.PREPARING,
+                OrderStatus.ON_WAY,
+                OrderStatus.DELIVERED,
+                OrderStatus.CANCELLED,
+            ):
                 from orders.emails import send_order_status_update_email
 
-                send_order_status_update_email(self)
-            except Exception:
-                logger.exception('Помилка надсилання сповіщення про зміну статусу замовлення')
+                schedule_on_commit(send_order_status_update_email, locked_order)
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         is_new = self.pk is None

@@ -90,6 +90,40 @@
         </div>
       {% endfor %}
     </div>
+
+    {% if page_obj.has_other_pages %}
+      <nav class="mt-10 flex flex-wrap items-center justify-center gap-1 font-mono text-xs" aria-label="Пагінація">
+        {% if page_obj.has_previous %}
+          <a href="?page={{ page_obj.previous_page_number }}"
+             class="px-3 py-2 border border-fv-noir/20 text-fv-noir hover:bg-fv-noir hover:text-white transition-colors"
+             aria-label="Попередня сторінка">←</a>
+        {% else %}
+          <span class="px-3 py-2 border border-fv-noir/10 text-fv-noir/30 cursor-not-allowed" aria-disabled="true">←</span>
+        {% endif %}
+
+        {% for num in page_obj.paginator.page_range %}
+          {% if num == page_obj.number %}
+            <span class="px-3 py-2 bg-fv-noir text-white border border-fv-noir" aria-current="page">{{ num }}</span>
+          {% elif num == 1 or num == page_obj.paginator.num_pages or num >= page_obj.number|add:"-2" and num <= page_obj.number|add:"2" %}
+            <a href="?page={{ num }}"
+               class="px-3 py-2 border border-fv-noir/20 text-fv-noir hover:bg-fv-noir hover:text-white transition-colors">{{ num }}</a>
+          {% elif num == page_obj.number|add:"-3" or num == page_obj.number|add:"3" %}
+            <span class="px-3 py-2 text-fv-slate">…</span>
+          {% endif %}
+        {% endfor %}
+
+        {% if page_obj.has_next %}
+          <a href="?page={{ page_obj.next_page_number }}"
+             class="px-3 py-2 border border-fv-noir/20 text-fv-noir hover:bg-fv-noir hover:text-white transition-colors"
+             aria-label="Наступна сторінка">→</a>
+        {% else %}
+          <span class="px-3 py-2 border border-fv-noir/10 text-fv-noir/30 cursor-not-allowed" aria-disabled="true">→</span>
+        {% endif %}
+      </nav>
+      <p class="mt-3 text-center font-mono text-[11px] text-fv-slate uppercase tracking-widest">
+        Сторінка {{ page_obj.number }} з {{ page_obj.paginator.num_pages }} · Всього {{ page_obj.paginator.count }} замовлень
+      </p>
+    {% endif %}
   {% endif %}
 </div>
 {% endblock %}

@@ -4,9 +4,9 @@ from accounts.models import Role
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
-from menu.models import Category, Dish
+from menu.models import Category, Dish, DishOption
 
-from orders.models import Cart
+from orders.models import Cart, Order
 
 User = get_user_model()
 
@@ -72,8 +72,9 @@ class CartViewsTest(TestCase):
             HTTP_HX_REQUEST='true',
         )
 
-        session_key = self.client.session.session_key
-        cart = Cart.objects.get(session_key=session_key)
+        guest_token = self.client.session.get('guest_token')
+        self.assertTrue(bool(guest_token))
+        cart = Cart.objects.get(guest_token=guest_token, user__isnull=True)
         item = cart.items.first()
 
         update_url = reverse('orders:cart_update', kwargs={'item_id': item.id})
@@ -128,8 +129,9 @@ class CartViewsTest(TestCase):
             {'quantity': '1'},
             HTTP_HX_REQUEST='true',
         )
-        session_key = self.client.session.session_key
-        cart = Cart.objects.get(session_key=session_key)
+        guest_token = self.client.session.get('guest_token')
+        self.assertTrue(bool(guest_token))
+        cart = Cart.objects.get(guest_token=guest_token, user__isnull=True)
         item = cart.items.first()
 
         update_url = reverse('orders:cart_update', kwargs={'item_id': item.id})
@@ -280,5 +282,104 @@ class CartViewsTest(TestCase):
         })
         self.assertTrue(form_parentheses.is_valid())
         self.assertEqual(form_parentheses.cleaned_data['customer_phone'], '+380501234567')
+
+    def test_cart_add_view_rejects_invalid_quantities_and_options_with_400(self):
+        url = reverse('orders:cart_add', kwargs={'dish_id': self.dish1.id})
+        for bad_qty in ('²', 'abc', str(2**31), '0', '-5', '100'):
+            resp = self.client.post(url, {'quantity': bad_qty}, HTTP_HX_REQUEST='true')
+            self.assertEqual(resp.status_code, 400, f'Expected 400 for qty={bad_qty!r}')
+
+        for bad_opt in ('²', 'abc', '0', '-1', str(2**31)):
+            resp = self.client.post(
+                url,
+                {'quantity': '1', 'option_id': bad_opt},
+                HTTP_HX_REQUEST='true',
+            )
+            self.assertEqual(resp.status_code, 400, f'Expected 400 for option_id={bad_opt!r}')
+
+        foreign_opt = DishOption.objects.create(
+            dish=self.dish2,
+            name='Чужий соус',
+            price_delta=Decimal('20.00'),
+        )
+        foreign_resp = self.client.post(
+            url,
+            {'quantity': '1', 'option_id': str(foreign_opt.id)},
+            HTTP_HX_REQUEST='true',
+        )
+        self.assertEqual(foreign_resp.status_code, 400)
+
+        missing_dish_resp = self.client.post(
+            reverse('orders:cart_add', kwargs={'dish_id': 999999}),
+            {'quantity': '1'},
+            HTTP_HX_REQUEST='true',
+        )
+        self.assertEqual(missing_dish_resp.status_code, 404)
+
+    def test_cart_update_view_rejects_invalid_quantities_with_400_without_resetting(self):
+        self.client.post(
+            reverse('orders:cart_add', kwargs={'dish_id': self.dish1.id}),
+            {'quantity': '3'},
+            HTTP_HX_REQUEST='true',
+        )
+        guest_token = self.client.session.get('guest_token')
+        cart = Cart.objects.get(guest_token=guest_token, user__isnull=True)
+        item = cart.items.first()
+
+        update_url = reverse('orders:cart_update', kwargs={'item_id': item.id})
+        for bad_qty in ('²', 'abc', str(2**31), '-1', '100'):
+            resp = self.client.post(
+                update_url,
+                {'quantity': bad_qty},
+                HTTP_HX_REQUEST='true',
+            )
+            self.assertEqual(resp.status_code, 400, f'Expected 400 for update qty={bad_qty!r}')
+            item.refresh_from_db()
+            self.assertEqual(item.quantity, 3)
+
+    def test_cart_badge_view_returns_current_count(self):
+        badge_url = reverse('orders:cart_badge')
+        empty_resp = self.client.get(badge_url)
+        self.assertEqual(empty_resp.status_code, 200)
+        self.assertIn('id="cart-badge"', empty_resp.content.decode('utf-8'))
+
+        self.client.post(
+            reverse('orders:cart_add', kwargs={'dish_id': self.dish1.id}),
+            {'quantity': '2'},
+        )
+        filled_resp = self.client.get(badge_url)
+        self.assertEqual(filled_resp.status_code, 200)
+        content = filled_resp.content.decode('utf-8')
+        self.assertIn('id="cart-badge"', content)
+        self.assertIn('2', content)
+
+    def test_order_list_view_paginates_15_per_page(self):
+        customer = User.objects.create_user(
+            email='paginated@test.com',
+            password='customerpassword123',
+            role=Role.CUSTOMER,
+        )
+        for idx in range(20):
+            Order.objects.create(
+                user=customer,
+                customer_name='Клієнт',
+                customer_phone='+380501112233',
+                delivery_address=f'Київ, вул. Тестова, {idx + 1}',
+                total_amount=Decimal('250.00'),
+            )
+
+        self.client.force_login(customer)
+        url = reverse('orders:order_list')
+
+        page1_resp = self.client.get(url)
+        self.assertEqual(page1_resp.status_code, 200)
+        self.assertEqual(len(page1_resp.context['page_obj']), 15)
+        self.assertEqual(page1_resp.context['page_obj'].paginator.num_pages, 2)
+        self.assertIn('?page=2', page1_resp.content.decode('utf-8'))
+
+        page2_resp = self.client.get(f'{url}?page=2')
+        self.assertEqual(page2_resp.status_code, 200)
+        self.assertEqual(len(page2_resp.context['page_obj']), 5)
+        self.assertIn('?page=1', page2_resp.content.decode('utf-8'))
 
 

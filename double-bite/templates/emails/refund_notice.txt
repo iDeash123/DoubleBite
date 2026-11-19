@@ -1,10 +1,14 @@
-Double Bite — Повернення коштів за замовлення #{{ order.order_number }}
+Double Bite — {% if is_partial_refund or order.payment_status == 'PARTIALLY_REFUNDED' %}Часткове повернення коштів{% else %}Повернення коштів{% endif %} за замовлення #{{ order.order_number }}
 
 Шановний(-а) {{ order.customer_name }},
+{% if is_partial_refund or order.payment_status == 'PARTIALLY_REFUNDED' %}
+Повідомляємо, що за замовленням #{{ order.order_number }} було успішно проведено часткове повернення коштів.
+{% else %}
 Повідомляємо, що за замовленням #{{ order.order_number }} було успішно проведено повернення коштів.
+{% endif %}
 
-Сума повернення: {{ refund_amount|default:order.total_amount }} грн
-Статус: Повернено через Stripe
+Сума повернення: {{ refund_amount|default_if_none:order.total_amount }} грн
+Статус: {% if is_partial_refund or order.payment_status == 'PARTIALLY_REFUNDED' %}Частково повернено через Stripe{% else %}Повернено через Stripe{% endif %}
 {% if order.stripe_payment_intent_id %}ID транзакції: {{ order.stripe_payment_intent_id }}{% endif %}
 
 Кошти повертаються на вашу картку протягом 1–5 банківських днів.

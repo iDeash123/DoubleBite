@@ -6,7 +6,7 @@ from django.utils.functional import SimpleLazyObject
 from menu.models import Category, Dish
 
 from orders.context_processors import cart_context
-from orders.models import Cart, CartItem, Order, PaymentMethod
+from orders.models import Cart, CartItem, Order, PaymentMethod, PaymentStatus
 from orders.services import CartService, CartSummary
 
 
@@ -27,10 +27,11 @@ class RefactoringAndCodeQualityTest(TestCase):
         self.assertIsInstance(settings.MIN_ORDER_AMOUNT, Decimal)
 
     def test_payment_method_is_online_helper(self):
+        self.assertFalse(hasattr(PaymentMethod, 'STRIPE'))
+        self.assertFalse(hasattr(PaymentStatus, 'COMPLETED'))
         self.assertTrue(PaymentMethod.is_online(PaymentMethod.ONLINE))
-        self.assertTrue(PaymentMethod.is_online(PaymentMethod.STRIPE))
         self.assertTrue(PaymentMethod.is_online('ONLINE'))
-        self.assertTrue(PaymentMethod.is_online('STRIPE'))
+        self.assertFalse(PaymentMethod.is_online('STRIPE'))
         self.assertFalse(PaymentMethod.is_online(PaymentMethod.CARD))
         self.assertFalse(PaymentMethod.is_online(PaymentMethod.CASH))
         self.assertFalse(PaymentMethod.is_online(None))
@@ -38,10 +39,10 @@ class RefactoringAndCodeQualityTest(TestCase):
     def test_order_is_online_payment_property(self):
         order_online = Order(payment_method=PaymentMethod.ONLINE)
         self.assertTrue(order_online.is_online_payment)
-        order_stripe = Order(payment_method=PaymentMethod.STRIPE)
-        self.assertTrue(order_stripe.is_online_payment)
         order_card = Order(payment_method=PaymentMethod.CARD)
         self.assertFalse(order_card.is_online_payment)
+        order_cash = Order(payment_method=PaymentMethod.CASH)
+        self.assertFalse(order_cash.is_online_payment)
 
     def test_cart_service_summary_empty(self):
         summary = CartService.summary(None)

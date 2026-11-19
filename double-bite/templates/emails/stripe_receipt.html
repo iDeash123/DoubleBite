@@ -11,24 +11,28 @@
   </p>
 
   <div style="background-color: #F6F6F6; border: 1px solid #E5E5E5; padding: 20px; margin: 24px 0;">
-    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Номер замовлення:</span>
-      <span class="mono" style="font-size: 12px; font-weight: 700; color: #262626;">#{{ order.order_number }}</span>
-    </div>
-    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Сума оплати:</span>
-      <span class="mono" style="font-size: 14px; font-weight: 700; color: #262626;">{{ order.total_amount }} грн</span>
-    </div>
-    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Статус платежу:</span>
-      <span class="mono" style="background-color: #F4F1EB; border: 1px solid #E8E3DA; color: #262626; font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 3px 8px;">СПЛАЧЕНО</span>
-    </div>
-    {% if order.stripe_payment_intent_id %}
-    <div style="display: flex; justify-content: space-between;">
-      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">ID транзакції:</span>
-      <span class="mono" style="font-size: 11px; color: #262626;">{{ order.stripe_payment_intent_id }}</span>
-    </div>
-    {% endif %}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse;">
+      <tr>
+        <td align="left" valign="top" style="padding: 0 12px 12px 0; font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Номер замовлення:</td>
+        <td align="right" valign="top" class="mono" style="padding: 0 0 12px 0; font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; font-weight: 700; color: #262626;">#{{ order.order_number }}</td>
+      </tr>
+      <tr>
+        <td align="left" valign="top" style="padding: 0 12px 12px 0; font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Сума оплати:</td>
+        <td align="right" valign="top" class="mono" style="padding: 0 0 12px 0; font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 14px; font-weight: 700; color: #262626;">{{ order.total_amount }} грн</td>
+      </tr>
+      <tr>
+        <td align="left" valign="middle" style="padding: 0 12px {% if order.stripe_payment_intent_id %}12px{% else %}0{% endif %} 0; font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">Статус платежу:</td>
+        <td align="right" valign="middle" style="padding: 0 0 {% if order.stripe_payment_intent_id %}12px{% else %}0{% endif %} 0;">
+          <span class="mono" style="display: inline-block; background-color: #F4F1EB; border: 1px solid #E8E3DA; color: #262626; font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 3px 8px;">СПЛАЧЕНО</span>
+        </td>
+      </tr>
+      {% if order.stripe_payment_intent_id %}
+      <tr>
+        <td align="left" valign="top" style="padding: 0 12px 0 0; font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; color: #8C8C8C;">ID транзакції:</td>
+        <td align="right" valign="top" class="mono" style="padding: 0; font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 11px; color: #262626;">{{ order.stripe_payment_intent_id }}</td>
+      </tr>
+      {% endif %}
+    </table>
   </div>
 
   <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #262626; margin: 24px 0 12px 0;">Оплачені позиції:</div>
@@ -43,7 +47,14 @@
     <tbody>
       {% for item in order.items.all %}
       <tr style="border-bottom: 1px solid #F6F6F6;">
-        <td style="padding: 12px 0; font-size: 13px; color: #262626; font-weight: 600;">{{ item.dish_title }}</td>
+        <td style="padding: 12px 0; font-size: 13px; color: #262626;">
+          <div style="font-weight: 600;">{{ item.dish_title }}</div>
+          {% if item.selected_options %}
+          <div class="mono" style="font-size: 11px; color: #8C8C8C; margin-top: 2px;">
+            {% for opt in item.selected_options %}{{ opt.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+          </div>
+          {% endif %}
+        </td>
         <td style="padding: 12px 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #262626; text-align: center;">{{ item.quantity }}</td>
         <td style="padding: 12px 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #262626; text-align: right;">{{ item.price }} грн</td>
       </tr>

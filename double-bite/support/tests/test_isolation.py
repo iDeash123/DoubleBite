@@ -57,7 +57,7 @@ class SessionIsolationAndIdorTest(TestCase):
         )
 
         self.guest_order_1 = Order.objects.create(
-            session_key='guest_session_key_1',
+            guest_token='guest_session_key_1',
             order_number='DB-2001',
             customer_name='Гість 1',
             customer_phone='+380673333333',
@@ -67,7 +67,7 @@ class SessionIsolationAndIdorTest(TestCase):
             eta_minutes=35,
         )
         self.guest_order_2 = Order.objects.create(
-            session_key='guest_session_key_2',
+            guest_token='guest_session_key_2',
             order_number='DB-2002',
             customer_name='Гість 2',
             customer_phone='+380674444444',
@@ -88,6 +88,7 @@ class SessionIsolationAndIdorTest(TestCase):
         request = self.factory.post('/support/chat/stream/')
         request.user = type('AnonymousUser', (), {'is_authenticated': False})()
         request.session = self.client.session
+        request.session['guest_token'] = session_key
         request.session.save()
         request.session._session_key = session_key
         return request

@@ -1,12 +1,23 @@
 from decimal import Decimal
+from pathlib import Path
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.db import transaction
 from django.test import RequestFactory, TestCase
-from menu.models import Category, Dish
+from menu.models import Category, Dish, DishOption
 
-from orders.emails import send_order_confirmation_email
-from orders.models import Cart, CartItem, Order, OrderItem, OrderStatus, PaymentMethod
+from orders.emails import send_order_confirmation_email, send_refund_notice_email
+from orders.models import (
+    Cart,
+    CartItem,
+    Order,
+    OrderItem,
+    OrderStatus,
+    PaymentMethod,
+    PaymentStatus,
+)
 from orders.services import OrderService, StripeService
 
 User = get_user_model()
@@ -37,6 +48,11 @@ class OrderEmailNotificationTests(TestCase):
             calories=800,
             is_available=True,
         )
+        self.opt_cheese = DishOption.objects.create(
+            dish=self.dish,
+            name='Подвійний сир',
+            price_delta=Decimal('30.00'),
+        )
         mail.outbox.clear()
 
     def _setup_cart_with_items(self, user=None):
@@ -45,7 +61,13 @@ class OrderEmailNotificationTests(TestCase):
             cart=cart,
             dish=self.dish,
             quantity=2,
-            selected_options=[{'name': 'Подвійний сир', 'price_delta': 30}],
+            selected_options=[
+                {
+                    'option_id': self.opt_cheese.id,
+                    'name': self.opt_cheese.name,
+                    'price_delta': '30.00',
+                }
+            ],
         )
         return cart
 
@@ -53,17 +75,18 @@ class OrderEmailNotificationTests(TestCase):
         cart = self._setup_cart_with_items(user=self.user)
         request = self.factory.post('/orders/checkout/')
         request.user = self.user
-        request.session = {'session_key': 'test-session-key'}
-        request._cached_cart = cart
+        request.session = {'guest_token': 'test-guest-token'}
+        request._cached_cart_obj = cart
 
-        order = OrderService.create_order_from_cart(
-            request=request,
-            customer_name='Тарас Шевченко',
-            customer_phone='+380501234567',
-            delivery_address='Київ, вул. Франка, 10, кв. 5',
-            payment_method=PaymentMethod.CASH,
-            notes='Не турбувати',
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            order = OrderService.create_order_from_cart(
+                request=request,
+                customer_name='Тарас Шевченко',
+                customer_phone='+380501234567',
+                delivery_address='Київ, вул. Франка, 10, кв. 5',
+                payment_method=PaymentMethod.CASH,
+                notes='Не турбувати',
+            )
 
         self.assertEqual(len(mail.outbox), 1)
         sent = mail.outbox[0]
@@ -72,9 +95,11 @@ class OrderEmailNotificationTests(TestCase):
         self.assertIn('підтверджено', sent.subject)
         self.assertIn(order.order_number, sent.body)
         self.assertIn('Маргарита', sent.body)
+        self.assertIn('Подвійний сир', sent.body)
         self.assertIn('560', sent.body)
         self.assertIn('~30 хв', sent.body)
         self.assertIn(f'/orders/tracking/{order.order_number}/', sent.body)
+        self.assertIn('вже передаємо його на кухню', sent.body)
 
         self.assertEqual(len(sent.alternatives), 1)
         self.assertEqual(sent.alternatives[0][1], 'text/html')
@@ -83,6 +108,7 @@ class OrderEmailNotificationTests(TestCase):
         self.assertIn('#262626', html)
         self.assertIn('JetBrains Mono', html)
         self.assertIn(order.order_number, html)
+        self.assertNotIn('display: flex', html)
 
     def test_order_status_preparing_email_notification(self):
         order = Order.objects.create(
@@ -95,7 +121,8 @@ class OrderEmailNotificationTests(TestCase):
         )
         mail.outbox.clear()
 
-        order.transition_to(OrderStatus.PREPARING)
+        with self.captureOnCommitCallbacks(execute=True):
+            order.transition_to(OrderStatus.PREPARING)
         self.assertEqual(len(mail.outbox), 1)
         sent = mail.outbox[0]
         self.assertEqual(sent.to, [self.user.email])
@@ -114,11 +141,12 @@ class OrderEmailNotificationTests(TestCase):
         )
         mail.outbox.clear()
 
-        order.transition_to(OrderStatus.ON_WAY)
+        with self.captureOnCommitCallbacks(execute=True):
+            order.transition_to(OrderStatus.ON_WAY)
         self.assertEqual(len(mail.outbox), 1)
         sent = mail.outbox[0]
         self.assertEqual(sent.to, [self.user.email])
-        self.assertIn('Кур\'єр', sent.subject)
+        self.assertIn("Кур'єр", sent.subject)
 
     def test_order_status_delivered_email_notification(self):
         order = Order.objects.create(
@@ -131,7 +159,8 @@ class OrderEmailNotificationTests(TestCase):
         )
         mail.outbox.clear()
 
-        order.transition_to(OrderStatus.DELIVERED)
+        with self.captureOnCommitCallbacks(execute=True):
+            order.transition_to(OrderStatus.DELIVERED)
         self.assertEqual(len(mail.outbox), 1)
         sent = mail.outbox[0]
         self.assertEqual(sent.to, [self.user.email])
@@ -148,7 +177,8 @@ class OrderEmailNotificationTests(TestCase):
         )
         mail.outbox.clear()
 
-        order.transition_to(OrderStatus.CANCELLED)
+        with self.captureOnCommitCallbacks(execute=True):
+            order.transition_to(OrderStatus.CANCELLED)
         self.assertEqual(len(mail.outbox), 1)
         sent = mail.outbox[0]
         self.assertEqual(sent.to, [self.user.email])
@@ -169,7 +199,8 @@ class OrderEmailNotificationTests(TestCase):
         self.assertEqual(count, 0)
         self.assertEqual(len(mail.outbox), 0)
 
-        order.transition_to(OrderStatus.CANCELLED)
+        with self.captureOnCommitCallbacks(execute=True):
+            order.transition_to(OrderStatus.CANCELLED)
         self.assertEqual(len(mail.outbox), 0)
 
     def test_stripe_checkout_session_completed_sends_receipt_email(self):
@@ -179,40 +210,52 @@ class OrderEmailNotificationTests(TestCase):
             customer_phone='+380501234567',
             delivery_address='Київ, вул. Франка, 10',
             status=OrderStatus.PENDING,
-            total_amount=Decimal('500.00'),
+            total_amount=Decimal('560.00'),
             stripe_session_id='cs_test_session_123',
         )
         OrderItem.objects.create(
             order=order,
             dish=self.dish,
             dish_title=self.dish.title,
-            price=self.dish.price,
+            price=Decimal('280.00'),
             quantity=2,
+            selected_options=[
+                {
+                    'option_id': self.opt_cheese.id,
+                    'name': 'Подвійний сир',
+                    'price_delta': '30.00',
+                }
+            ],
         )
         mail.outbox.clear()
 
         session_payload = {
             'id': 'cs_test_session_123',
             'payment_status': 'paid',
-            'amount_total': 50000,
+            'amount_total': 56000,
             'currency': 'uah',
             'client_reference_id': order.order_number,
             'payment_intent': 'pi_test_receipt_789',
             'customer_details': {'email': self.user.email},
             'metadata': {'order_number': order.order_number},
         }
-        StripeService.handle_checkout_session_completed(session_payload)
+        with self.captureOnCommitCallbacks(execute=True):
+            StripeService.handle_checkout_session_completed(session_payload)
 
         receipt_emails = [m for m in mail.outbox if 'Квитанція' in m.subject]
         self.assertEqual(len(receipt_emails), 1)
         receipt = receipt_emails[0]
         self.assertEqual(receipt.to, [self.user.email])
         self.assertIn(order.order_number, receipt.subject)
-        self.assertIn('500', receipt.body)
+        self.assertIn('560', receipt.body)
+        self.assertIn('Подвійний сир', receipt.body)
         self.assertIn('pi_test_receipt_789', receipt.body)
         self.assertEqual(len(receipt.alternatives), 1)
-        self.assertIn('#F6F6F6', receipt.alternatives[0][0])
-        self.assertIn('#262626', receipt.alternatives[0][0])
+        html = receipt.alternatives[0][0]
+        self.assertIn('#F6F6F6', html)
+        self.assertIn('#262626', html)
+        self.assertIn('Подвійний сир', html)
+        self.assertNotIn('display: flex', html)
 
     def test_stripe_charge_refunded_sends_refund_notice_email(self):
         order = Order.objects.create(
@@ -229,9 +272,13 @@ class OrderEmailNotificationTests(TestCase):
         charge_payload = {
             'id': 'ch_test_123',
             'payment_intent': 'pi_test_refund_456',
+            'refunded': True,
+            'amount': 50000,
+            'amount_refunded': 50000,
             'metadata': {'order_number': order.order_number},
         }
-        StripeService.handle_charge_refunded(charge_payload)
+        with self.captureOnCommitCallbacks(execute=True):
+            StripeService.handle_charge_refunded(charge_payload)
 
         self.assertEqual(len(mail.outbox), 1)
         refund_email = mail.outbox[0]
@@ -241,8 +288,10 @@ class OrderEmailNotificationTests(TestCase):
         self.assertIn('500', refund_email.body)
         self.assertIn('pi_test_refund_456', refund_email.body)
         self.assertEqual(len(refund_email.alternatives), 1)
-        self.assertIn('#F6F6F6', refund_email.alternatives[0][0])
-        self.assertIn('#262626', refund_email.alternatives[0][0])
+        html = refund_email.alternatives[0][0]
+        self.assertIn('#F6F6F6', html)
+        self.assertIn('#262626', html)
+        self.assertNotIn('display: flex', html)
 
     def test_stripe_receipt_email_guest_order_uses_customer_details_email(self):
         order = Order.objects.create(
@@ -266,7 +315,8 @@ class OrderEmailNotificationTests(TestCase):
             'customer_details': {'email': 'guest_stripe_user@example.com'},
             'metadata': {'order_number': order.order_number},
         }
-        StripeService.handle_checkout_session_completed(session_payload)
+        with self.captureOnCommitCallbacks(execute=True):
+            StripeService.handle_checkout_session_completed(session_payload)
 
         receipt_emails = [m for m in mail.outbox if 'Квитанція' in m.subject]
         self.assertEqual(len(receipt_emails), 1)
@@ -288,14 +338,133 @@ class OrderEmailNotificationTests(TestCase):
         charge_payload = {
             'id': 'ch_test_part_123',
             'payment_intent': 'pi_test_partial_456',
+            'amount': 50000,
             'amount_refunded': 25000,
             'metadata': {'order_number': order.order_number},
         }
-        StripeService.handle_charge_refunded(charge_payload)
+        with self.captureOnCommitCallbacks(execute=True):
+            StripeService.handle_charge_refunded(charge_payload)
 
         self.assertEqual(len(mail.outbox), 1)
         refund_email = mail.outbox[0]
         self.assertEqual(refund_email.to, [self.user.email])
         self.assertIn('Повернення коштів', refund_email.subject)
+        self.assertIn('Часткове повернення коштів', refund_email.body)
         self.assertIn('250', refund_email.body)
-        self.assertIn('#F4F1EB', refund_email.alternatives[0][0])
+        html = refund_email.alternatives[0][0]
+        self.assertIn('#F4F1EB', html)
+        self.assertIn('ЧАСТКОВО ПОВЕРНЕНО', html)
+        self.assertIn('Часткове повернення коштів', html)
+        self.assertNotIn('display: flex', html)
+
+    def test_rollback_inside_atomic_sends_zero_order_and_stripe_emails(self):
+        cart = self._setup_cart_with_items(user=self.user)
+        request = self.factory.post('/orders/checkout/')
+        request.user = self.user
+        request.session = {'guest_token': 'rollback-guest-tok'}
+        request._cached_cart_obj = cart
+
+        with self.captureOnCommitCallbacks(execute=True):
+            try:
+                with transaction.atomic():
+                    OrderService.create_order_from_cart(
+                        request=request,
+                        customer_name='Тарас Шевченко',
+                        customer_phone='+380501234567',
+                        delivery_address='Київ, вул. Франка, 10',
+                        payment_method=PaymentMethod.CASH,
+                    )
+                    raise RuntimeError('force rollback order create')
+            except RuntimeError:
+                pass
+        self.assertEqual(len(mail.outbox), 0)
+
+        order = Order.objects.create(
+            user=self.user,
+            customer_name='Тарас Шевченко',
+            customer_phone='+380501234567',
+            delivery_address='Київ, вул. Франка, 10',
+            status=OrderStatus.PENDING,
+            total_amount=Decimal('500.00'),
+            stripe_session_id='cs_rollback_1',
+        )
+        mail.outbox.clear()
+        session_payload = {
+            'id': 'cs_rollback_1',
+            'payment_status': 'paid',
+            'amount_total': 50000,
+            'currency': 'uah',
+            'client_reference_id': order.order_number,
+            'payment_intent': 'pi_rollback_1',
+            'customer_details': {'email': self.user.email},
+        }
+        with self.captureOnCommitCallbacks(execute=True):
+            try:
+                with transaction.atomic():
+                    StripeService.handle_checkout_session_completed(session_payload)
+                    raise RuntimeError('force rollback stripe webhook')
+            except RuntimeError:
+                pass
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_order_confirmation_online_pending_says_awaiting_payment(self):
+        order = Order.objects.create(
+            user=None,
+            customer_name='Очікує Оплату',
+            customer_phone='+380501234567',
+            customer_email='awaiting@example.com',
+            delivery_address='Київ, вул. Франка, 10',
+            payment_method=PaymentMethod.ONLINE,
+            status=OrderStatus.PENDING,
+            total_amount=Decimal('350.00'),
+        )
+        mail.outbox.clear()
+
+        count = send_order_confirmation_email(order)
+        self.assertEqual(count, 1)
+        sent = mail.outbox[0]
+        self.assertEqual(sent.to, ['awaiting@example.com'])
+        self.assertIn('очікує на онлайн-оплату', sent.body)
+        self.assertNotIn('вже передаємо його на кухню', sent.body)
+        html = sent.alternatives[0][0]
+        self.assertIn('очікує на онлайн-оплату', html)
+        self.assertNotIn('вже передаємо його на кухню', html)
+
+    def test_refund_notice_zero_amount_renders_0_00_via_default_if_none(self):
+        order = Order.objects.create(
+            user=self.user,
+            customer_name='Тарас Шевченко',
+            customer_phone='+380501234567',
+            delivery_address='Київ, вул. Франка, 10',
+            status=OrderStatus.PAID,
+            payment_status=PaymentStatus.PARTIALLY_REFUNDED,
+            total_amount=Decimal('500.00'),
+            stripe_payment_intent_id='pi_zero_refund_amt',
+        )
+        mail.outbox.clear()
+
+        count = send_refund_notice_email(
+            order,
+            charge={'amount': 50000, 'amount_refunded': 0, 'refunded': False},
+        )
+        self.assertEqual(count, 1)
+        refund_email = mail.outbox[0]
+        self.assertIn('0,00 грн', refund_email.body)
+        self.assertNotIn('500', refund_email.body)
+        html = refund_email.alternatives[0][0]
+        self.assertIn('0,00 грн', html)
+        self.assertNotIn('500', html)
+        self.assertIn('ЧАСТКОВО ПОВЕРНЕНО', html)
+
+    def test_order_email_templates_contain_zero_display_flex(self):
+        email_dir = settings.BASE_DIR / 'templates' / 'emails'
+        for name in (
+            'base_email.html',
+            'order_confirmation.html',
+            'status_update.html',
+            'stripe_receipt.html',
+            'refund_notice.html',
+        ):
+            content = Path(email_dir / name).read_text(encoding='utf-8').lower()
+            self.assertNotIn('display: flex', content, f'Found display: flex in {name}')
+            self.assertNotIn('display:flex', content, f'Found display:flex in {name}')

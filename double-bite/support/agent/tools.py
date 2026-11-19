@@ -1,10 +1,14 @@
 from typing import Any
 
-from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest
 from menu.models import Dish
 from menu.selectors import search_dishes_for_agent
-from orders.exceptions import DishUnavailableError
+from orders.exceptions import (
+    CartForbiddenError,
+    DishNotFoundError,
+    DishUnavailableError,
+    InvalidOptionError,
+)
 from orders.services import CartService
 
 from support.models import ChatSession, TicketReason
@@ -367,9 +371,12 @@ def execute_agent_tool(
                 "cart_items_count": items_count,
                 "message": f"Страву «{item.dish.title}» ({quantity} шт.) успішно додано до кошика."
             }
-        except PermissionDenied as e:
-            return {"error": str(e)}
-        except DishUnavailableError as e:
+        except (
+            CartForbiddenError,
+            DishNotFoundError,
+            DishUnavailableError,
+            InvalidOptionError,
+        ) as e:
             return {"error": str(e)}
         except (ValueError, KeyError, TypeError) as e:
             return {"error": f"Помилка при додаванні до кошика: {e!s}"}

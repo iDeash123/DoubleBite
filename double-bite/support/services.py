@@ -1,5 +1,6 @@
 import logging
 import re
+import secrets
 import uuid
 from typing import Any
 
@@ -7,6 +8,7 @@ from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Q
 from django.http import HttpRequest
+from orders.middleware import get_guest_token, get_pre_login_guest_token
 from orders.models import Order
 
 from support.models import (
@@ -204,11 +206,18 @@ class ChatSessionService:
 
 
 def validate_order_access(order: Order, request: HttpRequest) -> bool:
-    if request.user.is_authenticated:
-        return order.user_id == request.user.id
+    if request.user.is_authenticated and order.user_id == request.user.id:
+        return True
 
-    session_key = request.session.session_key or ''
-    return bool(order.session_key and session_key and order.session_key == session_key)
+    if order.user_id is None and order.guest_token:
+        guest_token = get_guest_token(request, create=False)
+        if guest_token and secrets.compare_digest(str(order.guest_token), str(guest_token)):
+            return True
+        pre_token = get_pre_login_guest_token(request)
+        if pre_token and secrets.compare_digest(str(order.guest_token), str(pre_token)):
+            return True
+
+    return False
 
 
 def check_order_status_for_request(

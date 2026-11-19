@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load l10n %}
 
 {% block title %}Оформлення замовлення — Double Bite™{% endblock %}
 {% block meta_description %}Оформлення доставки ресторанних страв від Double Bite.{% endblock %}
@@ -59,12 +60,42 @@
               <p class="text-xs font-mono text-red-600 mt-1">{{ form.customer_phone.errors.0 }}</p>
             {% endif %}
           </div>
+
+          <div>
+            <label for="{{ form.customer_email.id_for_label }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1.5 font-medium">
+              {{ form.customer_email.label }}
+            </label>
+            {{ form.customer_email }}
+            {% if form.customer_email.errors %}
+              <p class="text-xs font-mono text-red-600 mt-1">{{ form.customer_email.errors.0 }}</p>
+            {% endif %}
+          </div>
         </div>
 
         <div class="space-y-4 pt-4 border-t border-fv-noir/10">
           <h2 class="font-mono text-xs uppercase tracking-wider text-fv-slate border-b border-fv-noir/10 pb-2">
             2. Адреса доставки (Київ)
           </h2>
+
+          {% if saved_addresses %}
+            <div class="space-y-2">
+              <span class="block text-xs font-mono uppercase tracking-wider text-fv-slate">
+                Збережені адреси:
+              </span>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {% for addr in saved_addresses %}
+                  <button
+                    type="button"
+                    data-saved-address="{{ addr.format_full_address }}"
+                    class="p-3 text-left border border-fv-noir/20 bg-fv-offwhite hover:bg-white hover:border-fv-noir transition-colors text-xs font-mono"
+                  >
+                    <span class="block font-bold text-fv-noir uppercase tracking-wider">{{ addr.title }}</span>
+                    <span class="block text-[11px] text-fv-slate mt-0.5">{{ addr.format_full_address }}</span>
+                  </button>
+                {% endfor %}
+              </div>
+            </div>
+          {% endif %}
 
           <div>
             <label for="{{ form.delivery_address.id_for_label }}" class="block text-xs font-mono uppercase tracking-wider text-fv-noir mb-1.5 font-medium">
@@ -81,6 +112,9 @@
               {{ form.notes.label }}
             </label>
             {{ form.notes }}
+            {% if form.notes.errors %}
+              <p class="text-xs font-mono text-red-600 mt-1">{{ form.notes.errors.0 }}</p>
+            {% endif %}
           </div>
         </div>
 
@@ -165,7 +199,7 @@
         </div>
         <div class="flex justify-between text-fv-slate">
           <span>Доставка кур'єром:</span>
-          <span class="text-emerald-700 font-medium uppercase">Безкоштовно</span>
+          <span class="{% if meets_free_delivery %}text-emerald-700 uppercase{% else %}text-fv-noir{% endif %} font-medium">{% if meets_free_delivery %}Безкоштовно{% else %}{{ delivery_fee|unlocalize }} грн{% endif %}</span>
         </div>
         <div class="flex justify-between text-fv-slate">
           <span>Орієнтовний час доставки:</span>
@@ -179,4 +213,17 @@
     </div>
   </div>
 </div>
+{% if saved_addresses %}
+<script nonce="{{ csp_nonce }}">
+  document.addEventListener('click', function(evt) {
+    var btn = evt.target && evt.target.closest ? evt.target.closest('button[data-saved-address]') : null;
+    if (!btn) return;
+    var input = document.getElementById('{{ form.delivery_address.id_for_label|escapejs }}');
+    if (input) {
+      input.value = btn.getAttribute('data-saved-address') || '';
+      input.focus();
+    }
+  });
+</script>
+{% endif %}
 {% endblock %}

@@ -1,14 +1,15 @@
 from django.contrib import admin
 
+from .exceptions import InvalidStatusTransitionError
 from .models import (
     Cart,
     CartItem,
-    InvalidStatusTransitionError,
     Order,
     OrderItem,
     OrderStatus,
     ProcessedStripeEvent,
 )
+from .services import OrderService
 
 
 class OrderItemInline(admin.TabularInline):
@@ -16,6 +17,9 @@ class OrderItemInline(admin.TabularInline):
     extra = 0
     readonly_fields = ('dish_title', 'price', 'quantity', 'total_price', 'selected_options')
     can_delete = False
+
+    def has_add_permission(self, request, obj=None) -> bool:
+        return False
 
 
 @admin.register(Order)
@@ -36,11 +40,12 @@ class OrderAdmin(admin.ModelAdmin):
         'order_number',
         'customer_name',
         'customer_phone',
+        'customer_email',
         'delivery_address',
         'stripe_session_id',
         'stripe_payment_intent_id',
     )
-    exclude = ('session_key', 'access_token')
+    exclude = ('guest_token', 'access_token')
     readonly_fields = (
         'order_number',
         'status',
@@ -71,7 +76,10 @@ class OrderAdmin(admin.ModelAdmin):
                 error_count += 1
         if request:
             if success_count:
-                self.message_user(request, f"Успішно змінено статус {success_count} замовлень на {target_status}.")
+                self.message_user(
+                    request,
+                    f"Успішно змінено статус {success_count} замовлень на {target_status}.",
+                )
             if error_count:
                 self.message_user(
                     request,
@@ -97,7 +105,36 @@ class OrderAdmin(admin.ModelAdmin):
 
     @admin.action(description='Перевести у статус: Скасовано')
     def action_mark_cancelled(self, request, queryset):
-        self._apply_transition(request, queryset, OrderStatus.CANCELLED)
+        success_count = 0
+        error_count = 0
+        manual_refund_orders = []
+        for order in queryset:
+            try:
+                OrderService.cancel_order(order)
+                success_count += 1
+                if order.requires_manual_refund:
+                    manual_refund_orders.append(order.order_number or f'#{order.pk}')
+            except InvalidStatusTransitionError:
+                error_count += 1
+        if request:
+            if success_count:
+                self.message_user(
+                    request,
+                    f"Успішно скасовано {success_count} замовлень.",
+                )
+            if error_count:
+                self.message_user(
+                    request,
+                    f"Не вдалося скасувати {error_count} замовлень через неприпустимий перехід.",
+                    level='warning',
+                )
+            if manual_refund_orders:
+                orders_str = ', '.join(manual_refund_orders)
+                self.message_user(
+                    request,
+                    f"Потрібне ручне повернення коштів через Stripe для: {orders_str}.",
+                    level='warning',
+                )
 
 
 @admin.register(ProcessedStripeEvent)
@@ -117,6 +154,14 @@ class CartItemInline(admin.TabularInline):
 class CartAdmin(admin.ModelAdmin):
     list_display = ('id', 'user', 'total_quantity', 'total_amount', 'updated_at')
     search_fields = ('user__email',)
-    exclude = ('session_key',)
+    exclude = ('guest_token',)
     readonly_fields = ('created_at', 'updated_at')
     inlines = (CartItemInline,)
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .select_related('user')
+            .prefetch_related('items__dish__category')
+        )

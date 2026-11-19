@@ -11,7 +11,7 @@ Double Bite — Електронний чек про успішну оплату
 
 Склад замовлення:
 {% for item in order.items.all %}
-- {{ item.dish_title }} x {{ item.quantity }} — {{ item.price }} грн
+- {{ item.dish_title }} x {{ item.quantity }} — {{ item.price }} грн{% if item.selected_options %} ({% for opt in item.selected_options %}{{ opt.name }}{% if not forloop.last %}, {% endif %}{% endfor %}){% endif %}
 {% endfor %}
 
 Загальна сума: {{ order.total_amount }} грн

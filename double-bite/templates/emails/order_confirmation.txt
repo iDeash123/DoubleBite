@@ -1,7 +1,11 @@
 Double Bite — Замовлення #{{ order.order_number }} підтверджено!
 
 Шановний(-а) {{ order.customer_name }},
-Дякуємо за ваше замовлення в Double Bite!
+{% if order.is_online_payment and order.status == 'PENDING' %}
+Дякуємо за ваше замовлення! Воно очікує на онлайн-оплату; після підтвердження платежу ми одразу передамо його на кухню.
+{% else %}
+Дякуємо за ваше замовлення в Double Bite! Ми отримали ваше замовлення та вже передаємо його на кухню.
+{% endif %}
 
 Номер замовлення: #{{ order.order_number }}
 Орієнтовний час доставки (ETA): ~{{ order.eta_minutes|default:"30" }} хв
@@ -9,7 +13,7 @@ Double Bite — Замовлення #{{ order.order_number }} підтверд�
 
 Склад замовлення:
 {% for item in order.items.all %}
-- {{ item.dish_title }} x {{ item.quantity }} — {{ item.price }} грн
+- {{ item.dish_title }} x {{ item.quantity }} — {{ item.price }} грн{% if item.selected_options %} ({% for opt in item.selected_options %}{{ opt.name }}{% if not forloop.last %}, {% endif %}{% endfor %}){% endif %}
 {% endfor %}
 
 Загальна сума: {{ order.total_amount }} грн

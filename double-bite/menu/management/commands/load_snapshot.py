@@ -186,7 +186,7 @@ class Command(BaseCommand):
 
                 stats["carts"] = self._load_model(
                     Cart, data.get("carts", []),
-                    update_fields=["user_id", "session_key"],
+                    update_fields=["user_id", "guest_token"],
                 )
                 stats["cart_items"] = self._load_model(
                     CartItem, data.get("cart_items", []),
@@ -195,11 +195,12 @@ class Command(BaseCommand):
                 stats["orders"] = self._load_model(
                     Order, data.get("orders", []),
                     update_fields=[
-                        "order_number", "user_id", "session_key",
-                        "customer_name", "customer_phone", "delivery_address",
-                        "status", "payment_method", "payment_status",
-                        "stripe_session_id", "stripe_payment_intent_id",
-                        "total_amount", "eta_minutes", "notes",
+                        "order_number", "user_id", "guest_token",
+                        "customer_name", "customer_phone", "customer_email",
+                        "delivery_address", "status", "payment_method",
+                        "payment_status", "stripe_session_id",
+                        "stripe_payment_intent_id", "total_amount",
+                        "eta_minutes", "notes",
                     ],
                 )
                 stats["order_items"] = self._load_model(

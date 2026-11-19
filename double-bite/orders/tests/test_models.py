@@ -1,7 +1,10 @@
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.core import mail
+from django.db import IntegrityError, connection, transaction
+from django.db.migrations.executor import MigrationExecutor
+from django.test import TestCase, TransactionTestCase
 from menu.models import Category, Dish
 
 from orders.exceptions import InvalidStatusTransitionError
@@ -75,10 +78,11 @@ class OrdersModelTest(TestCase):
     def test_cart_creation_for_user_and_guest(self):
         user_cart = Cart.objects.create(user=self.user)
         self.assertIn('client@doublebite.ua', str(user_cart))
-        self.assertIsNone(user_cart.session_key or None)
+        self.assertEqual(user_cart.guest_token, '')
 
-        guest_cart = Cart.objects.create(session_key='guest_session_1234567890')
+        guest_cart = Cart.objects.create(guest_token='guest_token_1234567890')
         self.assertIn('Гість', str(guest_cart))
+        self.assertIn('guest_to', str(guest_cart))
         self.assertIsNone(guest_cart.user)
 
     def test_cart_item_unit_and_total_price_with_options(self):
@@ -120,7 +124,7 @@ class OrdersModelTest(TestCase):
         self.assertEqual(order.order_number, f"DB-{order.pk:04d}")
         self.assertEqual(order.status, OrderStatus.PENDING)
         self.assertEqual(order.payment_status, PaymentStatus.PENDING)
-        self.assertEqual(order.payment_method, PaymentMethod.CARD)
+        self.assertEqual(order.payment_method, PaymentMethod.ONLINE)
         self.assertIn(order.order_number, str(order))
 
     def test_state_machine_valid_linear_transitions(self):
@@ -135,7 +139,7 @@ class OrdersModelTest(TestCase):
         self.assertTrue(order.can_transition_to(OrderStatus.PAID))
         order.transition_to(OrderStatus.PAID)
         self.assertEqual(order.status, OrderStatus.PAID)
-        self.assertEqual(order.payment_status, PaymentStatus.COMPLETED)
+        self.assertEqual(order.payment_status, PaymentStatus.PAID)
 
         self.assertTrue(order.can_transition_to(OrderStatus.PREPARING))
         order.transition_to(OrderStatus.PREPARING)
@@ -279,3 +283,179 @@ class OrdersModelTest(TestCase):
             ],
         )
         self.assertEqual(item_negative_clamped.unit_price, Decimal('0.00'))
+
+    def test_cart_item_unit_price_skips_non_finite_without_poisoning_valid_deltas(self):
+        item = CartItem(
+            dish=self.dish1,
+            selected_options=[
+                {'name': 'Сир', 'price_delta': '40.00'},
+                {'name': 'NaN', 'price_delta': 'NaN'},
+                {'name': 'sNaN', 'price_delta': 'sNaN'},
+                {'name': 'Inf', 'price_delta': 'Infinity'},
+                {'name': 'NegInf', 'price_delta': '-Infinity'},
+                {'name': 'FloatNaN', 'price_delta': float('nan')},
+                {'name': 'FloatInf', 'price_delta': float('inf')},
+                {'name': 'BoolTrue', 'price_delta': True},
+                {'name': 'BoolFalse', 'price_delta': False},
+                {'name': 'NoneVal', 'price_delta': None},
+                {'name': 'Соус', 'price_delta': '15.00'},
+            ],
+        )
+        self.assertEqual(item.unit_price, Decimal('305.00'))
+
+    def test_cash_and_card_transitions_allow_pending_to_preparing_and_mark_paid_on_delivered(self):
+        for method in (PaymentMethod.CASH, PaymentMethod.CARD):
+            order = Order.objects.create(
+                user=self.user,
+                customer_name='Олексій',
+                customer_phone='+380501112233',
+                delivery_address='Київ, вул. Франка, 12',
+                payment_method=method,
+                total_amount=Decimal('400.00'),
+            )
+            self.assertTrue(order.can_transition_to(OrderStatus.PREPARING))
+            order.transition_to(OrderStatus.PREPARING)
+            self.assertEqual(order.status, OrderStatus.PREPARING)
+            self.assertEqual(order.payment_status, PaymentStatus.PENDING)
+
+            order.transition_to(OrderStatus.ON_WAY)
+            self.assertEqual(order.status, OrderStatus.ON_WAY)
+            self.assertEqual(order.payment_status, PaymentStatus.PENDING)
+
+            order.transition_to(OrderStatus.DELIVERED)
+            self.assertEqual(order.status, OrderStatus.DELIVERED)
+            self.assertEqual(order.payment_status, PaymentStatus.PAID)
+
+    def test_online_order_rejects_pending_to_preparing(self):
+        order = Order.objects.create(
+            user=self.user,
+            customer_name='Олексій',
+            customer_phone='+380501112233',
+            delivery_address='Київ, вул. Франка, 12',
+            payment_method=PaymentMethod.ONLINE,
+            total_amount=Decimal('400.00'),
+        )
+        self.assertFalse(order.can_transition_to(OrderStatus.PREPARING))
+        with self.assertRaises(InvalidStatusTransitionError):
+            order.transition_to(OrderStatus.PREPARING)
+
+    def test_cart_unique_constraints_enforce_single_user_and_guest_token_cart(self):
+        Cart.objects.create(user=self.user)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Cart.objects.create(user=self.user)
+
+        Cart.objects.create(user=None, guest_token='unique-guest-token-1')
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Cart.objects.create(user=None, guest_token='unique-guest-token-1')
+
+        empty_a = Cart.objects.create(user=None, guest_token='')
+        empty_b = Cart.objects.create(user=None, guest_token='')
+        self.assertNotEqual(empty_a.pk, empty_b.pk)
+
+    def test_order_transition_to_schedules_email_only_on_commit(self):
+        order = Order.objects.create(
+            user=self.user,
+            customer_name='Олексій',
+            customer_phone='+380501112233',
+            delivery_address='Київ',
+            payment_method=PaymentMethod.CASH,
+            status=OrderStatus.PENDING,
+            total_amount=Decimal('300.00'),
+        )
+        mail.outbox.clear()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            try:
+                with transaction.atomic():
+                    order.transition_to(OrderStatus.PREPARING)
+                    raise RuntimeError('Simulated rollback')
+            except RuntimeError:
+                pass
+
+        self.assertEqual(len(mail.outbox), 0)
+        order.refresh_from_db()
+        self.assertEqual(order.status, OrderStatus.PENDING)
+
+
+class OrdersMigration0005Test(TransactionTestCase):
+    def test_migration_0005_migrates_enums_tokens_and_deduplicates_carts(self):
+        target_0004 = [('orders', '0004_order_requires_manual_refund_and_more')]
+        target_0005 = [('orders', '0005_guest_token_payment_enums_and_constraints')]
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(target_0004)
+        try:
+            old_apps = executor.loader.project_state(target_0004).apps
+            OldUser = old_apps.get_model('accounts', 'User')
+            OldCategory = old_apps.get_model('menu', 'Category')
+            OldDish = old_apps.get_model('menu', 'Dish')
+            OldCart = old_apps.get_model('orders', 'Cart')
+            OldCartItem = old_apps.get_model('orders', 'CartItem')
+            OldOrder = old_apps.get_model('orders', 'Order')
+
+            user = OldUser.objects.create(email='mig0005@doublebite.ua', password='x')
+            category = OldCategory.objects.create(name='Піца', slug='mig-pizza', is_active=True)
+            dish_a = OldDish.objects.create(
+                category=category,
+                title='Маргарита',
+                slug='mig-margarita',
+                price=Decimal('250.00'),
+                weight_grams=400,
+            )
+            dish_b = OldDish.objects.create(
+                category=category,
+                title='Пепероні',
+                slug='mig-pepperoni',
+                price=Decimal('280.00'),
+                weight_grams=420,
+            )
+
+            user_cart_old = OldCart.objects.create(user=user, session_key='stale-user-sess')
+            user_cart_new = OldCart.objects.create(user=user, session_key='newer-user-sess')
+            OldCartItem.objects.create(cart=user_cart_old, dish=dish_a, quantity=60)
+            OldCartItem.objects.create(cart=user_cart_old, dish=dish_b, quantity=2)
+            OldCartItem.objects.create(cart=user_cart_new, dish=dish_a, quantity=50)
+
+            guest_cart_1 = OldCart.objects.create(user=None, session_key='raw_guest_sess_abc')
+            guest_cart_2 = OldCart.objects.create(user=None, session_key='raw_guest_sess_abc')
+            OldCartItem.objects.create(cart=guest_cart_1, dish=dish_a, quantity=2)
+            OldCartItem.objects.create(cart=guest_cart_2, dish=dish_a, quantity=3)
+
+            legacy_order = OldOrder.objects.create(
+                user=None,
+                session_key='raw_order_sess_xyz',
+                customer_name='Міграція',
+                customer_phone='+380501112233',
+                delivery_address='Київ',
+                payment_method='STRIPE',
+                payment_status='COMPLETED',
+                total_amount=Decimal('500.00'),
+            )
+
+            executor_fwd = MigrationExecutor(connection)
+            executor_fwd.migrate(target_0005)
+            new_apps = executor_fwd.loader.project_state(target_0005).apps
+
+            NewCart = new_apps.get_model('orders', 'Cart')
+            NewOrder = new_apps.get_model('orders', 'Order')
+
+            user_carts = list(NewCart.objects.filter(user_id=user.pk))
+            self.assertEqual(len(user_carts), 1)
+            self.assertEqual(user_carts[0].guest_token, '')
+            items_by_dish = {ci.dish_id: ci.quantity for ci in user_carts[0].items.all()}
+            self.assertEqual(items_by_dish[dish_a.pk], 99)
+            self.assertEqual(items_by_dish[dish_b.pk], 2)
+
+            guest_carts = list(NewCart.objects.filter(user_id__isnull=True))
+            self.assertEqual(len(guest_carts), 1)
+            self.assertTrue(bool(guest_carts[0].guest_token))
+            self.assertNotEqual(guest_carts[0].guest_token, 'raw_guest_sess_abc')
+            self.assertEqual(guest_carts[0].items.get(dish_id=dish_a.pk).quantity, 5)
+
+            migrated_order = NewOrder.objects.get(pk=legacy_order.pk)
+            self.assertEqual(migrated_order.payment_method, 'ONLINE')
+            self.assertEqual(migrated_order.payment_status, 'PAID')
+            self.assertTrue(bool(migrated_order.guest_token))
+            self.assertNotEqual(migrated_order.guest_token, 'raw_order_sess_xyz')
+        finally:
+            MigrationExecutor(connection).migrate(target_0005)
