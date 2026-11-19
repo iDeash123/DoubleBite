@@ -23,7 +23,7 @@ from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from .exceptions import (
     CartEmptyError,
@@ -119,6 +119,7 @@ def cart_view(request: HttpRequest) -> HttpResponse:
     return render_partial_or_full(request, 'orders/cart.html', context)
 
 
+@require_GET
 def cart_badge_view(request: HttpRequest) -> HttpResponse:
     count = CartService.get_items_count(request)
     return render(request, 'partials/cart_badge.html', {'cart_items_count': count})

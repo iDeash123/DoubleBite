@@ -1,26 +1,49 @@
 <script nonce="{{ csp_nonce }}">
 window.__formatMarkdown = function(text) {
   if (!text) return '';
-  var s = String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+  var raw = String(text);
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+  function formatInline(escapedStr) {
+    return escapedStr
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>');
+  }
+  var sentinel = '@@DBLINK_';
+  while (raw.indexOf(sentinel) !== -1) {
+    sentinel += 'X';
+  }
+  var placeholders = [];
+  var urlPattern = /^(https?:\/\/[^\s"'<>\\]+|\/(?![\/\\])[^\s"'<>\\]*)$/i;
+  var s = raw.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(match, label, rawUrl) {
+    var url = rawUrl.trim();
+    if (urlPattern.test(url)) {
+      var safeHref = escapeHtml(url);
+      var safeLabel = formatInline(escapeHtml(label));
+      var idx = placeholders.length;
+      placeholders.push(
+        '<a href="' + safeHref + '" target="_blank" rel="noopener noreferrer" class="underline">' + safeLabel + '</a>'
+      );
+      return sentinel + idx + '@@';
+    }
+    return label + ' (' + url + ')';
+  });
+  s = escapeHtml(s);
   s = s.split('\n').map(function(line) {
     line = line.replace(/^#{1,3}\s*(.+)$/, '<strong>$1</strong>');
     line = line.replace(/^-\s+(.+)$/, '&bull; $1');
     return line;
   }).join('\n');
-  s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(match, label, rawUrl) {
-    var url = rawUrl.trim();
-    if (/^(https?:\/\/[^\s"'<>&]+|\/[^\s"'<>&]*)$/i.test(url)) {
-      return '<a href="' + url + '" target="_blank" rel="noopener noreferrer" class="underline">' + label + '</a>';
-    }
-    return label + ' (' + url + ')';
-  });
+  s = formatInline(s);
+  for (var i = 0; i < placeholders.length; i++) {
+    s = s.split(sentinel + i + '@@').join(placeholders[i]);
+  }
   return s;
 };
 </script>
@@ -30,18 +53,48 @@ window.__formatMarkdown = function(text) {
     isEscalated: false,
     input: '',
     loading: false,
+    cartItemsCount: {{ cart_items_count|default:0 }},
+    abortController: null,
     messages: [],
+    getCsrfToken() {
+      let token = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+      if (!token) {
+        const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+        if (match) token = decodeURIComponent(match[1]);
+      }
+      return token;
+    },
+    abortActiveStream() {
+      if (this.abortController) {
+        this.abortController.abort();
+        this.abortController = null;
+      }
+      this.loading = false;
+    },
+    closeChat() {
+      this.abortActiveStream();
+      this.open = false;
+    },
     async init() {
       const welcomeMsg = {
         role: 'assistant',
-        content: 'Вітаю! Я інтелектуальний помічник Double Bite на базі Mistral AI. Допоможу обрати авторські ресторанні страви, врахувати індивідуальні вподобання чи алергени, або дізнатися деталі щодо доставки.'
+        sender: 'ai',
+        content: 'Вітаю! Я інтелектуальний помічник Double Bite на базі Mistral AI. Допоможу обрати авторські ресторанні страви, врахувати індивідуальні вподобання чи алергени, або дізнатися деталі щодо доставки.',
+        error: '',
+        cartUpdated: false
       };
       try {
         const res = await fetch('/support/chat/history/');
         if (res.ok) {
           const data = await res.json();
           if (data.messages && data.messages.length > 0) {
-            this.messages = data.messages.map(m => ({ role: m.role, content: m.content }));
+            this.messages = data.messages.map(m => ({
+              role: m.role,
+              sender: m.sender || (m.role === 'user' ? 'user' : (m.role === 'operator' ? 'operator' : (m.role === 'system' ? 'system' : 'ai'))),
+              content: m.content,
+              error: '',
+              cartUpdated: false
+            }));
           } else {
             this.messages = [welcomeMsg];
           }
@@ -56,13 +109,14 @@ window.__formatMarkdown = function(text) {
       }
     },
     sendQuick(text) {
+      if (this.isEscalated || this.loading) return;
       this.input = text;
       this.sendMessage();
     },
     async resetChat() {
-      if (this.loading) return;
+      this.abortActiveStream();
       try {
-        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+        const csrfToken = this.getCsrfToken();
         const res = await fetch('/support/chat/reset/', {
           method: 'POST',
           headers: {
@@ -75,7 +129,10 @@ window.__formatMarkdown = function(text) {
           this.messages = [
             {
               role: 'assistant',
-              content: 'Контекст діалогу очищено. Чим я можу вам допомогти сьогодні?'
+              sender: 'ai',
+              content: 'Контекст діалогу очищено. Чим я можу вам допомогти сьогодні?',
+              error: '',
+              cartUpdated: false
             }
           ];
         }
@@ -83,8 +140,11 @@ window.__formatMarkdown = function(text) {
     },
     async sendMessage() {
       const query = this.input.trim();
-      if (!query || this.loading) return;
-      this.messages.push({ role: 'user', content: query });
+      if (!query || this.isEscalated) return;
+      this.abortActiveStream();
+      const controller = new AbortController();
+      this.abortController = controller;
+      this.messages.push({ role: 'user', sender: 'user', content: query, error: '', cartUpdated: false });
       this.input = '';
       this.loading = true;
       this.$nextTick(() => {
@@ -92,24 +152,57 @@ window.__formatMarkdown = function(text) {
         if (c) c.scrollTop = c.scrollHeight;
       });
 
+      let cartMutated = false;
       try {
-        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+        const csrfToken = this.getCsrfToken();
         const res = await fetch('/support/chat/stream/', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'X-CSRFToken': csrfToken
           },
-          body: JSON.stringify({ message: query })
+          body: JSON.stringify({ message: query }),
+          signal: controller.signal
         });
 
         if (res.ok && res.body) {
           const reader = res.body.getReader();
           const decoder = new TextDecoder();
-          let assistantMsg = { role: 'assistant', content: '' };
-          this.messages.push(assistantMsg);
-          assistantMsg = this.messages[this.messages.length - 1];
-          this.loading = false;
+          this.messages.push({
+            role: 'assistant',
+            sender: 'ai',
+            content: '',
+            error: '',
+            cartUpdated: false
+          });
+          const assistantMsg = this.messages[this.messages.length - 1];
+
+          const processEventLine = (trimmed) => {
+            if (!trimmed.startsWith('data: ')) return;
+            try {
+              const data = JSON.parse(trimmed.slice(6));
+              if (data.token) {
+                assistantMsg.content += data.token;
+              }
+              if (data.escalated) {
+                this.isEscalated = true;
+              }
+              if (data.cart_mutation) {
+                cartMutated = true;
+                assistantMsg.cartUpdated = true;
+                if (typeof data.cart_items_count === 'number') {
+                  this.cartItemsCount = data.cart_items_count;
+                  const badge = document.getElementById('cart-badge');
+                  if (badge) badge.textContent = String(data.cart_items_count);
+                  const mobileBadge = document.getElementById('cart-badge-mobile');
+                  if (mobileBadge) mobileBadge.textContent = String(data.cart_items_count);
+                }
+              }
+              if (data.error) {
+                assistantMsg.error = data.error;
+              }
+            } catch (err) {}
+          };
 
           let buffer = '';
           while (true) {
@@ -120,55 +213,69 @@ window.__formatMarkdown = function(text) {
             buffer = lines.pop() || '';
 
             for (const line of lines) {
-              const trimmed = line.trim();
-              if (trimmed.startsWith('data: ')) {
-                try {
-                  const data = JSON.parse(trimmed.slice(6));
-                  if (data.token) {
-                    assistantMsg.content += data.token;
-                  }
-                  if (data.escalated) {
-                    this.isEscalated = true;
-                  }
-                  if (data.cart_mutation) {
-                    if (window.htmx) {
-                      htmx.ajax('GET', '/cart/badge/', { target: '#cart-badge', swap: 'outerHTML' });
-                    }
-                    window.dispatchEvent(new CustomEvent('open-cart-drawer'));
-                    this.hiddenByModal = true;
-                    this.open = false;
-                  }
-                  if (data.error) {
-                    assistantMsg.content = data.error;
-                  }
-                } catch (err) {}
-              }
+              processEventLine(line.trim());
             }
             this.$nextTick(() => {
               const c = this.$refs.msgContainer;
               if (c) c.scrollTop = c.scrollHeight;
             });
           }
+
+          const remaining = (buffer + decoder.decode()).trim();
+          if (remaining) {
+            processEventLine(remaining);
+          }
         } else {
-          this.loading = false;
           let errMsg = 'Вибачте, виникла помилка під час формування відповіді. Спробуйте пізніше.';
+          let errData = null;
           try {
-            const errData = await res.json();
-            if (errData.error) errMsg = errData.error;
-          } catch(e) {}
-          this.messages.push({ role: 'assistant', content: errMsg });
+            errData = await res.json();
+            if (errData && errData.error) errMsg = errData.error;
+          } catch (e) {}
+
+          if (res.status === 409 && errData && errData.is_escalated) {
+            this.isEscalated = true;
+            this.messages.push({
+              role: 'system',
+              sender: 'system',
+              content: errMsg,
+              error: '',
+              cartUpdated: false
+            });
+          } else {
+            this.messages.push({
+              role: 'assistant',
+              sender: 'ai',
+              content: '',
+              error: errMsg,
+              cartUpdated: false
+            });
+          }
         }
       } catch (e) {
-        this.loading = false;
+        if (e && e.name === 'AbortError') {
+          return;
+        }
         this.messages.push({
           role: 'assistant',
-          content: 'Вибачте, асистент тимчасово недоступний. Будь ласка, зверніться за номером: {{ restaurant_hotline|default:'+380 44 123 45 67'|escapejs }}.'
+          sender: 'ai',
+          content: '',
+          error: 'Вибачте, асистент тимчасово недоступний. Будь ласка, зверніться за номером: {{ restaurant_hotline|default:'+380 44 123 45 67'|escapejs }}.',
+          cartUpdated: false
+        });
+      } finally {
+        if (cartMutated && window.htmx) {
+          htmx.ajax('GET', '{% url 'orders:cart_badge' %}', { target: '#cart-badge', swap: 'outerHTML' });
+        }
+        if (this.abortController === controller) {
+          this.abortController = null;
+          this.loading = false;
+        }
+        this.$nextTick(() => {
+          const c = this.$refs.msgContainer;
+          if (c) c.scrollTop = c.scrollHeight;
         });
       }
-      this.$nextTick(() => {
-        const c = this.$refs.msgContainer;
-        if (c) c.scrollTop = c.scrollHeight;
-      });
     }
   }"
   @open-cart-drawer.window="hiddenByModal = true; open = false"
@@ -189,7 +296,7 @@ window.__formatMarkdown = function(text) {
     x-transition:leave="transition ease-in duration-100"
     x-transition:leave-start="opacity-100 scale-100"
     x-transition:leave-end="opacity-0 scale-90"
-    @click="hiddenByModal = false; open = !open"
+    @click="hiddenByModal = false; open = !open; if (!open) abortActiveStream();"
     class="fixed bottom-6 right-6 z-40 bg-fv-noir text-white hover:bg-black font-mono text-xs uppercase px-4 py-3.5 border border-fv-noir shadow-2xl flex items-center gap-2.5 transition-all cursor-pointer rounded-none"
     title="AI Консьєрж підтримки"
   >
@@ -223,38 +330,52 @@ window.__formatMarkdown = function(text) {
         <button @click="resetChat()" title="Почати новий діалог" class="text-[10px] font-mono uppercase px-2 py-1 bg-fv-offwhite hover:bg-fv-lightgray text-fv-noir border border-fv-noir/10 transition-colors">
           Новий діалог
         </button>
-        <button @click="open = false" class="p-1 text-fv-slate hover:text-fv-noir transition-colors text-base font-mono">
+        <button @click="closeChat()" class="p-1 text-fv-slate hover:text-fv-noir transition-colors text-base font-mono">
           ✕
         </button>
       </div>
     </div>
 
     <div class="px-4 py-2 bg-fv-offwhite border-b border-fv-noir/10 flex flex-wrap gap-1.5">
-      <button @click="sendQuick('Що порадиш на вечерю?')" class="text-[10px] font-mono uppercase px-2 py-0.5 bg-white border border-fv-noir/10 text-fv-noir hover:border-fv-noir transition-colors">
+      <button @click="sendQuick('Що порадиш на вечерю?')" :disabled="isEscalated || loading" class="text-[10px] font-mono uppercase px-2 py-0.5 bg-white border border-fv-noir/10 text-fv-noir hover:border-fv-noir transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
         Вечеря
       </button>
-      <button @click="sendQuick('Які є веганські страви?')" class="text-[10px] font-mono uppercase px-2 py-0.5 bg-white border border-fv-noir/10 text-fv-noir hover:border-fv-noir transition-colors">
+      <button @click="sendQuick('Які є веганські страви?')" :disabled="isEscalated || loading" class="text-[10px] font-mono uppercase px-2 py-0.5 bg-white border border-fv-noir/10 text-fv-noir hover:border-fv-noir transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
         Веган
       </button>
-      <button @click="sendQuick('Який час та вартість доставки?')" class="text-[10px] font-mono uppercase px-2 py-0.5 bg-white border border-fv-noir/10 text-fv-noir hover:border-fv-noir transition-colors">
+      <button @click="sendQuick('Який час та вартість доставки?')" :disabled="isEscalated || loading" class="text-[10px] font-mono uppercase px-2 py-0.5 bg-white border border-fv-noir/10 text-fv-noir hover:border-fv-noir transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
         Доставка
       </button>
     </div>
 
     <div x-ref="msgContainer" data-lenis-prevent class="flex-1 min-h-0 p-4 overflow-y-auto space-y-3 bg-white">
       <template x-for="(msg, index) in messages" :key="index">
-        <div :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+        <div :class="msg.sender === 'user' ? 'flex justify-end' : 'flex justify-start'">
           <div
-            :class="msg.role === 'user'
+            :class="msg.sender === 'user'
               ? 'bg-fv-noir text-white p-3 text-xs font-sans max-w-[85%] rounded-none'
-              : 'bg-fv-offwhite text-fv-noir border border-fv-noir/10 p-3 text-xs font-sans max-w-[85%] rounded-none leading-relaxed'"
+              : (msg.sender === 'system'
+                ? 'bg-amber-50 text-amber-900 border border-amber-300 p-3 text-xs font-sans max-w-[85%] rounded-none leading-relaxed'
+                : (msg.sender === 'operator'
+                  ? 'bg-emerald-50 text-fv-noir border border-emerald-300 p-3 text-xs font-sans max-w-[85%] rounded-none leading-relaxed'
+                  : 'bg-fv-offwhite text-fv-noir border border-fv-noir/10 p-3 text-xs font-sans max-w-[85%] rounded-none leading-relaxed'))"
           >
             <div
-              :class="msg.role === 'user' ? 'text-white/50 text-right' : 'text-fv-slate text-left'"
+              :class="msg.sender === 'user' ? 'text-white/50 text-right' : 'text-fv-slate text-left'"
               class="text-[9px] font-mono uppercase tracking-wider mb-1"
-              x-text="msg.role === 'user' ? 'Ви' : (isEscalated ? 'Адміністратор ресторану' : 'Double Bite Concierge')"
+              x-text="msg.sender === 'user' ? 'Ви' : (msg.sender === 'operator' ? 'Адміністратор ресторану' : (msg.sender === 'system' ? 'Система' : 'Double Bite Concierge'))"
             ></div>
-            <div class="whitespace-pre-wrap" x-effect="$el.innerHTML = window.__formatMarkdown(msg.content)"></div>
+            <div x-show="msg.content" class="whitespace-pre-wrap" x-effect="$el.innerHTML = window.__formatMarkdown(msg.content)"></div>
+            <div x-show="msg.error" :class="msg.content ? 'mt-2' : ''" class="p-2 bg-red-50 border border-red-200 text-red-800 text-[11px] font-mono whitespace-pre-wrap" x-text="msg.error"></div>
+            <div x-show="msg.cartUpdated" class="mt-2 pt-2 border-t border-fv-noir/10">
+              <button
+                type="button"
+                @click="window.dispatchEvent(new CustomEvent('open-cart-drawer'))"
+                class="text-[10px] font-mono uppercase tracking-wider px-2.5 py-1 bg-fv-noir text-white hover:bg-black transition-colors cursor-pointer rounded-none"
+              >
+                Відкрити кошик
+              </button>
+            </div>
           </div>
         </div>
       </template>
@@ -268,12 +389,14 @@ window.__formatMarkdown = function(text) {
       <input
         type="text"
         x-model="input"
+        :disabled="isEscalated || loading"
         placeholder="Запитайте про страви чи доставку..."
-        class="flex-1 px-3 py-2 text-xs font-mono bg-white border border-fv-noir/20 text-fv-noir placeholder:text-fv-slate focus:outline-none focus:border-fv-noir rounded-none"
+        class="flex-1 px-3 py-2 text-xs font-mono bg-white border border-fv-noir/20 text-fv-noir placeholder:text-fv-slate focus:outline-none focus:border-fv-noir rounded-none disabled:bg-fv-offwhite disabled:cursor-not-allowed"
       >
       <button
         type="submit"
-        class="px-4 py-2 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors rounded-none whitespace-nowrap"
+        :disabled="isEscalated || loading"
+        class="px-4 py-2 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors rounded-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
       >
         Надіслати
       </button>

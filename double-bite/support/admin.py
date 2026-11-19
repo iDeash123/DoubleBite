@@ -1,9 +1,11 @@
 from django.contrib import admin
+from django.db import transaction
 from django.utils import timezone
 
 from support.models import (
     ChatMessage,
     ChatSession,
+    ChatSessionStatus,
     FAQKnowledge,
     SupportTicket,
     TicketStatus,
@@ -31,7 +33,7 @@ class ChatSessionAdmin(admin.ModelAdmin):
     search_fields = ('session_uuid', 'user__email', 'escalation_reason')
     list_select_related = ('user',)
     readonly_fields = ('session_uuid', 'created_at', 'updated_at')
-    exclude = ('session_key',)
+    exclude = ('guest_token',)
     inlines = (ChatMessageInline,)
 
 
@@ -44,6 +46,7 @@ class ChatMessageAdmin(admin.ModelAdmin):
 
     def content_snippet(self, obj: ChatMessage) -> str:
         return obj.content[:50] + '...' if len(obj.content) > 50 else obj.content
+
     content_snippet.short_description = 'Вміст'
 
 
@@ -76,7 +79,29 @@ class SupportTicketAdmin(admin.ModelAdmin):
 
     @admin.action(description='Позначити обрані тікети як "Вирішено"')
     def mark_resolved(self, request, queryset):
-        queryset.update(status=TicketStatus.RESOLVED, resolved_at=timezone.now())
+        now = timezone.now()
+        with transaction.atomic():
+            session_ids = list(
+                queryset.values_list('session_id', flat=True).distinct()
+            )
+            queryset.update(status=TicketStatus.RESOLVED, resolved_at=now)
+            if session_ids:
+                list(ChatSession.objects.select_for_update().filter(pk__in=session_ids))
+                open_session_ids = set(
+                    SupportTicket.objects.filter(
+                        session_id__in=session_ids,
+                        status__in=[TicketStatus.OPEN, TicketStatus.IN_PROGRESS],
+                    ).values_list('session_id', flat=True)
+                )
+                sessions_to_resolve = [
+                    sid for sid in session_ids if sid not in open_session_ids
+                ]
+                if sessions_to_resolve:
+                    ChatSession.objects.filter(pk__in=sessions_to_resolve).update(
+                        is_escalated=False,
+                        status=ChatSessionStatus.RESOLVED,
+                        updated_at=now,
+                    )
 
 
 @admin.register(FAQKnowledge)

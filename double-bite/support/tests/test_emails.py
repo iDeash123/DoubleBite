@@ -4,11 +4,18 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.cache import cache
-from django.test import RequestFactory, TestCase
+from django.db import transaction
+from django.test import RequestFactory, TestCase, override_settings
 from orders.models import Order
 
 from support.agent.tools import execute_agent_tool
-from support.models import ChatMessage, ChatSession, TicketReason
+from support.models import (
+    ChatMessage,
+    ChatSession,
+    MessageRole,
+    SupportTicket,
+    TicketReason,
+)
 from support.services import ChatSessionService
 
 User = get_user_model()
@@ -38,13 +45,14 @@ class TicketEscalationEmailTests(TestCase):
         mail.outbox.clear()
 
     def test_escalate_session_sends_admin_escalation_email(self):
-        ticket = ChatSessionService.escalate_session(
-            session=self.session,
-            reason=TicketReason.COMPLAINT,
-            details='Страва приїхала холодна',
-            order=self.order,
-            customer_phone='+380509876543',
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            ticket = ChatSessionService.escalate_session(
+                session=self.session,
+                reason=TicketReason.COMPLAINT,
+                details='Страва приїхала холодна',
+                order=self.order,
+                customer_phone='+380509876543',
+            )
 
         self.assertEqual(len(mail.outbox), 1)
         sent = mail.outbox[0]
@@ -68,18 +76,19 @@ class TicketEscalationEmailTests(TestCase):
     def test_escalate_to_operator_tool_triggers_admin_email(self):
         request = self.factory.get('/support/chat/stream/')
         request.user = self.user
-        request.session = {'session_key': 'tool-session-key'}
+        request.session = {}
 
-        result = execute_agent_tool(
-            'escalate_to_operator',
-            {
-                'reason': TicketReason.HUMAN_REQUESTED,
-                'details': 'Клієнт вимагає зв\'язатися з менеджером ресторану',
-                'order_id': self.order.id,
-            },
-            request=request,
-            session=self.session,
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            result = execute_agent_tool(
+                'escalate_to_operator',
+                {
+                    'reason': TicketReason.HUMAN_REQUESTED,
+                    'details': "Клієнт вимагає зв'язатися з менеджером ресторану",
+                    'order_id': self.order.id,
+                },
+                request=request,
+                session=self.session,
+            )
 
         self.assertIsNotNone(result.get('ticket_id'))
         self.assertEqual(len(mail.outbox), 1)
@@ -89,16 +98,17 @@ class TicketEscalationEmailTests(TestCase):
 
     def test_guest_session_escalation_email(self):
         guest_session = ChatSession.objects.create(
-            session_key='guest-sess-abc',
+            guest_token='guest-sess-abc',
         )
         mail.outbox.clear()
 
-        ticket = ChatSessionService.escalate_session(
-            session=guest_session,
-            reason=TicketReason.HUMAN_REQUESTED,
-            details='Запит від неавторизованого клієнта',
-            customer_phone='+380671112233',
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            ticket = ChatSessionService.escalate_session(
+                session=guest_session,
+                reason=TicketReason.HUMAN_REQUESTED,
+                details='Запит від неавторизованого клієнта',
+                customer_phone='+380671112233',
+            )
 
         self.assertEqual(len(mail.outbox), 1)
         sent = mail.outbox[0]
@@ -109,28 +119,35 @@ class TicketEscalationEmailTests(TestCase):
     def test_escalation_email_includes_dialogue_excerpt(self):
         ChatMessage.objects.create(
             session=self.session,
-            role='user',
+            role=MessageRole.USER,
             content='Де моє замовлення?',
         )
         ChatMessage.objects.create(
             session=self.session,
-            role='assistant',
+            role=MessageRole.ASSISTANT,
             content='Зараз перевірю стан доставки.',
+        )
+        ChatMessage.objects.create(
+            session=self.session,
+            role=MessageRole.OPERATOR,
+            content='Підключився до звернення.',
         )
         mail.outbox.clear()
 
-        ChatSessionService.escalate_session(
-            session=self.session,
-            reason=TicketReason.ORDER_ISSUE,
-            details='Затримка кур\'єра на 20 хвилин',
-            order=self.order,
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            ChatSessionService.escalate_session(
+                session=self.session,
+                reason=TicketReason.ORDER_ISSUE,
+                details="Затримка кур'єра на 20 хвилин",
+                order=self.order,
+            )
 
         self.assertEqual(len(mail.outbox), 1)
         sent = mail.outbox[0]
         self.assertIn('Витяг з діалогу', sent.body)
         self.assertIn('Де моє замовлення?', sent.body)
         self.assertIn('Зараз перевірю стан доставки.', sent.body)
+        self.assertIn('Підключився до звернення.', sent.body)
         self.assertEqual(len(sent.alternatives), 1)
         html = sent.alternatives[0][0]
         self.assertIn('#F4F1EB', html)
@@ -147,14 +164,60 @@ class TicketEscalationEmailTests(TestCase):
         session = ChatSession.objects.create(user=user_no_contact)
         mail.outbox.clear()
 
-        ticket = ChatSessionService.escalate_session(
-            session=session,
-            reason=TicketReason.BOT_CONFUSED,
-            details='Бот не зміг розпізнати запит',
-            customer_phone='',
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            ticket = ChatSessionService.escalate_session(
+                session=session,
+                reason=TicketReason.BOT_CONFUSED,
+                details='Бот не зміг розпізнати запит',
+                customer_phone='',
+            )
 
         self.assertEqual(len(mail.outbox), 1)
         sent = mail.outbox[0]
         self.assertIn(f'#{ticket.id}', sent.body)
         self.assertIn('Не вказано', sent.body)
+
+    def test_escalate_session_rolled_back_transaction_sends_no_email(self):
+        mail.outbox.clear()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            try:
+                with transaction.atomic():
+                    ChatSessionService.escalate_session(
+                        session=self.session,
+                        reason=TicketReason.COMPLAINT,
+                        details='Тимчасова помилка транзакції',
+                        order=self.order,
+                    )
+                    raise RuntimeError('Simulated rollback')
+            except RuntimeError:
+                pass
+
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertEqual(SupportTicket.objects.filter(session=self.session).count(), 0)
+        self.session.refresh_from_db()
+        self.assertFalse(self.session.is_escalated)
+
+    @override_settings(
+        SITE_PROTOCOL='https',
+        SITE_DOMAIN='order.doublebite.ua',
+        DJANGO_ADMIN_URL='staff-panel/',
+    )
+    def test_escalation_email_uses_site_settings_and_admin_url_fallback(self):
+        from unittest.mock import patch
+
+        from django.urls import NoReverseMatch
+
+        from support.emails import get_admin_ticket_url
+
+        dummy_ticket = type('T', (), {'id': 42})()
+        normal_url = get_admin_ticket_url(dummy_ticket)
+        self.assertTrue(normal_url.startswith('https://order.doublebite.ua/'))
+        self.assertIn('/support/supportticket/42/change/', normal_url)
+
+        with patch('support.emails.reverse', side_effect=NoReverseMatch('missing')):
+            fallback_url = get_admin_ticket_url(dummy_ticket)
+        self.assertEqual(
+            fallback_url,
+            'https://order.doublebite.ua/staff-panel/support/supportticket/42/change/',
+        )

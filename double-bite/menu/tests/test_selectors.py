@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.test import TestCase
+from support.vector_search import generate_mock_embedding
 
 from menu.models import Category, Dish, DishOption
 from menu.selectors import (
@@ -174,6 +175,49 @@ class MenuSelectorsTest(TestCase):
         self.assertIn('price', first)
         self.assertIn('options', first)
         self.assertTrue(len(first['options']) >= 1)
+
+    def test_search_dishes_for_agent_sql_filter_before_limit_and_cutoff(self):
+        high_sim_vec = generate_mock_embedding('трюфельна неаполітанська паста')
+        for idx in range(5):
+            Dish.objects.create(
+                category=self.cat_pizza,
+                title=f'Трюфельна Стейк Піца {idx}',
+                slug=f'truffle-steak-{idx}',
+                description='трюфельна неаполітанська паста',
+                price=Decimal('490.00'),
+                weight_grams=480,
+                calories=920,
+                is_vegetarian=False,
+                is_available=True,
+                embedding=high_sim_vec,
+            )
+
+        veg_match = Dish.objects.create(
+            category=self.cat_pizza,
+            title='Легка Веганська Паста',
+            slug='light-veg-pasta',
+            description='ніжна паста з зеленню',
+            price=Decimal('195.00'),
+            weight_grams=320,
+            calories=420,
+            is_vegetarian=True,
+            is_available=True,
+            embedding=generate_mock_embedding('паста зелень томати'),
+        )
+
+        results = search_dishes_for_agent(
+            query='трюфельна неаполітанська паста',
+            max_price=Decimal('250.00'),
+            is_vegetarian=True,
+            limit=2,
+        )
+        self.assertEqual([item['id'] for item in results], [veg_match.id])
+
+        unrelated = search_dishes_for_agent(
+            query='абсолютно неіснуючий трактор космос',
+            limit=5,
+        )
+        self.assertEqual(unrelated, [])
 
     def test_filter_dishes_exclude_allergens_cyrillic_case_insensitive(self):
         dish_nuts_titlecase = Dish.objects.create(

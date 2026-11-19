@@ -512,34 +512,36 @@ def search_dishes_for_agent(
     max_price: Decimal | float | None = None,
     is_vegetarian: bool | None = None,
     max_calories: int | None = None,
+    limit: int = 10,
 ) -> list[dict[str, Any]]:
-    dishes = list(filter_dishes(
-        category_slug=category_slug,
-        query=query,
-        max_price=max_price,
-        is_vegetarian=is_vegetarian,
-        max_calories=max_calories,
-        only_available=True,
-        prefetch_options=True,
-    ).order_by('id')[:10])
+    if limit <= 0:
+        return []
+
+    dishes = list(
+        filter_dishes(
+            category_slug=category_slug,
+            query=query,
+            max_price=max_price,
+            is_vegetarian=is_vegetarian,
+            max_calories=max_calories,
+            only_available=True,
+            prefetch_options=True,
+        ).order_by('id')[:limit]
+    )
 
     if not dishes and query:
         try:
             from support.vector_search import search_dishes_semantic
 
-            semantic_dishes = search_dishes_semantic(
+            dishes = search_dishes_semantic(
                 query=query,
-                limit=10,
+                limit=limit,
                 category_slug=category_slug,
                 only_available=True,
+                max_price=max_price,
+                is_vegetarian=is_vegetarian,
+                max_calories=max_calories,
             )
-            if max_price is not None:
-                semantic_dishes = [d for d in semantic_dishes if d.price <= Decimal(str(max_price))]
-            if is_vegetarian is not None:
-                semantic_dishes = [d for d in semantic_dishes if d.is_vegetarian == is_vegetarian]
-            if max_calories is not None:
-                semantic_dishes = [d for d in semantic_dishes if d.calories <= max_calories]
-            dishes = semantic_dishes[:10]
         except (
             ImportError,
             DatabaseError,
@@ -552,7 +554,7 @@ def search_dishes_for_agent(
             logger.warning('Semantic dish search failed for query %r: %s', query, exc)
 
     results: list[dict[str, Any]] = []
-    for dish in dishes[:10]:
+    for dish in dishes[:limit]:
         options = [
             {'name': opt.name, 'price_delta': float(opt.price_delta)}
             for opt in dish.options.all()

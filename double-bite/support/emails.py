@@ -2,18 +2,24 @@ from typing import Any
 
 from config.emails import resolve_site_domain, resolve_site_protocol, send_templated_email
 from django.conf import settings
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
+
+from support.models import MessageRole
 
 
-def get_admin_ticket_url(ticket: Any, domain: str | None = None, protocol: str | None = None) -> str:
+def get_admin_ticket_url(
+    ticket: Any,
+    domain: str | None = None,
+    protocol: str | None = None,
+) -> str:
     try:
         path = reverse('admin:support_supportticket_change', args=[ticket.id])
-    except Exception:
+    except NoReverseMatch:
         admin_prefix = getattr(settings, 'DJANGO_ADMIN_URL', 'admin/').strip('/')
         path = f'/{admin_prefix}/support/supportticket/{ticket.id}/change/'
     effective_domain = resolve_site_domain(domain)
     effective_protocol = resolve_site_protocol(protocol)
-    return f"{effective_protocol}://{effective_domain}{path}"
+    return f'{effective_protocol}://{effective_domain}{path}'
 
 
 def send_ticket_escalated_email(
@@ -30,19 +36,37 @@ def send_ticket_escalated_email(
     customer_email = 'Не вказано'
     if getattr(ticket, 'session', None) and getattr(ticket.session, 'user', None):
         user = ticket.session.user
-        customer_name = getattr(user, 'first_name', '') or getattr(user, 'username', '') or getattr(user, 'email', '') or 'Гість'
+        customer_name = (
+            getattr(user, 'first_name', '')
+            or getattr(user, 'username', '')
+            or getattr(user, 'email', '')
+            or 'Гість'
+        )
         customer_email = getattr(user, 'email', None) or 'Не вказано'
 
     effective_domain = resolve_site_domain(domain)
     effective_protocol = resolve_site_protocol(protocol)
-    admin_ticket_url = get_admin_ticket_url(ticket, domain=effective_domain, protocol=effective_protocol)
-    reason_display = ticket.get_reason_display() if hasattr(ticket, 'get_reason_display') else ticket.reason
+    admin_ticket_url = get_admin_ticket_url(
+        ticket,
+        domain=effective_domain,
+        protocol=effective_protocol,
+    )
+    reason_display = (
+        ticket.get_reason_display()
+        if hasattr(ticket, 'get_reason_display')
+        else ticket.reason
+    )
 
     recent_messages = []
     if getattr(ticket, 'session', None) and hasattr(ticket.session, 'messages'):
         recent_messages = list(
-            ticket.session.messages.filter(role__in=['user', 'assistant'])
-            .order_by('-created_at')[:6]
+            ticket.session.messages.filter(
+                role__in=[
+                    MessageRole.USER,
+                    MessageRole.ASSISTANT,
+                    MessageRole.OPERATOR,
+                ]
+            ).order_by('-created_at', '-id')[:6]
         )
         recent_messages.reverse()
 
@@ -56,7 +80,9 @@ def send_ticket_escalated_email(
         'domain': effective_domain,
     }
     return send_templated_email(
-        subject=f'Double Bite: [ТЕРМІНОВО] Ескалація тікету #{ticket.id} — {reason_display}',
+        subject=(
+            f'Double Bite: [ТЕРМІНОВО] Ескалація тікету #{ticket.id} — {reason_display}'
+        ),
         template_prefix='emails/ticket_escalated',
         context=context,
         recipient_list=[admin_email],

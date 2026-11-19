@@ -2,6 +2,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 
 class ChatSessionStatus(models.TextChoices):
@@ -13,6 +14,7 @@ class ChatSessionStatus(models.TextChoices):
 class MessageRole(models.TextChoices):
     USER = 'user', 'Користувач'
     ASSISTANT = 'assistant', 'Асистент'
+    OPERATOR = 'operator', 'Оператор'
     TOOL = 'tool', 'Інструмент'
     SYSTEM = 'system', 'Система'
 
@@ -46,10 +48,11 @@ class ChatSession(models.Model):
         db_index=True,
         verbose_name='Користувач',
     )
-    session_key = models.CharField(
-        'Ключ сесії гостя',
-        max_length=40,
+    guest_token = models.CharField(
+        'Токен гостя',
+        max_length=64,
         blank=True,
+        default='',
         db_index=True,
     )
     status = models.CharField(
@@ -75,10 +78,38 @@ class ChatSession(models.Model):
         verbose_name = 'Сесія чату'
         verbose_name_plural = 'Сесії чату'
         ordering = ('-created_at',)
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user'],
+                condition=Q(
+                    user__isnull=False,
+                    status__in=[
+                        ChatSessionStatus.ACTIVE,
+                        ChatSessionStatus.ESCALATED,
+                    ],
+                ),
+                name='unique_active_chat_session_per_user',
+            ),
+            models.UniqueConstraint(
+                fields=['guest_token'],
+                condition=(
+                    Q(
+                        user__isnull=True,
+                        status__in=[
+                            ChatSessionStatus.ACTIVE,
+                            ChatSessionStatus.ESCALATED,
+                        ],
+                    )
+                    & ~Q(guest_token='')
+                ),
+                name='unique_active_guest_chat_session_per_token',
+            ),
+        ]
 
     def __str__(self) -> str:
-        owner = self.user.email if self.user else f"Гість ({self.session_key[:8] if self.session_key else 'anon'})"
-        return f"Чат {self.session_uuid} — {owner} [{self.status}]"
+        token_preview = self.guest_token[:8] if self.guest_token else 'anon'
+        owner = self.user.email if self.user else f'Гість ({token_preview})'
+        return f'Чат {self.session_uuid} — {owner} [{self.status}]'
 
 
 class ChatMessage(models.Model):
@@ -107,7 +138,7 @@ class ChatMessage(models.Model):
     class Meta:
         verbose_name = 'Повідомлення чату'
         verbose_name_plural = 'Повідомлення чату'
-        ordering = ('created_at',)
+        ordering = ('created_at', 'id')
 
     def __str__(self) -> str:
         return f"[{self.role}] {self.content[:40]}..."
@@ -160,6 +191,18 @@ class SupportTicket(models.Model):
         verbose_name = 'Тікет підтримки'
         verbose_name_plural = 'Тікети підтримки'
         ordering = ('-created_at',)
+        constraints = [
+            models.UniqueConstraint(
+                fields=['session'],
+                condition=Q(
+                    status__in=[
+                        TicketStatus.OPEN,
+                        TicketStatus.IN_PROGRESS,
+                    ],
+                ),
+                name='unique_open_ticket_per_session',
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"Тікет #{self.id or 0} [{self.get_reason_display()}] — {self.status}"

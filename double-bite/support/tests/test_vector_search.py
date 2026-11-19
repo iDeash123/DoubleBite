@@ -1,6 +1,9 @@
+import os
 from decimal import Decimal
+from unittest.mock import MagicMock, patch
 
 import pytest
+from django.test import override_settings
 from menu.models import Category, Dish
 from menu.selectors import search_dishes_for_agent
 
@@ -8,6 +11,8 @@ from support.vector_search import (
     EMBEDDING_DIM,
     cosine_similarity,
     generate_mock_embedding,
+    get_embedding,
+    get_embeddings_batch,
     search_dishes_semantic,
 )
 
@@ -150,3 +155,126 @@ def test_search_dishes_for_agent_with_semantic_fallback(sample_dishes_with_embed
     assert len(agent_results) > 0
     titles = [item['title'] for item in agent_results]
     assert dish1.title in titles
+
+
+def test_real_mode_defaults_off_mock_and_returns_none_on_failure():
+    env_clean = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ('TEST_USE_MOCK_EMBEDDING', 'MISTRAL_EMBEDDING_TIMEOUT_MS')
+    }
+    env_clean['MISTRAL_API_KEY'] = 'real-api-key'
+
+    mock_client = MagicMock()
+    mock_item = MagicMock()
+    mock_item.embedding = [0.25] * EMBEDDING_DIM
+    mock_resp = MagicMock()
+    mock_resp.data = [mock_item]
+    mock_client.embeddings.create.return_value = mock_resp
+
+    with (
+        override_settings(is_testing=False),
+        patch.dict(os.environ, env_clean, clear=True),
+        patch('support.vector_search.Mistral', return_value=mock_client) as mock_cls,
+    ):
+        vec = get_embedding('піца маргарита')
+
+    assert vec == [0.25] * EMBEDDING_DIM
+    mock_cls.assert_called_once_with(api_key='real-api-key', timeout_ms=15000)
+    mock_client.embeddings.create.assert_called_once_with(
+        model='mistral-embed',
+        inputs=['піца маргарита'],
+        timeout_ms=15000,
+    )
+
+    mock_client.embeddings.create.side_effect = TimeoutError('Mistral timed out')
+    with (
+        override_settings(is_testing=False),
+        patch.dict(os.environ, env_clean, clear=True),
+        patch('support.vector_search.Mistral', return_value=mock_client),
+    ):
+        failed_vec = get_embedding('піца маргарита', timeout_ms=5000)
+
+    assert failed_vec is None
+
+
+def test_real_mode_without_api_key_returns_none():
+    env_no_key = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ('TEST_USE_MOCK_EMBEDDING', 'MISTRAL_API_KEY')
+    }
+    with (
+        override_settings(is_testing=False, MISTRAL_API_KEY=''),
+        patch.dict(os.environ, env_no_key, clear=True),
+    ):
+        assert get_embedding('піца') is None
+        assert get_embeddings_batch(['піца', 'паста']) == [None, None]
+
+
+@pytest.mark.django_db
+def test_sql_filters_applied_before_limit_prevent_crowding_out(sample_category):
+    high_sim_vec = generate_mock_embedding('піца неаполітанська сир томати')
+    for idx in range(5):
+        Dish.objects.create(
+            category=sample_category,
+            title=f'Дорога Неаполітанська {idx}',
+            slug=f'expensive-neapolitan-{idx}',
+            description='піца неаполітанська сир томати',
+            price=Decimal('450.00'),
+            weight_grams=450,
+            calories=900,
+            is_vegetarian=False,
+            is_available=True,
+            embedding=high_sim_vec,
+        )
+
+    cheap_veg = Dish.objects.create(
+        category=sample_category,
+        title='Веганська Маргарита Бюджет',
+        slug='cheap-veg-margherita',
+        description='піца сир томати',
+        price=Decimal('190.00'),
+        weight_grams=380,
+        calories=550,
+        is_vegetarian=True,
+        is_available=True,
+        embedding=generate_mock_embedding('піца сир томати базилік'),
+    )
+
+    semantic_hits = search_dishes_semantic(
+        'піца неаполітанська сир томати',
+        limit=2,
+        max_price=Decimal('250.00'),
+        is_vegetarian=True,
+    )
+    assert [d.pk for d in semantic_hits] == [cheap_veg.pk]
+
+    agent_hits = search_dishes_for_agent(
+        query='піца неаполітанська сир томати',
+        max_price=Decimal('250.00'),
+        is_vegetarian=True,
+        limit=2,
+    )
+    assert [item['id'] for item in agent_hits] == [cheap_veg.id]
+
+
+@pytest.mark.django_db
+def test_relevance_cutoff_drops_unrelated_queries(sample_dishes_with_embeddings):
+    results = search_dishes_semantic('абсолютно неіснуючий трактор космос', limit=5)
+    assert results == []
+
+    agent_results = search_dishes_for_agent(
+        query='абсолютно неіснуючий трактор космос',
+        limit=5,
+    )
+    assert agent_results == []
+
+
+@pytest.mark.django_db
+def test_get_embeddings_batch_handles_blank_and_valid_texts():
+    vectors = get_embeddings_batch(['піца', '   ', 'суші'])
+    assert len(vectors) == 3
+    assert vectors[0] is not None and len(vectors[0]) == EMBEDDING_DIM
+    assert vectors[1] == [0.0] * EMBEDDING_DIM
+    assert vectors[2] is not None and len(vectors[2]) == EMBEDDING_DIM
