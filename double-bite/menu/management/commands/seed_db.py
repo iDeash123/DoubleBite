@@ -2276,14 +2276,34 @@ class Command(BaseCommand):
             or os.getenv('admin_mail')
             or 'admin@doublebite.com'
         )
-        is_dev_or_test = bool(settings.DEBUG or getattr(settings, 'is_testing', False))
+        is_testing_env = (
+            bool(settings.is_testing)
+            if hasattr(settings, 'is_testing')
+            else bool(getattr(settings, 'IS_TESTING', False))
+        )
+        is_dev_or_test = bool(settings.DEBUG or is_testing_env)
         admin_password = (
-            os.getenv('ADMIN_PASSWORD')
-            or os.getenv('admin_password')
+            (os.getenv('ADMIN_PASSWORD') or '').strip()
+            or (os.getenv('admin_password') or '').strip()
             or ('admin12345' if is_dev_or_test else '')
         )
         if not is_dev_or_test and not admin_password:
             raise CommandError("ADMIN_PASSWORD обов'язковий при DEBUG=False")
+
+        customer_password = (
+            (os.getenv('SEED_CUSTOMER_PASSWORD') or '').strip()
+            or ('customer12345' if is_dev_or_test else '')
+        )
+        courier_password = (
+            (os.getenv('SEED_COURIER_PASSWORD') or '').strip()
+            or ('courier12345' if is_dev_or_test else '')
+        )
+        if not options.get('clean_only') and not is_dev_or_test and (
+            not customer_password or not courier_password
+        ):
+            raise CommandError(
+                "SEED_CUSTOMER_PASSWORD та SEED_COURIER_PASSWORD обов'язкові при DEBUG=False"
+            )
 
         self.stdout.write(self.style.WARNING('Початок процесу очищення та заповнення бази даних...'))
 
@@ -2337,7 +2357,7 @@ class Command(BaseCommand):
             if not customer_user:
                 customer_user = User.objects.create_user(
                     email=customer_email,
-                    password='customer12345',
+                    password=customer_password,
                     first_name='Олена',
                     last_name='Коваленко',
                     phone='+380501234567',
@@ -2355,7 +2375,7 @@ class Command(BaseCommand):
             if not courier_user:
                 courier_user = User.objects.create_user(
                     email=courier_email,
-                    password='courier12345',
+                    password=courier_password,
                     first_name='Богдан',
                     last_name='Шевченко',
                     phone='+380671234567',

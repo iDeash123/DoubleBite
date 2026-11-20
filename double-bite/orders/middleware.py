@@ -2,8 +2,8 @@ import secrets
 
 from django.http import HttpRequest, HttpResponse
 
-GUEST_TOKEN_SESSION_KEY = 'guest_token'
-PRE_LOGIN_GUEST_TOKEN_SESSION_KEY = '_pre_login_guest_token'
+GUEST_TOKEN_SESSION_KEY = 'guest_token'  # noqa: S105 - Django session key name, not a secret
+PRE_LOGIN_GUEST_TOKEN_SESSION_KEY = '_pre_login_guest_token'  # noqa: S105 - Django session key name, not a secret
 
 
 def get_guest_token(request: HttpRequest, *, create: bool = False) -> str:

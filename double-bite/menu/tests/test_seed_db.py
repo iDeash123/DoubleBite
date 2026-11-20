@@ -247,3 +247,39 @@ class SeedDbCommandTests(TestCase):
         with patch.dict(os.environ, {'ADMIN_PASSWORD': '', 'admin_password': ''}):
             with self.assertRaises(CommandError):
                 call_command('seed_db', force=True, clean_only=True)
+
+    @override_settings(DEBUG=False, is_testing=False)
+    def test_seed_db_requires_demo_account_passwords_when_debug_false(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                'ADMIN_PASSWORD': 'ProdAdminPassword!123',
+                'SEED_CUSTOMER_PASSWORD': '',
+                'SEED_COURIER_PASSWORD': '',
+            },
+        ):
+            with self.assertRaises(CommandError):
+                call_command('seed_db', force=True, skip_images=True)
+
+        with patch.dict(
+            os.environ,
+            {
+                'ADMIN_PASSWORD': '   ',
+                'admin_password': '',
+                'SEED_CUSTOMER_PASSWORD': 'ValidCustomerPassword!123',
+                'SEED_COURIER_PASSWORD': 'ValidCourierPassword!123',
+            },
+        ):
+            with self.assertRaises(CommandError):
+                call_command('seed_db', force=True, clean_only=True)
+
+        with patch.dict(
+            os.environ,
+            {
+                'ADMIN_PASSWORD': 'ProdAdminPassword!123',
+                'SEED_CUSTOMER_PASSWORD': '   ',
+                'SEED_COURIER_PASSWORD': 'ValidCourierPassword!123',
+            },
+        ):
+            with self.assertRaises(CommandError):
+                call_command('seed_db', force=True, skip_images=True)

@@ -42,6 +42,7 @@ is_testing = (
     or (len(sys.argv) > 1 and sys.argv[1] == 'test')
     or env_bool('DJANGO_TESTING', False)
 )
+IS_TESTING = is_testing
 
 DJANGO_ADMIN_URL = normalize_admin_url(os.getenv('DJANGO_ADMIN_URL', 'admin/'))
 
@@ -58,7 +59,9 @@ if not is_testing and not DEBUG:
             'is required when DEBUG=False'
         )
 elif not SECRET_KEY:
-    SECRET_KEY = 'django-insecure-doublebite-dev-secret-key-change-in-production-2026!'
+    SECRET_KEY = (
+        'django-insecure-doublebite-dev-secret-key-change-in-production-2026!'  # noqa: S105 - dev/test fallback
+    )
 
 ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', '').split(',') if h.strip()]
 if not is_testing and not DEBUG:
@@ -215,20 +218,28 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-db_engine = os.getenv('DB_ENGINE', 'django.db.backends.sqlite3')
+use_postgres_for_tests = is_testing and env_bool('TEST_WITH_POSTGRES', False)
+db_engine = os.getenv('DB_ENGINE', '').strip()
 
-if is_testing and not os.getenv('TEST_WITH_POSTGRES'):
+if is_testing and not use_postgres_for_tests:
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': BASE_DIR / 'test_db.sqlite3',
         }
     }
-elif 'postgresql' in db_engine:
+elif use_postgres_for_tests or 'postgresql' in db_engine:
+    if use_postgres_for_tests and db_engine and 'postgresql' not in db_engine:
+        raise ImproperlyConfigured(
+            'PostgreSQL DB_ENGINE is required when TEST_WITH_POSTGRES=1'
+        )
+    resolved_engine = db_engine or 'django.db.backends.postgresql'
     db_name = os.getenv('DB_NAME', '').strip()
     db_user = os.getenv('DB_USER', '').strip()
     db_password = os.getenv('DB_PASSWORD', '').strip()
-    if not is_testing and (not db_name or not db_user or not db_password):
+    if (not is_testing or use_postgres_for_tests) and (
+        not db_name or not db_user or not db_password
+    ):
         raise ImproperlyConfigured(
             'DB_NAME, DB_USER, and DB_PASSWORD environment variables are required for PostgreSQL'
         )
@@ -241,7 +252,7 @@ elif 'postgresql' in db_engine:
         )
     DATABASES = {
         'default': {
-            'ENGINE': db_engine,
+            'ENGINE': resolved_engine,
             'NAME': db_name,
             'USER': db_user,
             'PASSWORD': db_password,
@@ -410,7 +421,8 @@ STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', '')
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', '')
 STRIPE_ORDER_SUCCESS_STATUS = env_str('STRIPE_ORDER_SUCCESS_STATUS', 'PAID')
 
-if is_testing:
+redis_url = os.getenv('REDIS_URL', '').strip()
+if is_testing and not env_bool('TEST_WITH_REDIS', False):
     CACHES = {
         'default': {
             'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
@@ -418,9 +430,10 @@ if is_testing:
         }
     }
 else:
-    redis_url = os.getenv('REDIS_URL', '').strip()
-    if not redis_url and not DEBUG:
+    if not redis_url and not DEBUG and not is_testing:
         raise ImproperlyConfigured('REDIS_URL environment variable is required when DEBUG=False')
+    if is_testing and not redis_url:
+        raise ImproperlyConfigured('REDIS_URL environment variable is required when TEST_WITH_REDIS=1')
     if redis_url:
         CACHES = {
             'default': {

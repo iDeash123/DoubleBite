@@ -13,7 +13,7 @@ from config.security import (
     get_client_ip,
     rate_limit_429_response,
 )
-from django.db import close_old_connections
+from django.db import close_old_connections, connections
 from django.http import (
     HttpRequest,
     HttpResponse,
@@ -39,8 +39,19 @@ _KIND_ERR = 1
 _KIND_DONE = 2
 
 
+def _close_non_atomic_connections() -> None:
+    if not any(conn.in_atomic_block for conn in connections.all(initialized_only=True)):
+        close_old_connections()
+
+
+def _close_thread_connections() -> None:
+    for conn in connections.all(initialized_only=True):
+        if not conn.in_atomic_block:
+            conn.close()
+
+
 def _save_message(session_uuid: Any, role: str, content: str) -> ChatMessage:
-    close_old_connections()
+    _close_non_atomic_connections()
     session = ChatSession.objects.get(session_uuid=session_uuid)
     return ChatMessage.objects.create(
         session=session,
@@ -87,7 +98,13 @@ def _iter_async_gen_new_loop(async_gen: AsyncGenerator[Any, None]) -> Iterator[A
             try:
                 loop.run_until_complete(loop.shutdown_asyncgens())
             finally:
-                loop.close()
+                try:
+                    loop.run_until_complete(
+                        sync_to_async(_close_non_atomic_connections, thread_sensitive=True)()
+                    )
+                finally:
+                    loop.close()
+                    _close_non_atomic_connections()
 
 
 def _iter_async_gen_threaded(async_gen: AsyncGenerator[Any, None]) -> Iterator[Any]:
@@ -120,7 +137,7 @@ def _iter_async_gen_threaded(async_gen: AsyncGenerator[Any, None]) -> Iterator[A
                         break
                     if stop_event.is_set() or not _put((_KIND_ITEM, item)):
                         break
-            except BaseException as exc:
+            except BaseException as exc:  # noqa: BLE001 - propagate any worker error to caller thread
                 if not stop_event.is_set():
                     _put((_KIND_ERR, exc))
             finally:
@@ -129,7 +146,7 @@ def _iter_async_gen_threaded(async_gen: AsyncGenerator[Any, None]) -> Iterator[A
                     aclose = getattr(async_gen, 'aclose', None)
                     if callable(aclose):
                         await aclose()
-                except BaseException as close_exc:
+                except BaseException as close_exc:  # noqa: BLE001 - propagate close failure to caller thread
                     if not stop_event.is_set() and finished_normally:
                         _put((_KIND_ERR, close_exc))
                         finished_normally = False
@@ -144,7 +161,13 @@ def _iter_async_gen_threaded(async_gen: AsyncGenerator[Any, None]) -> Iterator[A
             try:
                 loop.run_until_complete(loop.shutdown_asyncgens())
             finally:
-                loop.close()
+                try:
+                    loop.run_until_complete(
+                        sync_to_async(_close_non_atomic_connections, thread_sensitive=True)()
+                    )
+                finally:
+                    loop.close()
+                    _close_thread_connections()
 
     thread = threading.Thread(target=_worker, daemon=True)
     thread.start()
@@ -299,7 +322,12 @@ async def chat_stream_view(request: HttpRequest) -> HttpResponse:
             )
             yield f'data: {err_payload}\n\n'
         finally:
-            await _close_stream()
+            try:
+                await _close_stream()
+            finally:
+                await sync_to_async(
+                    _close_non_atomic_connections, thread_sensitive=True
+                )()
 
     stream_content: Any = (
         event_generator()

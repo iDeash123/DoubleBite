@@ -614,7 +614,11 @@ class StripeService:
             raise ValueError('STRIPE_SECRET_KEY is not configured.')
 
         with transaction.atomic():
-            locked_order = Order.objects.select_for_update().select_related('user').get(pk=order.pk)
+            locked_order = (
+                Order.objects.select_for_update(of=('self',))
+                .select_related('user')
+                .get(pk=order.pk)
+            )
             if not locked_order.is_online_payment:
                 raise ValueError('Онлайн-оплата доступна лише для методу оплати ONLINE.')
             if locked_order.status != OrderStatus.PENDING:
@@ -1246,11 +1250,16 @@ class OrderService:
                         api_key=secret_key,
                     )
                     refund_succeeded = True
-                except Exception as exc:
+                except (stripe.StripeError, OSError, TimeoutError, ValueError) as exc:
                     logger.error(
                         'Failed to refund Stripe payment for cancelled order %s: %s',
                         order_number,
                         exc,
+                    )
+                except Exception:
+                    logger.exception(
+                        'Unexpected error while refunding Stripe payment for cancelled order %s',
+                        order_number,
                     )
 
             with transaction.atomic():

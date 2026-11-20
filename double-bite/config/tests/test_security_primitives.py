@@ -172,6 +172,14 @@ class RateLimiterTests(SimpleTestCase):
         self.assertFalse(limited_after_reset)
         self.assertEqual(retry_after_reset, 0)
 
+    @override_settings(
+        CACHES={
+            'default': {
+                'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+                'LOCATION': 'double-bite-locmem-ttl-test',
+            }
+        }
+    )
     def test_locmem_rate_limit_does_not_reset_ttl_on_increments(self):
         consume_rate_limit('chat', 'user@example.com', limit=5, period=30)
         full_key = next(k for k in cache._expire_info if 'rl:chat:' in k)

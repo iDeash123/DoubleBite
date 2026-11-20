@@ -70,6 +70,8 @@ class SecretKeyValidationTest(SimpleTestCase):
     BASE_PROD_ENV = {
         'DEBUG': 'False',
         'DJANGO_TESTING': '0',
+        'TEST_WITH_POSTGRES': '0',
+        'TEST_WITH_REDIS': '0',
         'SECRET_KEY': 'aB3$cD6&eF9*gH2^jK5(lM8)nP1!qR4@sT7#uV0%wX2+yZ4=567',
         'ALLOWED_HOSTS': 'doublebite.ua',
         'DB_ENGINE': 'django.db.backends.postgresql',
@@ -424,3 +426,54 @@ class SecretKeyValidationTest(SimpleTestCase):
         proc_bad_num = self._run_settings_import(NUM_PROXIES='-1')
         self.assertNotEqual(proc_bad_num.returncode, 0)
         self.assertIn('ImproperlyConfigured', proc_bad_num.stderr)
+
+    def test_test_with_redis_toggle_configures_redis_cache_in_testing(self):
+        proc_ok = self._run_settings_import(
+            code=(
+                'import config.settings as s; '
+                'assert s.is_testing is True; '
+                'assert s.IS_TESTING is True; '
+                'assert s.CACHES["default"]["BACKEND"] == "django.core.cache.backends.redis.RedisCache"'
+            ),
+            DJANGO_TESTING='1',
+            TEST_WITH_REDIS='1',
+            REDIS_URL='redis://:redispass@localhost:6379/0',
+        )
+        self.assertEqual(proc_ok.returncode, 0, proc_ok.stderr)
+
+        proc_missing = self._run_settings_import(
+            DJANGO_TESTING='1',
+            TEST_WITH_REDIS='1',
+            REDIS_URL='',
+        )
+        self.assertNotEqual(proc_missing.returncode, 0)
+        self.assertIn('ImproperlyConfigured', proc_missing.stderr)
+
+    def test_test_with_postgres_toggle_fails_closed_without_postgres_config(self):
+        proc_default_engine = self._run_settings_import(
+            code=(
+                'import config.settings as s; '
+                'assert s.DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql"'
+            ),
+            DJANGO_TESTING='1',
+            TEST_WITH_POSTGRES='1',
+            DB_ENGINE='',
+        )
+        self.assertEqual(proc_default_engine.returncode, 0, proc_default_engine.stderr)
+
+        proc_sqlite_engine = self._run_settings_import(
+            DJANGO_TESTING='1',
+            TEST_WITH_POSTGRES='1',
+            DB_ENGINE='django.db.backends.sqlite3',
+        )
+        self.assertNotEqual(proc_sqlite_engine.returncode, 0)
+        self.assertIn('ImproperlyConfigured', proc_sqlite_engine.stderr)
+
+        for field in ('DB_NAME', 'DB_USER', 'DB_PASSWORD'):
+            proc_missing = self._run_settings_import(
+                DJANGO_TESTING='1',
+                TEST_WITH_POSTGRES='1',
+                **{field: ''},
+            )
+            self.assertNotEqual(proc_missing.returncode, 0)
+            self.assertIn('ImproperlyConfigured', proc_missing.stderr)

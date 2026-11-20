@@ -532,6 +532,22 @@ class StripeServiceTest(TestCase):
         self.assertTrue(self.order.requires_manual_refund)
         self.assertIn('ручного повернення', self.order.notes)
 
+    @override_settings(STRIPE_SECRET_KEY='sk_test_fake_secret_key')
+    @patch('stripe.Refund.create')
+    def test_cancel_order_marks_manual_refund_on_unexpected_refund_error(self, mock_refund_create):
+        mock_refund_create.side_effect = RuntimeError('Unexpected SDK error')
+        self.order.status = OrderStatus.PAID
+        self.order.payment_status = PaymentStatus.PAID
+        self.order.stripe_payment_intent_id = 'pi_fail_unexpected_123'
+        self.order.save()
+
+        OrderService.cancel_order(self.order)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.CANCELLED)
+        self.assertTrue(self.order.requires_manual_refund)
+        self.assertIn('ручного повернення', self.order.notes)
+
 
 class StripeCheckoutFlowTest(TestCase):
     def setUp(self):

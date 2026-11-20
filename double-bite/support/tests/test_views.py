@@ -10,7 +10,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.sessions.backends.db import SessionStore
 from django.core.cache import cache
-from django.db import connections
+from django.db import close_old_connections, connections
 from django.template.loader import render_to_string
 from django.test import (
     AsyncClient,
@@ -33,7 +33,14 @@ from support.models import (
     TicketReason,
 )
 from support.services import ChatSessionService
-from support.views import _get_history, _iter_async_gen_sync, _save_message, chat_stream_view
+from support.views import (
+    _close_thread_connections,
+    _get_history,
+    _iter_async_gen_sync,
+    _iter_async_gen_threaded,
+    _save_message,
+    chat_stream_view,
+)
 
 User = get_user_model()
 
@@ -410,12 +417,12 @@ class SupportViewsTest(TestCase):
             all(item['role'] in (MessageRole.USER, MessageRole.ASSISTANT) for item in history)
         )
 
-    def test_save_message_invokes_close_old_connections(self):
+    def test_save_message_preserves_active_atomic_transaction(self):
         session = ChatSession.objects.create(user=self.user, status=ChatSessionStatus.ACTIVE)
         with patch('support.views.close_old_connections') as mock_close:
-            msg = _save_message(session.session_uuid, MessageRole.USER, 'Перевірка зʼєднання')
-        mock_close.assert_called_once()
-        self.assertEqual(msg.content, 'Перевірка зʼєднання')
+            msg = _save_message(session.session_uuid, MessageRole.USER, 'Перевірка транзакції')
+        mock_close.assert_not_called()
+        self.assertEqual(msg.content, 'Перевірка транзакції')
 
     async def test_cancelled_error_closes_stream_and_does_not_save_partial_reply(self):
         tracking_stream = TrackingCancelledStream()
@@ -551,6 +558,13 @@ class SupportWsgiAndConcurrencyTest(TransactionTestCase):
             phone='+380501112233',
         )
 
+    def test_save_message_invokes_close_old_connections(self):
+        session = ChatSession.objects.create(user=self.user, status=ChatSessionStatus.ACTIVE)
+        with patch('support.views.close_old_connections', wraps=close_old_connections) as mock_close:
+            msg = _save_message(session.session_uuid, MessageRole.USER, 'Перевірка зʼєднання')
+        mock_close.assert_called_once()
+        self.assertEqual(msg.content, 'Перевірка зʼєднання')
+
     @patch(
         'support.agent.client.MistralSupportAgent.stream_chat_response',
         side_effect=mock_async_stream_tokens,
@@ -582,6 +596,50 @@ class SupportWsgiAndConcurrencyTest(TransactionTestCase):
         self.assertEqual(messages[0].content, 'WSGI запит без scope')
         self.assertEqual(messages[1].role, MessageRole.ASSISTANT)
         self.assertEqual(messages[1].content, 'Привіт! Як справи?')
+
+    def test_threaded_wsgi_adapter_abrupt_disconnect_closes_stream_and_connections(self):
+        closed_flag = False
+
+        def db_ping():
+            with connections['default'].cursor() as cursor:
+                cursor.execute('SELECT 1')
+                return cursor.fetchone()[0]
+
+        async def streaming_gen():
+            nonlocal closed_flag
+            try:
+                await sync_to_async(db_ping, thread_sensitive=True)()
+                yield 'chunk-1'
+                await asyncio.sleep(5)
+                yield 'chunk-2'
+            finally:
+                closed_flag = True
+
+        with patch(
+            'support.views._close_non_atomic_connections',
+            wraps=close_old_connections,
+        ) as mock_close:
+            iterator = _iter_async_gen_threaded(streaming_gen())
+            self.assertEqual(next(iterator), 'chunk-1')
+            iterator.close()
+
+        self.assertTrue(closed_flag)
+        self.assertGreaterEqual(mock_close.call_count, 1)
+
+        orig_max_age = connections['default'].settings_dict.get('CONN_MAX_AGE', 0)
+        connections['default'].settings_dict['CONN_MAX_AGE'] = 60
+        try:
+            conn = connections['default']
+            with conn.cursor() as cursor:
+                cursor.execute('SELECT 1')
+            self.assertIsNotNone(conn.connection)
+            with patch.object(conn, 'close', wraps=conn.close) as mock_conn_close:
+                _close_thread_connections()
+            mock_conn_close.assert_called_once()
+            if not (conn.vendor == 'sqlite' and conn.is_in_memory_db()):
+                self.assertIsNone(conn.connection)
+        finally:
+            connections['default'].settings_dict['CONN_MAX_AGE'] = orig_max_age
 
     def test_concurrent_get_or_create_active_session_creates_single_session(self):
         workers = 6

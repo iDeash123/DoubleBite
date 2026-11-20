@@ -459,7 +459,7 @@ class ChatSessionService:
 
         with _sqlite_support_guard(), transaction.atomic():
             locked_session = (
-                ChatSession.objects.select_for_update()
+                ChatSession.objects.select_for_update(of=('self',))
                 .select_related('user')
                 .get(pk=session.pk)
             )
