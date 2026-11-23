@@ -2,26 +2,246 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --db-ink: #141312;
+  --db-noir: #24211E;
+  --db-paper: #FAF8F5;
+  --db-boucle: #F3EFE8;
+  --db-surface: #FFFFFF;
+  --db-linen: #E6E0D6;
+  --db-text: #1F1C19;
+  --db-text-secondary: #57524C;
+  --db-text-muted: #6E6861;
+  --db-crust: #C8743A;
+  --db-crust-dark: #A65622;
+  --db-crust-soft: #E9A66F;
+  --db-success: #166534;
+  --db-warning: #92400E;
+  --db-danger: #B91C1C;
+
+  --db-radius-sm: 6px;
+  --db-radius-md: 8px;
+  --db-radius-lg: 12px;
+  --db-radius-xl: 16px;
+  --db-ease: cubic-bezier(.22, 1, .36, 1);
+
+  --db-scrollbar-thumb: #756E66;
+  --db-scrollbar-track: #F3EFE8;
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+    accent-color: var(--db-crust-dark);
+    scrollbar-color: var(--db-scrollbar-thumb) var(--db-scrollbar-track);
+  }
+
+  body {
+    background-color: var(--db-paper);
+    color: var(--db-text);
+    font-family: "Manrope", -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  ::selection {
+    background-color: rgba(200, 116, 58, 0.22);
+    color: var(--db-ink);
+  }
+
+  textarea {
+    resize: vertical;
+  }
+
+  :where(a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+    outline: 2px solid var(--db-crust-dark);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .db-input {
+    @apply w-full font-sans text-base sm:text-sm text-db-text bg-db-paper border border-db-linen rounded-lg px-3.5 py-2.5 min-h-[44px] placeholder:text-db-subtle transition-[border-color,background-color,box-shadow] duration-150;
+  }
+
+  .db-input:hover:not(:disabled) {
+    border-color: rgba(36, 33, 30, 0.4);
+  }
+
+  .db-input:focus {
+    background-color: var(--db-surface);
+    border-color: var(--db-crust-dark);
+    box-shadow: 0 0 0 3px rgba(200, 116, 58, 0.16);
+    outline: none;
+  }
+
+  .db-input:focus-visible {
+    outline: 2px solid var(--db-crust-dark);
+    outline-offset: 2px;
+  }
+
+  .db-input:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+
+  .db-allauth-form input:not([type="checkbox"]):not([type="radio"]),
+  .db-allauth-form select,
+  .db-allauth-form textarea {
+    @apply w-full font-sans text-base sm:text-sm text-db-text bg-db-paper border border-db-linen rounded-lg px-3.5 py-2.5 min-h-[44px] placeholder:text-db-subtle transition-[border-color,background-color,box-shadow] duration-150;
+  }
+
+  .db-allauth-form input:not([type="checkbox"]):not([type="radio"]):hover:not(:disabled),
+  .db-allauth-form select:hover:not(:disabled),
+  .db-allauth-form textarea:hover:not(:disabled) {
+    border-color: rgba(36, 33, 30, 0.4);
+  }
+
+  .db-allauth-form input:not([type="checkbox"]):not([type="radio"]):focus,
+  .db-allauth-form select:focus,
+  .db-allauth-form textarea:focus {
+    background-color: var(--db-surface);
+    border-color: var(--db-crust-dark);
+    box-shadow: 0 0 0 3px rgba(200, 116, 58, 0.16);
+    outline: none;
+  }
+
+  .db-allauth-form input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+  .db-allauth-form select:focus-visible,
+  .db-allauth-form textarea:focus-visible {
+    outline: 2px solid var(--db-crust-dark);
+    outline-offset: 2px;
+  }
+
+  .db-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 min-h-[44px] px-5 py-2.5 rounded-lg bg-db-noir text-white font-sans text-sm font-medium border border-transparent cursor-pointer transition-[background-color,border-color,color,transform] duration-150;
+    transition-timing-function: var(--db-ease);
+  }
+
+  .db-btn-primary:hover:not(:disabled) {
+    background-color: var(--db-crust-dark);
+  }
+
+  .db-btn-primary:active:not(:disabled) {
+    transform: scale(0.99);
+  }
+
+  .db-btn-primary:focus-visible {
+    outline: 2px solid var(--db-crust-dark);
+    outline-offset: 2px;
+  }
+
+  .db-btn-primary:disabled {
+    @apply opacity-50 pointer-events-none;
+  }
+
+  .db-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 min-h-[44px] px-5 py-2.5 rounded-lg bg-db-surface text-db-text font-sans text-sm font-medium border border-db-linen cursor-pointer transition-[background-color,border-color,color,transform] duration-150;
+    transition-timing-function: var(--db-ease);
+  }
+
+  .db-btn-secondary:hover:not(:disabled) {
+    background-color: var(--db-boucle);
+    border-color: rgba(36, 33, 30, 0.4);
+  }
+
+  .db-btn-secondary:active:not(:disabled) {
+    transform: scale(0.99);
+  }
+
+  .db-btn-secondary:focus-visible {
+    outline: 2px solid var(--db-crust-dark);
+    outline-offset: 2px;
+  }
+
+  .db-btn-secondary:disabled {
+    @apply opacity-50 pointer-events-none;
+  }
+
+  .db-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-lg bg-transparent text-db-text font-sans text-sm font-medium border border-transparent cursor-pointer transition-[background-color,color,transform] duration-150;
+    transition-timing-function: var(--db-ease);
+  }
+
+  .db-btn-ghost:hover:not(:disabled) {
+    background-color: var(--db-boucle);
+  }
+
+  .db-btn-ghost:active:not(:disabled) {
+    transform: scale(0.99);
+  }
+
+  .db-btn-ghost:focus-visible {
+    outline: 2px solid var(--db-crust-dark);
+    outline-offset: 2px;
+  }
+
+  .db-btn-ghost:disabled {
+    @apply opacity-50 pointer-events-none;
+  }
+
+  .db-btn-danger {
+    @apply inline-flex items-center justify-center gap-2 min-h-[44px] px-5 py-2.5 rounded-lg bg-db-surface text-db-danger font-sans text-sm font-medium border border-red-200 cursor-pointer transition-[background-color,border-color,color,transform] duration-150;
+    transition-timing-function: var(--db-ease);
+  }
+
+  .db-btn-danger:hover:not(:disabled) {
+    background-color: var(--db-danger);
+    border-color: var(--db-danger);
+    color: #FFFFFF;
+  }
+
+  .db-btn-danger:active:not(:disabled) {
+    transform: scale(0.99);
+  }
+
+  .db-btn-danger:focus-visible {
+    outline: 2px solid var(--db-danger);
+    outline-offset: 2px;
+  }
+
+  .db-btn-danger:disabled {
+    @apply opacity-50 pointer-events-none;
+  }
+
+  .db-card {
+    @apply bg-db-surface border border-db-linen rounded-xl;
+    box-shadow: 0 1px 2px rgba(20, 19, 18, 0.04);
+  }
+
+  .db-tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 [x-cloak] {
   display: none !important;
 }
 
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
 
-::-webkit-scrollbar-track {
-  background: #f1f1f1;
-}
+  ::-webkit-scrollbar-track {
+    background: var(--db-scrollbar-track);
+  }
 
-::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 0;
-}
+  ::-webkit-scrollbar-thumb {
+    background: var(--db-scrollbar-thumb);
+    border-radius: 4px;
+  }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #8c8c8c;
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--db-text-secondary);
+  }
 }
 
 @media print {
@@ -35,11 +255,12 @@
 }
 
 .db-select-arrow {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23888' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2357524C' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 0.6rem center;
+  background-position: right 0.75rem center;
   background-size: 1rem;
-  padding-right: 2rem;
+  padding-right: 2.25rem;
 }
 
 .h-\[18px\] {
@@ -54,4 +275,13 @@
 
 .overflow-hidden {
   overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

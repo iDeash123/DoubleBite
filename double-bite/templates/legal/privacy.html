@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Політика конфіденційності — Double Bite™{% endblock %}
+{% block meta_description %}Політика конфіденційності та порядок обробки персональних даних сервісу доставки страв Double Bite у Києві.{% endblock %}
+
+{% block content %}
+<article class="max-w-4xl mx-auto px-4 sm:px-8 py-12 sm:py-16">
+  <header class="pb-8 mb-8 border-b border-db-linen">
+    <p class="text-xs font-medium uppercase tracking-wider text-db-crust-dark mb-2">
+      Правова інформація
+    </p>
+    <h1 class="font-serif text-3xl sm:text-5xl font-medium text-db-text mb-3">
+      Політика конфіденційності
+    </h1>
+    <p class="text-sm text-db-subtle font-sans">
+      Останнє оновлення: <span class="font-mono tabular-nums">2026</span> · Сервіс доставки ресторанних страв Double Bite™ (Київ)
+    </p>
+  </header>
+
+  <div class="bg-white border border-db-linen rounded-2xl p-6 sm:p-10 space-y-8 text-sm sm:text-base font-sans text-db-muted leading-relaxed shadow-sm">
+    <section class="space-y-3">
+      <h2 class="font-serif text-2xl font-medium text-db-text">1. Загальні положення та оператор даних</h2>
+      <p>
+        Ця Політика конфіденційності пояснює, які персональні дані ми збираємо під час оформлення замовлень, реєстрації акаунта та користування сайтом Double Bite™, з якою метою вони обробляються та як захищаються відповідно до законодавства України про захист персональних даних.
+      </p>
+      <div class="rounded-xl bg-db-paper border border-db-linen p-4 text-sm space-y-1">
+        <p class="font-medium text-db-text">Оператор сервісу:</p>
+        <p>[ЗАПОВНИТИ: реквізити оператора]</p>
+        <p>Адреса кухні: {{ restaurant_address }}</p>
+        <p>Гаряча лінія: <span class="font-mono tabular-nums">{{ restaurant_hotline }}</span></p>
+      </div>
+    </section>
+
+    <section class="space-y-3">
+      <h2 class="font-serif text-2xl font-medium text-db-text">2. Які дані ми збираємо</h2>
+      <p>Ми збираємо лише ті дані, які необхідні для приготування, оплати та доставки вашого замовлення:</p>
+      <ul class="list-disc pl-5 space-y-2">
+        <li><strong class="font-medium text-db-text">Контактні дані:</strong> імʼя та прізвище, електронна пошта (email), номер телефону для підтвердження та супроводу доставки.</li>
+        <li><strong class="font-medium text-db-text">Дані доставки:</strong> адреса доставки в межах Києва, збережені адреси у профілі та коментарі для курʼєра чи кухні.</li>
+        <li><strong class="font-medium text-db-text">Історія замовлень і звернень:</strong> склад замовлень, обрані модифікатори страв, статуси виконання та повідомлення у чаті з AI-консьєржем або адміністратором.</li>
+        <li><strong class="font-medium text-db-text">Платіжні дані:</strong> онлайн-оплати обробляються сертифікованим платіжним провайдером <strong class="font-medium text-db-text">Stripe</strong>. Double Bite™ не зберігає номери банківських карток, терміни дії чи CVV-коди на своїх серверах.</li>
+        <li><strong class="font-medium text-db-text">Технічні cookie-файли:</strong> сесійні та захисні cookie (включно з CSRF-токеном), необхідні для роботи кошика, авторизації та захисту від зловживань.</li>
+      </ul>
+    </section>
+
+    <section class="space-y-3">
+      <h2 class="font-serif text-2xl font-medium text-db-text">3. Мета обробки та передача третім сторонам</h2>
+      <p>
+        Персональні дані використовуються для прийому й доставки замовлень, надсилання сервісних листів про статус замовлення та відновлення доступу, підтримки клієнтів і дотримання вимог фінансового обліку.
+      </p>
+      <p>
+        Ми не продаємо персональні дані третім особам. Передача даних обмежена технічними партнерами, безпосередньо задіяними у наданні сервісу: платіжним сервісом Stripe (для проведення онлайн-оплат), поштовим сервісом (для транзакційних сповіщень) та провайдером AI-асистента (лише текст вашого звернення у чаті без платіжних реквізитів).
+      </p>
+    </section>
+
+    <section class="space-y-3">
+      <h2 class="font-serif text-2xl font-medium text-db-text">4. Ваші права та звернення</h2>
+      <p>
+        Ви маєте право отримати інформацію про обсяг ваших персональних даних, вимагати їх виправлення або видалення (крім даних, збереження яких вимагається законом для бухгалтерського обліку), а також відкликати згоду на обробку.
+      </p>
+      <p>
+        Для запитів щодо персональних даних зверніться за телефоном <span class="font-mono tabular-nums text-db-text">{{ restaurant_hotline }}</span> або за адресою <span class="text-db-text">{{ restaurant_address }}</span>.
+      </p>
+    </section>
+  </div>
+
+  <div class="mt-8 flex flex-wrap items-center justify-between gap-4 text-sm">
+    <a href="{% url 'terms' %}" class="font-medium text-db-crust-dark hover:underline">
+      Переглянути Умови використання →
+    </a>
+    <a href="/menu/" class="min-h-[44px] px-5 py-2.5 rounded-lg bg-db-noir text-white hover:bg-db-ink inline-flex items-center justify-center font-medium transition-colors">
+      Перейти до меню
+    </a>
+  </div>
+</article>
+{% endblock %}

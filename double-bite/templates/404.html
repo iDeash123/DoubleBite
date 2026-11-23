@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Сторінку не знайдено (404) — Double Bite™{% endblock %}
+{% block meta_description %}Запитана сторінка не знайдена. Поверніться на головну або оберіть авторські страви в меню Double Bite.{% endblock %}
+
+{% block content %}
+<section class="max-w-[1440px] mx-auto px-4 sm:px-8 py-16 sm:py-24">
+  <div class="max-w-xl mx-auto bg-white border border-db-linen rounded-2xl p-8 sm:p-12 text-center shadow-sm">
+    <div class="inline-flex items-center justify-center w-14 h-14 rounded-full bg-db-boucle text-db-crust-dark mb-6">
+      <svg class="w-7 h-7" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+        <path d="M18.28 13.53 A9 9 0 1 1 13.38 1.66 A4.2 4.2 0 0 0 17.72 7.57 A3.4 3.4 0 0 0 18.28 13.53 Z"/>
+      </svg>
+    </div>
+
+    <p class="font-mono text-xs font-medium tracking-widest uppercase text-db-crust-dark mb-3 tabular-nums">
+      Помилка 404
+    </p>
+    <h1 class="font-serif text-3xl sm:text-4xl font-medium text-db-text mb-4">
+      Сторінку не знайдено
+    </h1>
+    <p class="font-sans text-sm sm:text-base text-db-muted leading-relaxed mb-8">
+      Можливо, страву вже оновили в сезонному меню або посилання застаріло. Перегляньте актуальні позиції в каталозі чи поверніться на головну.
+    </p>
+
+    <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3">
+      <a
+        href="/menu/"
+        class="min-h-[44px] px-6 py-3 rounded-lg bg-db-noir text-white hover:bg-db-ink text-sm font-sans font-medium inline-flex items-center justify-center transition-colors"
+      >
+        Перейти до меню
+      </a>
+      <a
+        href="/"
+        class="min-h-[44px] px-6 py-3 rounded-lg border border-db-linen bg-white text-db-text hover:border-db-noir/40 text-sm font-sans font-medium inline-flex items-center justify-center transition-colors"
+      >
+        На головну
+      </a>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -27,7 +27,7 @@ class HomeViewTest(TestCase):
         response = self.client.get(reverse('home'))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'double bite')
-        self.assertContains(response, 'fv-noir')
+        self.assertContains(response, 'db-noir')
         self.assertContains(response, 'fonts.css')
         self.assertContains(response, 'htmx.min.js')
         self.assertContains(response, 'alpine.min.js')

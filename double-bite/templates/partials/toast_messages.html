@@ -102,73 +102,72 @@ window.showToast = function(message, type, timeout) {
       if (t.includes('success')) {
         return 'border-l-4 border-l-emerald-600';
       }
-      return 'border-l-4 border-l-fv-noir';
+      return 'border-l-4 border-l-db-crust-dark';
     },
     getTypeBadge(type) {
       const t = (type || '').toLowerCase();
       if (t.includes('error')) {
-        return { label: 'ПОМИЛКА', dot: 'bg-red-500', badge: 'text-red-700 bg-red-50 border-red-200' };
+        return { label: 'Помилка', dot: 'bg-red-600', badge: 'text-red-700 bg-red-50 border-red-200' };
       }
       if (t.includes('warning')) {
-        return { label: 'УВАГА', dot: 'bg-amber-500', badge: 'text-amber-800 bg-amber-50 border-amber-200' };
+        return { label: 'Увага', dot: 'bg-amber-600', badge: 'text-amber-800 bg-amber-50 border-amber-200' };
       }
       if (t.includes('success')) {
-        return { label: 'УСПІШНО', dot: 'bg-emerald-500', badge: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
+        return { label: 'Успішно', dot: 'bg-emerald-600', badge: 'text-emerald-800 bg-emerald-50 border-emerald-200' };
       }
-      return { label: 'ІНФО', dot: 'bg-fv-noir', badge: 'text-fv-noir bg-fv-offwhite border-fv-noir/20' };
+      return { label: 'Інфо', dot: 'bg-db-crust-dark', badge: 'text-db-text bg-db-boucle border-db-linen' };
     }
   }"
   @show-toast.window="addToast($event.detail)"
   @toast.window="addToast($event.detail)"
-  class="fixed bottom-6 right-6 z-50 flex flex-col gap-2.5 max-w-sm w-full pointer-events-none sm:bottom-8 sm:right-8"
+  class="fixed top-20 sm:top-24 right-4 sm:right-6 z-50 flex flex-col gap-2.5 w-[calc(100vw-2rem)] sm:w-full max-w-sm pointer-events-none"
   aria-live="polite"
 >
   <template x-for="toast in toasts" :key="toast.id">
     <div
       @mouseenter="pause(toast)"
       @mouseleave="resume(toast)"
-      x-transition:enter="transition ease-out duration-300 transform"
-      x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:translate-x-4 scale-95"
+      x-transition:enter="transition ease-out duration-200 transform"
+      x-transition:enter-start="opacity-0 -translate-y-2 sm:translate-y-0 sm:translate-x-4 scale-95"
       x-transition:enter-end="opacity-100 translate-y-0 sm:translate-x-0 scale-100"
-      x-transition:leave="transition ease-in duration-200 transform"
+      x-transition:leave="transition ease-in duration-150 transform"
       x-transition:leave-start="opacity-100 translate-y-0 sm:translate-x-0 scale-100"
-      x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:translate-x-4 scale-95"
-      class="pointer-events-auto bg-white border border-fv-noir/20 p-4 shadow-xl transition-all duration-300 transform rounded-none"
+      x-transition:leave-end="opacity-0 -translate-y-2 sm:translate-y-0 sm:translate-x-4 scale-95"
+      class="pointer-events-auto bg-white border border-db-linen rounded-xl p-4 shadow-lg"
       :class="getToastClasses(toast.type)"
       role="alert"
     >
-      <div class="flex items-center justify-between pb-2 mb-2 border-b border-fv-noir/10 text-xs font-mono">
+      <div class="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-db-linen/70">
         <div class="flex items-center gap-2">
-          <span :class="getTypeBadge(toast.type).dot" class="w-2 h-2 rounded-full inline-block shrink-0"></span>
-          <span :class="getTypeBadge(toast.type).badge" class="text-[10px] font-mono uppercase tracking-widest font-bold px-2 py-0.5 border rounded-none" x-text="getTypeBadge(toast.type).label"></span>
+          <span :class="getTypeBadge(toast.type).dot" class="w-2 h-2 rounded-full inline-block shrink-0" aria-hidden="true"></span>
+          <span :class="getTypeBadge(toast.type).badge" class="text-xs font-sans font-medium px-2 py-0.5 border rounded-md" x-text="getTypeBadge(toast.type).label"></span>
         </div>
-        <div class="flex items-center gap-2">
-          <span class="text-[9px] uppercase font-bold tracking-widest text-fv-slate hidden sm:inline">DOUBLE BITE</span>
-          <button
-            type="button"
-            @click="removeToast(toast.id)"
-            class="p-1 -mr-1 text-fv-slate hover:text-fv-noir transition-colors text-sm font-mono leading-none cursor-pointer rounded-none"
-            aria-label="Закрити"
-          >
-            ✕
-          </button>
-        </div>
+        <button
+          type="button"
+          @click="removeToast(toast.id)"
+          class="min-w-[32px] min-h-[32px] -mr-1.5 -mt-1 inline-flex items-center justify-center rounded-lg text-db-subtle hover:text-db-text hover:bg-db-boucle transition-colors cursor-pointer"
+          aria-label="Закрити"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
       </div>
-      <div class="text-xs font-mono text-fv-noir leading-relaxed break-words" x-text="toast.message"></div>
+      <div class="text-sm font-sans text-db-text leading-relaxed break-words" x-text="toast.message"></div>
     </div>
   </template>
   <noscript>
     {% if messages %}
       <div class="space-y-2 pointer-events-auto">
         {% for message in messages %}
-          <div class="pointer-events-auto bg-white border border-fv-noir/20 p-4 shadow-xl rounded-none text-fv-noir {% if 'error' in message.tags %}border-l-4 border-l-red-600{% elif 'warning' in message.tags %}border-l-4 border-l-amber-500{% elif 'success' in message.tags %}border-l-4 border-l-emerald-600{% else %}border-l-4 border-l-fv-noir{% endif %}" role="alert">
-            <div class="flex items-center justify-between pb-2 mb-2 border-b border-fv-noir/10 text-xs font-mono">
-              <span class="text-[10px] font-mono uppercase tracking-widest font-bold px-2 py-0.5 border rounded-none {% if 'error' in message.tags %}text-red-700 bg-red-50 border-red-200{% elif 'warning' in message.tags %}text-amber-800 bg-amber-50 border-amber-200{% elif 'success' in message.tags %}text-emerald-700 bg-emerald-50 border-emerald-200{% else %}text-fv-noir bg-fv-offwhite border-fv-noir/20{% endif %}">
-                {% if 'error' in message.tags %}ПОМИЛКА{% elif 'warning' in message.tags %}УВАГА{% elif 'success' in message.tags %}УСПІШНО{% else %}ІНФО{% endif %}
+          <div class="pointer-events-auto bg-white border border-db-linen rounded-xl p-4 shadow-lg text-db-text {% if 'error' in message.tags %}border-l-4 border-l-red-600{% elif 'warning' in message.tags %}border-l-4 border-l-amber-500{% elif 'success' in message.tags %}border-l-4 border-l-emerald-600{% else %}border-l-4 border-l-db-crust-dark{% endif %}" role="alert">
+            <div class="flex items-center justify-between pb-2 mb-2 border-b border-db-linen/70">
+              <span class="text-xs font-sans font-medium px-2 py-0.5 border rounded-md {% if 'error' in message.tags %}text-red-700 bg-red-50 border-red-200{% elif 'warning' in message.tags %}text-amber-800 bg-amber-50 border-amber-200{% elif 'success' in message.tags %}text-emerald-800 bg-emerald-50 border-emerald-200{% else %}text-db-text bg-db-boucle border-db-linen{% endif %}">
+                {% if 'error' in message.tags %}Помилка{% elif 'warning' in message.tags %}Увага{% elif 'success' in message.tags %}Успішно{% else %}Інфо{% endif %}
               </span>
-              <span class="text-[9px] uppercase font-bold tracking-widest text-fv-slate">DOUBLE BITE</span>
             </div>
-            <div class="text-xs font-mono text-fv-noir leading-relaxed break-words">{{ message }}</div>
+            <div class="text-sm font-sans text-db-text leading-relaxed break-words">{{ message }}</div>
           </div>
         {% endfor %}
       </div>

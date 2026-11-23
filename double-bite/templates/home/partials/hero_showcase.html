@@ -115,15 +115,14 @@ function heroShowcase(initialDishes) {
       this.selectDish((this.currentIndex + 1) % this.dishes.length);
     },
     onMouseMove(event) {
+      if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
       var rect = this.$el.getBoundingClientRect();
       var nx = (event.clientX - rect.left) / rect.width;
       var ny = (event.clientY - rect.top) / rect.height;
       var stage = this.$refs.stage;
       if (!stage) return;
-      stage.style.setProperty('--px', ((0.5 - nx) * 24).toFixed(1) + 'px');
-      stage.style.setProperty('--py', ((0.5 - ny) * 16).toFixed(1) + 'px');
-      stage.style.setProperty('--mx', (nx * 100).toFixed(1) + '%');
-      stage.style.setProperty('--my', (ny * 100).toFixed(1) + '%');
+      stage.style.setProperty('--px', ((0.5 - nx) * 18).toFixed(1) + 'px');
+      stage.style.setProperty('--py', ((0.5 - ny) * 12).toFixed(1) + 'px');
     },
     resetTilt() {
       var stage = this.$refs.stage;
@@ -205,23 +204,10 @@ function heroShowcase(initialDishes) {
   <div class="db-hero__stage" x-ref="stage" :style="'--ox:' + origin.x + '%;--oy:' + origin.y + '%'">
     <template x-for="(dish, idx) in dishes" :key="'slide-' + idx">
       <div class="db-hero__slide" :class="{ 'is-active': idx === currentIndex, 'is-prev': idx === prevIndex }" :aria-hidden="idx !== currentIndex">
-        <img class="db-hero__img" :src="dish.image" :alt="dish.title" width="1600" height="1000" :loading="idx === 0 ? 'eager' : 'lazy'" decoding="async">
+        <img class="db-hero__img" :src="dish.image" :alt="dish.title" width="1600" height="1000" :loading="idx === 0 ? 'eager' : 'lazy'" :fetchpriority="idx === 0 ? 'high' : 'auto'" decoding="async">
       </div>
     </template>
     <div class="db-hero__shade"></div>
-    <div class="db-hero__spot"></div>
-    <div class="db-hero__grain"></div>
-  </div>
-
-  <div class="db-hero__index" aria-hidden="true">
-    <span class="db-hero__index-roll">
-      <span class="db-hero__index-track" :style="'transform: translateY(-' + (currentIndex * 0.8) + 'em)'">
-        <template x-for="(dish, idx) in dishes" :key="'num-' + idx">
-          <span x-text="pad(idx + 1)"></span>
-        </template>
-      </span>
-    </span>
-    <small x-text="'/' + pad(dishes.length)"></small>
   </div>
 
   <div class="db-hero__body">
@@ -229,7 +215,22 @@ function heroShowcase(initialDishes) {
 
       <div class="db-hero__top">
         <h1 class="db-hero__h1"><b>Double Bite</b> — авторські бургери, неаполітанська піца, боули та десерти з доставкою по Києву</h1>
-        <span class="db-hero__status"><span class="db-pulse"></span>Приймаємо замовлення · 10:00 — 22:00</span>
+        <div class="db-hero__top-meta">
+          <span class="db-hero__status{% if not kitchen_is_open %} is-closed{% endif %}">
+            {% if kitchen_is_open %}
+              <span class="db-pulse" aria-hidden="true"></span>
+              <span>Кухня відкрита · 10:00 — 22:00</span>
+            {% else %}
+              <span class="db-status-dot" aria-hidden="true"></span>
+              <span>Передзамовлення · відкриваємось о 10:00</span>
+            {% endif %}
+          </span>
+          <span class="db-hero__counter" aria-label="Номер страви у вітрині">
+            <span x-text="pad(currentIndex + 1)">01</span>
+            <span class="db-hero__counter-sep" aria-hidden="true">/</span>
+            <span x-text="pad(dishes.length)">04</span>
+          </span>
+        </div>
       </div>
 
       <div class="db-hero__content" @mouseenter="setHover(true)" @mouseleave="setHover(false)" @focusin="setHover(true)" @focusout="setHover(false)">
@@ -242,14 +243,14 @@ function heroShowcase(initialDishes) {
 
             <h2 class="db-hero__title">
               <template x-for="(word, wi) in titleWords" :key="currentIndex + '-' + wi">
-                <span class="w"><span :style="'animation-delay:' + (0.12 + wi * 0.08) + 's'" x-text="word"></span></span>
+                <span class="w"><span :style="'animation-delay:' + (0.03 + wi * 0.03) + 's'" x-text="word"></span></span>
               </template>
             </h2>
 
-            <p class="db-hero__sub db-fade-in" style="animation-delay:.35s" x-text="dish.subtitle"></p>
-            <p class="db-hero__desc db-fade-in" style="animation-delay:.45s" x-text="dish.description"></p>
+            <p class="db-hero__sub db-fade-in" style="animation-delay:.1s" x-text="dish.subtitle"></p>
+            <p class="db-hero__desc db-fade-in" style="animation-delay:.15s" x-text="dish.description"></p>
 
-            <dl class="db-hero__passport db-fade-in" style="animation-delay:.55s">
+            <dl class="db-hero__passport db-fade-in" style="animation-delay:.2s">
               <div><dt>Вартість</dt><dd class="is-price" x-text="dish.price + ' ₴'"></dd></div>
               <div><dt>Вага</dt><dd x-text="dish.weight_grams + ' г'"></dd></div>
               <div><dt>Енергія</dt><dd x-text="dish.calories + ' ккал'"></dd></div>
@@ -267,7 +268,6 @@ function heroShowcase(initialDishes) {
           <a href="/menu/" class="db-btn db-btn--ghost-dark">Відкрити меню</a>
         </div>
         <button type="button" id="hero-ai-consult-btn" class="db-link db-hero__ai" @click="askAiConcierge(currentDish)">
-          <span class="db-pulse"></span>
           <span class="db-link__label">Запитати AI-консьєржа про страву</span>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
         </button>
@@ -288,7 +288,7 @@ function heroShowcase(initialDishes) {
               @click="selectDish(idx)"
             >
               <span class="db-rail-item__bar" aria-hidden="true"><i @animationend="idx === currentIndex && next()"></i></span>
-              <span class="db-rail-item__thumb"><img :src="dish.image" alt="" width="56" height="56" loading="lazy"></span>
+              <span class="db-rail-item__thumb"><img :src="dish.image" alt="" width="52" height="52" loading="lazy"></span>
               <span class="db-rail-item__meta">
                 <span class="db-rail-item__tag" x-text="dish.tag"></span>
                 <span class="db-rail-item__title" x-text="dish.title"></span>

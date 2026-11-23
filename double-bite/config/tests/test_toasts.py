@@ -34,8 +34,7 @@ class ToastNotificationComponentTests(TestCase):
         self.assertContains(response, 'id="toast-notifications-container"')
         self.assertContains(response, 'window.showToast')
         self.assertContains(response, '@show-toast.window="addToast($event.detail)"')
-        self.assertContains(response, 'fixed bottom-6 right-6')
-        self.assertContains(response, 'sm:bottom-8 sm:right-8')
+        self.assertContains(response, 'fixed top-20 sm:top-24 right-4 sm:right-6')
 
     def test_render_toast_with_success_message(self):
         request = self._get_request_with_messages()
@@ -44,9 +43,9 @@ class ToastNotificationComponentTests(TestCase):
         rendered = template.render(request=request)
         self.assertIn('Операція пройшла успішно!', rendered)
         self.assertIn("type: 'success'", rendered)
-        self.assertIn('УСПІШНО', rendered)
+        self.assertIn('Успішно', rendered)
         self.assertIn('border-l-emerald-600', rendered)
-        self.assertIn('text-emerald-700 bg-emerald-50 border-emerald-200', rendered)
+        self.assertIn('text-emerald-800 bg-emerald-50 border-emerald-200', rendered)
 
     def test_render_toast_with_error_message(self):
         request = self._get_request_with_messages()
@@ -55,7 +54,7 @@ class ToastNotificationComponentTests(TestCase):
         rendered = template.render(request=request)
         self.assertIn('Виникла помилка під час обробки.', rendered)
         self.assertIn("type: 'error'", rendered)
-        self.assertIn('ПОМИЛКА', rendered)
+        self.assertIn('Помилка', rendered)
         self.assertIn('border-l-red-600', rendered)
         self.assertIn('text-red-700 bg-red-50 border-red-200', rendered)
 
@@ -66,7 +65,7 @@ class ToastNotificationComponentTests(TestCase):
         rendered = template.render(request=request)
         self.assertIn('Увага: термін дії сесії спливає.', rendered)
         self.assertIn("type: 'warning'", rendered)
-        self.assertIn('УВАГА', rendered)
+        self.assertIn('Увага', rendered)
         self.assertIn('border-l-amber-500', rendered)
         self.assertIn('text-amber-800 bg-amber-50 border-amber-200', rendered)
 
@@ -77,9 +76,9 @@ class ToastNotificationComponentTests(TestCase):
         rendered = template.render(request=request)
         self.assertIn('Інформаційне повідомлення.', rendered)
         self.assertIn("type: 'info'", rendered)
-        self.assertIn('ІНФО', rendered)
-        self.assertIn('border-l-fv-noir', rendered)
-        self.assertIn('text-fv-noir bg-fv-offwhite border-fv-noir/20', rendered)
+        self.assertIn('Інфо', rendered)
+        self.assertIn('border-l-db-crust-dark', rendered)
+        self.assertIn('text-db-text bg-db-boucle border-db-linen', rendered)
 
     def test_render_toast_multiple_messages(self):
         request = self._get_request_with_messages()
@@ -100,13 +99,13 @@ class ToastNotificationComponentTests(TestCase):
         self.assertNotIn('<script>alert("xss")</script>', rendered)
         self.assertIn('\\u003Cscript\\u003Ealert(', rendered)
 
-    def test_toast_component_brandbook_styling_tokens(self):
+    def test_toast_component_design_system_tokens(self):
         response = self.client.get(reverse('home'))
-        self.assertContains(response, 'rounded-none')
-        self.assertContains(response, 'font-mono')
-        self.assertContains(response, 'shadow-xl')
-        self.assertContains(response, 'border-fv-noir/20')
-        self.assertContains(response, 'text-fv-noir')
+        self.assertContains(response, 'rounded-xl')
+        self.assertContains(response, 'font-sans')
+        self.assertContains(response, 'shadow-lg')
+        self.assertContains(response, 'border-db-linen')
+        self.assertContains(response, 'text-db-text')
         self.assertContains(response, 'pointer-events-none')
         self.assertContains(response, 'pointer-events-auto')
         self.assertContains(response, 'aria-live="polite"')
@@ -136,7 +135,7 @@ class ToastNotificationComponentTests(TestCase):
         rendered = template.render(request=request)
         self.assertIn('<noscript>', rendered)
         self.assertIn('Помилка без JavaScript', rendered)
-        self.assertIn('ПОМИЛКА', rendered)
+        self.assertIn('Помилка', rendered)
 
     def test_integration_login_message_rendered_in_toasts(self):
         User.objects.create_user(
@@ -153,3 +152,23 @@ class ToastNotificationComponentTests(TestCase):
         self.assertContains(login_response, 'Ви успішно увійшли в систему.')
         self.assertContains(login_response, 'id="toast-notifications-container"')
         self.assertNotContains(login_response, 'max-w-[1440px] w-full mx-auto px-4 sm:px-8 pt-4')
+
+
+class LegalPagesTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+    def test_privacy_page_returns_200(self):
+        response = self.client.get(reverse('privacy'))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'legal/privacy.html')
+        self.assertContains(response, 'Політика конфіденційності')
+        self.assertContains(response, 'Stripe')
+        self.assertContains(response, '[ЗАПОВНИТИ: реквізити оператора]')
+
+    def test_terms_page_returns_200(self):
+        response = self.client.get(reverse('terms'))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'legal/terms.html')
+        self.assertContains(response, 'Умови використання')
+        self.assertContains(response, '[ЗАПОВНИТИ: реквізити оператора]')

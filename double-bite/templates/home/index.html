@@ -52,10 +52,19 @@
   <script nonce="{{ csp_nonce }}">
     (function () {
       var els = document.querySelectorAll('[data-reveal]');
-      if (!('IntersectionObserver' in window) || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      if (!els.length) return;
+      function revealAll() {
         els.forEach(function (el) { el.classList.add('is-in'); });
+      }
+      if (
+        window.location.hash ||
+        !('IntersectionObserver' in window) ||
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      ) {
+        revealAll();
         return;
       }
+      var vh = window.innerHeight || document.documentElement.clientHeight || 900;
       var io = new IntersectionObserver(function (entries) {
         entries.forEach(function (entry) {
           if (entry.isIntersecting) {
@@ -63,8 +72,15 @@
             io.unobserve(entry.target);
           }
         });
-      }, { rootMargin: '0px 0px -12% 0px', threshold: 0.08 });
-      els.forEach(function (el) { io.observe(el); });
+      }, { rootMargin: '0px 0px -6% 0px', threshold: 0.02 });
+      els.forEach(function (el) {
+        if (el.getBoundingClientRect().top <= vh) {
+          el.classList.add('is-in');
+        } else {
+          io.observe(el);
+        }
+      });
+      window.addEventListener('hashchange', revealAll, { once: true });
     })();
   </script>
 {% endblock %}

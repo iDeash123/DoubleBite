@@ -19,12 +19,13 @@ from .models import DeliveryAddress
 User = get_user_model()
 
 INPUT_CSS_CLASS = (
-    'w-full px-4 py-2.5 border border-fv-noir/20 bg-white text-xs '
-    'font-mono text-fv-noir focus:border-fv-noir outline-none '
-    'rounded-none transition-colors'
+    'font-sans text-base sm:text-sm rounded-lg w-full min-h-[44px] px-4 '
+    'py-2.5 border border-db-linen bg-db-paper text-db-text '
+    'placeholder:text-db-subtle focus:bg-white focus:border-db-crust-dark '
+    'focus:ring-2 focus:ring-db-crust/20 focus:outline-none transition-colors'
 )
 CHECKBOX_CSS_CLASS = (
-    'h-4 w-4 text-fv-noir border-fv-noir/30 rounded-none focus:ring-0'
+    'h-4 w-4 rounded border-db-linen accent-db-crust-dark'
 )
 
 

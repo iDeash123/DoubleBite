@@ -5,135 +5,133 @@
 {% block meta_description %}Керування підключеними OAuth-сервісами Google та GitHub у Double Bite.{% endblock %}
 
 {% block content %}
-<div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-12 sm:py-16">
-  <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
-    <div class="md:col-start-3 md:col-span-8 lg:col-start-4 lg:col-span-6">
-      <div class="bg-white p-8 sm:p-12 border border-fv-noir/20 rounded-none relative space-y-8">
-        <div class="flex items-center justify-between border-b border-fv-noir/10 pb-4 text-xs font-mono">
-          <span class="text-fv-slate uppercase tracking-widest">03 / OAuth-зв'язки</span>
-          <span class="text-fv-noir font-bold">DOUBLE BITE™</span>
+<div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-10 sm:py-16">
+  <div class="max-w-xl mx-auto">
+    <div class="bg-white p-6 sm:p-10 border border-db-linen rounded-2xl shadow-sm space-y-8">
+      <div>
+        <p class="font-sans text-xs font-medium text-db-crust-dark mb-2">
+          Налаштування акаунту
+        </p>
+        <h1 class="font-serif text-3xl sm:text-4xl font-medium tracking-tight text-db-text">
+          Підключені сервіси
+        </h1>
+        <p class="font-sans text-sm text-db-muted mt-2 leading-relaxed">
+          Керуйте сторонніми сервісами для швидкого входу до вашого профілю
+        </p>
+      </div>
+
+      {% if form.accounts %}
+        {% url 'socialaccount_connections' as action_url %}
+        <form method="post" action="{{ action_url }}" class="space-y-5">
+          {% csrf_token %}
+
+          {% if form.non_field_errors %}
+            <div class="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 font-sans text-sm leading-relaxed">
+              {% for error in form.non_field_errors %}
+                <div>{{ error }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+
+          {% if form.account.errors %}
+            <div class="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 font-sans text-sm leading-relaxed">
+              {% for error in form.account.errors %}
+                <div>{{ error }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+
+          <div class="space-y-3">
+            {% for acc in form.fields.account.choices %}
+              {% with account=acc.0.instance.get_provider_account %}
+                <label
+                  for="id_account_{{ account.account.pk }}"
+                  class="p-4 rounded-xl border border-db-linen bg-db-paper flex items-center justify-between gap-3 cursor-pointer hover:border-db-noir/30 has-[:checked]:border-db-crust has-[:checked]:bg-db-boucle/70 transition-colors"
+                >
+                  <div class="flex items-center gap-3 min-w-0">
+                    <input
+                      id="id_account_{{ account.account.pk }}"
+                      type="radio"
+                      name="account"
+                      value="{{ account.account.pk }}"
+                      class="h-4 w-4 accent-db-crust-dark border-db-linen shrink-0"
+                    >
+                    <span class="font-sans text-sm font-medium text-db-text break-all">{{ account }}</span>
+                  </div>
+                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-sans text-xs font-medium bg-db-boucle text-db-crust-dark border border-db-crust/30 shrink-0">
+                    {{ account.get_brand.name }}
+                  </span>
+                </label>
+              {% endwith %}
+            {% endfor %}
+          </div>
+
+          <button
+            type="submit"
+            class="w-full min-h-[44px] px-4 py-2.5 bg-white border border-red-200 text-red-700 font-sans text-sm font-medium hover:bg-red-700 hover:text-white hover:border-red-700 transition-colors rounded-lg"
+          >
+            Відключити обраний акаунт
+          </button>
+        </form>
+      {% else %}
+        <div class="p-6 rounded-xl bg-db-paper border border-dashed border-db-linen text-center font-sans text-sm text-db-muted">
+          До вашого облікового запису ще не підключено жодного стороннього сервісу.
         </div>
+      {% endif %}
 
-        <div>
-          <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-fv-noir font-sans">Підключені сервіси</h1>
-          <p class="font-serif italic text-sm text-fv-slate mt-2">
-            Керуйте сторонніми сервісами для швидкого входу до вашого профілю
-          </p>
-        </div>
-
-        {% if form.accounts %}
-          {% url 'socialaccount_connections' as action_url %}
-          <form method="post" action="{{ action_url }}" class="space-y-4">
-            {% csrf_token %}
-
-            {% if form.non_field_errors %}
-              <div class="p-4 bg-red-50 border border-red-500 text-red-700 text-xs font-mono">
-                {% for error in form.non_field_errors %}
-                  <div>{{ error }}</div>
-                {% endfor %}
-              </div>
-            {% endif %}
-
-            {% if form.account.errors %}
-              <div class="p-4 bg-red-50 border border-red-500 text-red-700 text-xs font-mono">
-                {% for error in form.account.errors %}
-                  <div>{{ error }}</div>
-                {% endfor %}
-              </div>
-            {% endif %}
-
-            <div class="space-y-3">
-              {% for acc in form.fields.account.choices %}
-                {% with account=acc.0.instance.get_provider_account %}
-                  <label
-                    for="id_account_{{ account.account.pk }}"
-                    class="p-4 border border-fv-noir/15 bg-fv-offwhite/60 flex items-center justify-between gap-3 cursor-pointer hover:border-fv-noir/40 transition-colors"
+      {% get_providers as socialaccount_providers %}
+      {% if socialaccount_providers %}
+        <div class="pt-6 border-t border-db-linen space-y-4">
+          <h2 class="font-sans text-base font-semibold text-db-text">
+            Підключити сервіс
+          </h2>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {% for provider in socialaccount_providers %}
+              {% provider_login_url provider process="connect" as connect_url %}
+              <form method="post" action="{{ connect_url }}">
+                {% csrf_token %}
+                {% if provider.id == "google" %}
+                  <button
+                    type="submit"
+                    class="w-full min-h-[44px] py-2.5 px-4 bg-white border border-db-linen hover:border-db-noir/40 hover:bg-db-paper text-db-text font-sans text-sm font-medium flex items-center justify-center gap-2.5 transition-colors rounded-lg"
                   >
-                    <div class="flex items-center gap-3">
-                      <input
-                        id="id_account_{{ account.account.pk }}"
-                        type="radio"
-                        name="account"
-                        value="{{ account.account.pk }}"
-                        class="h-4 w-4 text-fv-noir border-fv-noir/30 shrink-0"
-                      >
-                      <span class="text-xs font-mono text-fv-noir break-all">{{ account }}</span>
-                    </div>
-                    <span class="text-[10px] font-mono uppercase px-2 py-0.5 bg-fv-noir text-white shrink-0">
-                      {{ account.get_brand.name }}
-                    </span>
-                  </label>
-                {% endwith %}
-              {% endfor %}
-            </div>
-
-            <button
-              type="submit"
-              class="w-full py-3.5 border border-red-200 text-red-600 text-xs font-mono uppercase tracking-wider hover:bg-red-600 hover:text-white hover:border-red-600 transition-colors rounded-none"
-            >
-              Відключити обраний акаунт
-            </button>
-          </form>
-        {% else %}
-          <div class="p-6 bg-fv-offwhite border border-dashed border-fv-noir/20 text-center text-xs font-mono text-fv-slate">
-            До вашого облікового запису ще не підключено жодного стороннього сервісу.
+                    <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                      <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"/>
+                      <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.27 21.37 7.35 24 12 24Z"/>
+                      <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.26C.46 8.16 0 9.94 0 12s.46 3.84 1.26 5.42l4.02-3.15Z"/>
+                      <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.27 2.63 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98Z"/>
+                    </svg>
+                    <span>{{ provider.name }}</span>
+                  </button>
+                {% elif provider.id == "github" %}
+                  <button
+                    type="submit"
+                    class="w-full min-h-[44px] py-2.5 px-4 bg-white border border-db-linen hover:border-db-noir/40 hover:bg-db-paper text-db-text font-sans text-sm font-medium flex items-center justify-center gap-2.5 transition-colors rounded-lg"
+                  >
+                    <svg class="w-4 h-4 shrink-0 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+                      <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2Z"/>
+                    </svg>
+                    <span>{{ provider.name }}</span>
+                  </button>
+                {% else %}
+                  <button
+                    type="submit"
+                    class="w-full min-h-[44px] py-2.5 px-4 bg-white border border-db-linen hover:border-db-noir/40 hover:bg-db-paper text-db-text font-sans text-sm font-medium transition-colors rounded-lg"
+                  >
+                    {{ provider.name }}
+                  </button>
+                {% endif %}
+              </form>
+            {% endfor %}
           </div>
-        {% endif %}
-
-        {% get_providers as socialaccount_providers %}
-        {% if socialaccount_providers %}
-          <div class="pt-6 border-t border-fv-noir/10 space-y-4">
-            <h2 class="text-sm font-bold uppercase tracking-wider text-fv-noir font-mono">
-              + Підключити сервіс
-            </h2>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {% for provider in socialaccount_providers %}
-                {% provider_login_url provider process="connect" as connect_url %}
-                <form method="post" action="{{ connect_url }}">
-                  {% csrf_token %}
-                  {% if provider.id == "google" %}
-                    <button
-                      type="submit"
-                      class="w-full py-3.5 px-4 bg-white border border-[#E5E5E5] hover:border-fv-noir/30 text-fv-noir text-xs font-mono uppercase tracking-wider flex items-center justify-center gap-2.5 transition-all shadow-xs rounded-none"
-                    >
-                      <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                        <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"/>
-                        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.27 21.37 7.35 24 12 24Z"/>
-                        <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.26C.46 8.16 0 9.94 0 12s.46 3.84 1.26 5.42l4.02-3.15Z"/>
-                        <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.27 2.63 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98Z"/>
-                      </svg>
-                      <span>{{ provider.name }}</span>
-                    </button>
-                  {% elif provider.id == "github" %}
-                    <button
-                      type="submit"
-                      class="w-full py-3.5 px-4 bg-fv-noir hover:bg-black text-white text-xs font-mono uppercase tracking-wider flex items-center justify-center gap-2.5 transition-all shadow-xs rounded-none"
-                    >
-                      <svg class="w-4 h-4 shrink-0 fill-current" viewBox="0 0 24 24">
-                        <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2Z"/>
-                      </svg>
-                      <span>{{ provider.name }}</span>
-                    </button>
-                  {% else %}
-                    <button
-                      type="submit"
-                      class="w-full py-3.5 px-4 border border-fv-noir/30 text-fv-noir text-xs font-mono uppercase tracking-wider hover:border-fv-noir hover:bg-fv-offwhite transition-colors rounded-none"
-                    >
-                      {{ provider.name }}
-                    </button>
-                  {% endif %}
-                </form>
-              {% endfor %}
-            </div>
-          </div>
-        {% endif %}
-
-        <div class="pt-6 border-t border-fv-noir/10 flex items-center justify-between text-xs font-mono text-fv-slate">
-          <span>Особистий кабінет</span>
-          <a href="{% url 'accounts:profile' %}" class="font-bold text-fv-noir hover:underline underline-offset-4 uppercase tracking-wider">
-            ← Повернутися до профілю
-          </a>
         </div>
+      {% endif %}
+
+      <div class="pt-6 border-t border-db-linen flex flex-col sm:flex-row items-center justify-between gap-3 font-sans text-sm text-db-muted">
+        <span>Особистий кабінет</span>
+        <a href="{% url 'accounts:profile' %}" class="font-medium text-db-crust-dark hover:text-db-noir hover:underline underline-offset-4 transition-colors">
+          ← Повернутися до профілю
+        </a>
       </div>
     </div>
   </div>

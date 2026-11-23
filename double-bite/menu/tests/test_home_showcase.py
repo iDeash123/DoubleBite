@@ -1,6 +1,9 @@
 import json
 import os
+from datetime import datetime
 from decimal import Decimal
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -82,8 +85,10 @@ class HomeShowcaseTest(TestCase):
         collections_data = response.context['collections_data']
         burgers_col = next(c for c in collections_data if c['slug'] == 'burgers')
         self.assertEqual(burgers_col['dishes'][0]['id'], self.dish.id)
+        self.assertEqual(burgers_col['dishes'][0]['detail_url'], self.dish.get_absolute_url())
         for extra_item in burgers_col['dishes'][1:]:
             self.assertIsNone(extra_item['id'])
+            self.assertEqual(extra_item['detail_url'], '')
 
         for other_col in collections_data:
             if other_col['slug'] != 'burgers':
@@ -144,10 +149,44 @@ class HomeShowcaseTest(TestCase):
 
     def test_live_gastro_ticker_content(self):
         response = self.client.get(reverse('home'))
-        self.assertContains(response, 'ПРИЙМАЄМО ЗАМОВЛЕННЯ')
+        self.assertContains(response, 'ЩОДЕННО 10:00 — 22:00')
+        self.assertContains(response, '25–45 ХВ')
         self.assertContains(response, 'ТЕРМОБОКСИ З СЕНСОРАМИ')
         self.assertContains(response, 'БЕЗКОШТОВНА ДОСТАВКА ВІД 500 ₴')
         self.assertContains(response, 'MISTRAL AI CONCIERGE АКТИВНИЙ 24/7')
+        self.assertNotContains(response, 'db-ticker__row--big')
+        self.assertNotContains(response, 'Live logistics')
+        self.assertNotContains(response, '2026-Q1 OK')
+        self.assertContains(response, 'Зона доставки')
+        self.assertContains(response, 'Власна курʼєрська доставка у термобоксах')
+
+    def test_kitchen_is_open_respects_kyiv_operating_hours(self):
+        kyiv_tz = ZoneInfo('Europe/Kyiv')
+
+        for hour, minute in ((10, 0), (15, 30), (21, 59)):
+            open_dt = datetime(2026, 5, 10, hour, minute, tzinfo=kyiv_tz)
+            with patch('menu.selectors.timezone.localtime', return_value=open_dt):
+                ctx = get_home_page_context()
+                self.assertTrue(ctx['kitchen_is_open'])
+                response = self.client.get(reverse('home'))
+                self.assertContains(response, 'Кухня відкрита · 10:00 — 22:00')
+                self.assertEqual(response.content.decode('utf-8').count('class="db-pulse"'), 1)
+
+        for hour, minute in ((9, 59), (22, 0), (23, 30), (3, 0)):
+            closed_dt = datetime(2026, 5, 10, hour, minute, tzinfo=kyiv_tz)
+            with patch('menu.selectors.timezone.localtime', return_value=closed_dt):
+                ctx = get_home_page_context()
+                self.assertFalse(ctx['kitchen_is_open'])
+                response = self.client.get(reverse('home'))
+                self.assertContains(response, 'Передзамовлення · відкриваємось о 10:00')
+                self.assertEqual(response.content.decode('utf-8').count('class="db-pulse"'), 0)
+
+    def test_hero_uses_compact_counter_without_removed_overlays(self):
+        response = self.client.get(reverse('home'))
+        self.assertContains(response, 'db-hero__counter')
+        self.assertNotContains(response, 'db-hero__spot')
+        self.assertNotContains(response, 'db-hero__grain')
+        self.assertNotContains(response, 'db-hero__index')
 
     def test_quick_cart_action_via_htmx(self):
         url = reverse('orders:cart_add', kwargs={'dish_id': self.dish.id})

@@ -1,26 +1,46 @@
+const root = __dirname.replace(/\\/g, '/');
+
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
-    './templates/**/*.html',
-    './**/templates/**/*.html',
-    './**/*.py',
-    './static/js/**/*.js',
+    `${root}/templates/**/*.html`,
+    `${root}/**/templates/**/*.html`,
+    `${root}/**/*.py`,
+    `${root}/static/js/**/*.js`,
   ],
   theme: {
     extend: {
       colors: {
-        'fv-noir': '#262626',
-        'fv-slate': '#8C8C8C',
-        'fv-lightgray': '#E5E5E5',
-        'fv-offwhite': '#F6F6F6',
+        // Double Bite unified warm gastronomic palette
+        'db-ink': '#141312',
+        'db-noir': '#24211E',
+        'db-paper': '#FAF8F5',
+        'db-boucle': '#F3EFE8',
+        'db-surface': '#FFFFFF',
+        'db-linen': '#E6E0D6',
+        'db-text': '#1F1C19',
+        'db-muted': '#57524C',
+        'db-subtle': '#6E6861',
+        'db-crust': '#C8743A',
+        'db-crust-dark': '#A65622',
+        'db-crust-soft': '#E9A66F',
+        'db-success': '#166534',
+        'db-warning': '#92400E',
+        'db-danger': '#B91C1C',
+
+        // Legacy fv-* aliases remapped to warm tokens during migration
+        'fv-noir': '#24211E',
+        'fv-offwhite': '#FAF8F5',
+        'fv-slate': '#57524C',
+        'fv-lightgray': '#E6E0D6',
         'fv-white': '#FFFFFF',
-        'fv-boucle': '#F4F1EB',
-        'fv-linen': '#E8E3DA',
+        'fv-boucle': '#F3EFE8',
+        'fv-linen': '#E6E0D6',
         'fv-oak': '#D5C2AB',
         'fv-stone': '#DDD7CF',
       },
       fontFamily: {
-        sans: ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+        sans: ['"Manrope"', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
         serif: ['"Cormorant Garamond"', 'Georgia', 'serif'],
         mono: ['"JetBrains Mono"', 'monospace'],
       },

@@ -27,7 +27,7 @@ class TemplatedEmailServiceTests(SimpleTestCase):
         self.assertIn('Double Bite', sent.body)
         self.assertEqual(len(sent.alternatives), 1)
         self.assertEqual(sent.alternatives[0][1], 'text/html')
-        self.assertIn('#F6F6F6', sent.alternatives[0][0])
+        self.assertIn('#FAF8F5', sent.alternatives[0][0])
         self.assertIn('Double Bite', sent.alternatives[0][0])
 
     def test_send_templated_email_single_string_recipient(self):
@@ -108,9 +108,11 @@ class TemplatedEmailServiceTests(SimpleTestCase):
 
     def test_base_email_template_brand_elements(self):
         rendered = render_to_string('emails/base_email.html', {})
-        self.assertIn('#F6F6F6', rendered)
+        self.assertIn('#FAF8F5', rendered)
         self.assertIn('#FFFFFF', rendered)
-        self.assertIn('#262626', rendered)
+        self.assertIn('#24211E', rendered)
+        self.assertIn('#1F1C19', rendered)
+        self.assertIn('#C8743A', rendered)
         self.assertIn('JetBrains Mono', rendered)
         self.assertIn('Double Bite', rendered)
 

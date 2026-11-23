@@ -4,39 +4,37 @@
 {% block meta_description %}Лист із посиланням для підтвердження електронної пошти Double Bite надіслано.{% endblock %}
 
 {% block content %}
-<div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-12 sm:py-16">
-  <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
-    <div class="md:col-start-4 md:col-span-6">
-      <div class="bg-white p-8 sm:p-12 border border-fv-noir/20 rounded-none relative">
-        <div class="flex items-center justify-between border-b border-fv-noir/10 pb-4 mb-8 text-xs font-mono">
-          <span class="text-fv-slate uppercase tracking-widest">02 / Верифікація</span>
-          <span class="text-fv-noir font-bold">DOUBLE BITE™</span>
-        </div>
+<div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-10 sm:py-16">
+  <div class="max-w-lg mx-auto">
+    <div class="bg-white p-6 sm:p-10 border border-db-linen rounded-2xl shadow-sm">
+      <div class="mb-6">
+        <p class="font-sans text-xs font-medium text-db-crust-dark mb-2">
+          Підтвердження пошти
+        </p>
+        <h1 class="font-serif text-3xl sm:text-4xl font-medium tracking-tight text-db-text">
+          Перевірте вашу пошту
+        </h1>
+        <p class="font-sans text-sm text-db-muted mt-2 leading-relaxed">
+          Лист із посиланням для активації акаунту надіслано
+        </p>
+      </div>
 
-        <div class="mb-8">
-          <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-fv-noir font-sans">Перевірте вашу пошту</h1>
-          <p class="font-serif italic text-sm text-fv-slate mt-2">
-            Лист із посиланням для активації акаунту надіслано
-          </p>
-        </div>
+      <div class="p-4 sm:p-5 rounded-xl bg-db-paper border border-db-linen space-y-3 font-sans text-sm text-db-text leading-relaxed">
+        <p>
+          Ми надіслали вам лист для підтвердження електронної адреси. Перейдіть за посиланням у листі, щоб завершити реєстрацію та активувати вхід до кабінету.
+        </p>
+        <p class="text-db-muted">
+          Якщо лист не з'явився у вхідних протягом кількох хвилин, перевірте папку «Спам» або «Промоакції».
+        </p>
+      </div>
 
-        <div class="space-y-4 text-xs font-mono text-fv-noir leading-relaxed mb-8">
-          <p>
-            Ми надіслали вам лист для підтвердження електронної адреси. Перейдіть за посиланням у листі, щоб завершити реєстрацію та активувати вхід до кабінету.
-          </p>
-          <p class="text-fv-slate">
-            Якщо лист не з'явився у вхідних протягом кількох хвилин, перевірте папку «Спам» або «Промоакції».
-          </p>
-        </div>
-
-        <div class="mt-8 pt-6 border-t border-fv-noir/10 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono text-fv-slate">
-          <a href="{% url 'home' %}" class="hover:text-fv-noir hover:underline underline-offset-4 uppercase tracking-wider">
-            ← На головну
-          </a>
-          <a href="{% url 'accounts:login' %}" class="font-bold text-fv-noir hover:underline underline-offset-4 uppercase tracking-wider">
-            Перейти до входу →
-          </a>
-        </div>
+      <div class="mt-8 pt-6 border-t border-db-linen flex flex-col sm:flex-row items-center justify-between gap-3 font-sans text-sm text-db-muted">
+        <a href="{% url 'home' %}" class="hover:text-db-text hover:underline underline-offset-4 transition-colors">
+          ← На головну
+        </a>
+        <a href="{% url 'accounts:login' %}" class="font-medium text-db-crust-dark hover:text-db-noir hover:underline underline-offset-4 transition-colors">
+          Перейти до входу →
+        </a>
       </div>
     </div>
   </div>

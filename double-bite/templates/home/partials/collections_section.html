@@ -259,7 +259,7 @@ function collectionsShowcase(initialCollections) {
         <span class="db-kicker"><span class="db-kicker__num">02</span><span class="db-kicker__line"></span><span>Гастрономічні колекції страв</span></span>
         <h2 class="db-head__title"><em>Гастрономічні</em>колекції</h2>
       </div>
-      <div class="db-head__aside" data-reveal style="--d:.15s">
+      <div class="db-head__aside" data-reveal style="--d:.08s">
         <p class="db-head__lead">Пʼять напрямів кухні Double Bite. Оберіть колекцію — і додайте страву в кошик просто звідси, без переходу в меню.</p>
         <a href="/menu/" class="db-btn db-btn--dark">Переглянути все меню</a>
       </div>
@@ -303,7 +303,9 @@ function collectionsShowcase(initialCollections) {
               <template x-for="(dish, dIdx) in col.dishes" :key="activeCollectionIndex + '-' + dIdx">
                 <article class="db-dish dish-card-stagger" :style="'--i:' + dIdx">
                   <div class="db-dish__media">
-                    <img :src="dish.image" :alt="dish.title" width="600" height="750" loading="lazy" decoding="async">
+                    <a class="db-dish__media-link" :href="dish.detail_url || ('/menu/?category=' + col.slug)" :aria-label="dish.title">
+                      <img :src="dish.image" :alt="dish.title" width="600" height="750" loading="lazy" decoding="async">
+                    </a>
                     <span class="db-dish__price" x-text="dish.price + ' ₴'"></span>
                     <span class="db-dish__specs" x-text="dish.weight_grams + ' г · ' + dish.calories + ' ккал'"></span>
                     <button type="button" class="db-dish__add" @click="addToCart(dish, $event)" :aria-label="'Додати в кошик: ' + dish.title" title="В кошик">
@@ -311,7 +313,9 @@ function collectionsShowcase(initialCollections) {
                     </button>
                   </div>
                   <div class="db-dish__body">
-                    <h4 class="db-dish__title" x-text="dish.title"></h4>
+                    <h4 class="db-dish__title">
+                      <a class="db-dish__title-link" :href="dish.detail_url || ('/menu/?category=' + col.slug)" x-text="dish.title"></a>
+                    </h4>
                     <p class="db-dish__desc" x-text="dish.description"></p>
                   </div>
                 </article>

@@ -4,9 +4,11 @@ from django import forms
 from .models import PaymentMethod
 
 _INPUT_CLASS = (
-    'w-full px-4 py-3 bg-fv-offwhite border border-fv-noir/20 '
-    'focus:outline-none focus:border-fv-noir text-xs font-mono '
-    'text-fv-noir placeholder:text-fv-slate'
+    'w-full font-sans text-base sm:text-sm rounded-lg bg-db-paper '
+    'border border-db-linen px-4 py-3 text-db-text '
+    'placeholder:text-db-subtle focus:outline-none focus:bg-white '
+    'focus:border-db-crust-dark focus:ring-2 focus:ring-db-crust/20 '
+    'transition-colors'
 )
 
 
@@ -50,7 +52,7 @@ class OrderCheckoutForm(forms.Form):
         choices=PaymentMethod.choices,
         initial=PaymentMethod.ONLINE,
         widget=forms.RadioSelect(attrs={
-            'class': 'accent-fv-noir',
+            'class': 'h-4 w-4 accent-db-crust-dark shrink-0',
         }),
     )
     notes = forms.CharField(

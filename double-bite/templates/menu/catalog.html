@@ -16,13 +16,24 @@
   modalQuantity: 1,
   modalSubmitting: false,
   modalOpener: null,
+  formatPrice(amount) {
+    const num = parseFloat(amount || 0);
+    if (!Number.isFinite(num)) return '0 ₴';
+    const rounded = Math.round(num * 100) / 100;
+    const isWhole = Math.abs(rounded - Math.round(rounded)) < 0.001;
+    const formatted = isWhole ? String(Math.round(rounded)) : rounded.toFixed(2).replace('.', ',');
+    return formatted + ' ₴';
+  },
   get modalUnitPrice() {
     const base = parseFloat(this.modalDish.price || 0) || 0;
     const delta = parseFloat(this.modalOptionDelta || 0) || 0;
     return base + delta;
   },
+  get modalUnitPriceFormatted() {
+    return this.formatPrice(this.modalUnitPrice);
+  },
   get modalTotalPrice() {
-    return (this.modalUnitPrice * this.modalQuantity).toFixed(2);
+    return this.formatPrice(this.modalUnitPrice * this.modalQuantity);
   },
   setModalOption(id, delta) {
     this.modalSelectedOptionId = id ? String(id) : '';
@@ -36,9 +47,11 @@
   },
   formatOptionDelta(delta) {
     const val = parseFloat(delta || 0);
-    if (!Number.isFinite(val) || val === 0) return '0.00 грн';
-    const absFormatted = Math.abs(val).toFixed(2);
-    return val > 0 ? ('+' + absFormatted + ' грн') : ('-' + absFormatted + ' грн');
+    if (!Number.isFinite(val) || Math.abs(val) < 0.001) return '0 ₴';
+    const absVal = Math.abs(Math.round(val * 100) / 100);
+    const isWhole = Math.abs(absVal - Math.round(absVal)) < 0.001;
+    const absFormatted = isWhole ? String(Math.round(absVal)) : absVal.toFixed(2).replace('.', ',');
+    return (val > 0 ? '+' : '-') + absFormatted + ' ₴';
   },
   openModal(dish) {
     this.modalOpener = (dish && dish.opener) || document.activeElement;
@@ -154,38 +167,43 @@
   }
 }" @open-dish-modal.window="openModal($event.detail)">
 
-  <div class="border-b border-fv-noir/15 pb-8 mb-8">
+  <div class="border-b border-db-linen pb-6 sm:pb-8 mb-6 sm:mb-8">
     <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
       <div>
-        <span class="font-serif italic text-sm sm:text-base text-fv-slate uppercase tracking-widest block mb-2">
+        <span class="font-sans text-xs font-medium tracking-wider uppercase text-db-crust-dark block mb-2">
           Авторська гастрономія · Сезонне меню
         </span>
-        <h1 class="font-sans font-black text-3xl sm:text-4xl text-fv-noir tracking-tight uppercase">
+        <h1 class="font-serif text-4xl sm:text-5xl font-medium text-db-text tracking-tight leading-[1.06]">
           Каталог страв
         </h1>
+        <p class="mt-2 font-sans text-sm text-db-muted max-w-xl leading-relaxed">
+          Неаполітанська піца, авторські бургери, свіжі боули та десерти з доставкою по Києву за 25–45 хв.
+        </p>
       </div>
-      <div class="text-xs font-mono text-fv-slate">
+      <div class="font-sans text-sm text-db-muted shrink-0">
         <span id="total-dishes">Всього позицій у меню: <strong class="text-fv-noir">{{ total_dishes }}</strong></span>
       </div>
     </div>
   </div>
 
-  <form id="menu-filter-form" method="get" action="{% url 'menu:catalog' %}" class="space-y-6 mb-10"
+  <form id="menu-filter-form" method="get" action="{% url 'menu:catalog' %}" class="space-y-4 mb-8"
         hx-get="{% url 'menu:catalog' %}"
         hx-target="#dish-grid"
         hx-swap="outerHTML"
+        hx-indicator="#catalog-loading"
         hx-trigger="change from:select, change from:input[type='checkbox'], change from:#category-input, input delay:300ms from:#search-input, input delay:600ms from:[name='max_price'], submit"
         hx-push-url="true">
-    
+
     <input type="hidden" name="category" id="category-input" value="{{ selected_category|default:'' }}">
     <input type="hidden" name="page" id="page-input" value="">
 
-    <div class="flex flex-wrap items-center gap-2 border-b border-fv-noir/10 pb-4">
+    <div class="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 sm:flex-wrap" role="group" aria-label="Категорії страв">
       <button
         type="button"
         @click="setCategory('')"
-        :class="category === '' ? 'bg-fv-noir text-white' : 'bg-fv-offwhite text-fv-noir hover:bg-fv-lightgray'"
-        class="px-4 py-2 text-xs font-mono uppercase tracking-wider transition-colors border border-fv-noir/15"
+        :aria-pressed="category === '' ? 'true' : 'false'"
+        :class="category === '' ? 'bg-db-noir text-white border-db-noir shadow-sm' : 'bg-white border-db-linen text-db-text hover:border-db-noir/40'"
+        class="rounded-lg min-h-[40px] px-4 py-2 text-sm font-sans font-medium whitespace-nowrap shrink-0 border transition-[color,background-color,border-color] duration-150"
       >
         Усі страви
       </button>
@@ -193,83 +211,99 @@
         <button
           type="button"
           @click="setCategory('{{ cat.slug }}')"
-          :class="category === '{{ cat.slug }}' ? 'bg-fv-noir text-white' : 'bg-fv-offwhite text-fv-noir hover:bg-fv-lightgray'"
-          class="px-4 py-2 text-xs font-mono uppercase tracking-wider transition-colors border border-fv-noir/15"
+          :aria-pressed="category === '{{ cat.slug }}' ? 'true' : 'false'"
+          :class="category === '{{ cat.slug }}' ? 'bg-db-noir text-white border-db-noir shadow-sm' : 'bg-white border-db-linen text-db-text hover:border-db-noir/40'"
+          class="rounded-lg min-h-[40px] px-4 py-2 text-sm font-sans font-medium whitespace-nowrap shrink-0 border transition-[color,background-color,border-color] duration-150"
         >
           {{ cat.name }}
         </button>
       {% endfor %}
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-center bg-white p-4 border border-fv-noir/15">
-      <div class="md:col-span-5 relative">
-        <input
-          type="text"
-          id="search-input"
-          name="q"
-          value="{{ search_query }}"
-          placeholder="Пошук за назвою чи інгредієнтами..."
-          class="w-full pl-9 pr-4 py-2.5 text-xs font-mono bg-fv-offwhite border border-fv-noir/20 focus:outline-none focus:border-fv-noir text-fv-noir placeholder:text-fv-slate"
-        >
-        <svg class="w-4 h-4 text-fv-slate absolute left-3 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-        </svg>
-      </div>
-
-      <div class="md:col-span-2">
-        <input
-          type="number"
-          name="max_price"
-          value="{{ max_price }}"
-          placeholder="Макс. ціна (грн)"
-          min="0"
-          step="1"
-          class="w-full px-3 py-2.5 text-xs font-mono bg-fv-offwhite border border-fv-noir/20 focus:outline-none focus:border-fv-noir text-fv-noir placeholder:text-fv-slate"
-        >
-      </div>
-
-      <div class="md:col-span-2">
-        <select
-          name="sort"
-          class="w-full px-3 py-2.5 pr-8 text-xs font-mono bg-fv-offwhite border border-fv-noir/20 focus:outline-none focus:border-fv-noir text-fv-noir appearance-none cursor-pointer db-select-arrow"
-        >
-          <option value="default"     {% if sort == 'default'     %}selected{% endif %}>За замовчуванням</option>
-          <option value="price_asc"   {% if sort == 'price_asc'   %}selected{% endif %}>Ціна: від низької</option>
-          <option value="price_desc"  {% if sort == 'price_desc'  %}selected{% endif %}>Ціна: від високої</option>
-          <option value="name_asc"    {% if sort == 'name_asc'    %}selected{% endif %}>Назва: А → Я</option>
-          <option value="name_desc"   {% if sort == 'name_desc'   %}selected{% endif %}>Назва: Я → А</option>
-          <option value="calories_asc"  {% if sort == 'calories_asc'  %}selected{% endif %}>Калорії: від менших</option>
-          <option value="calories_desc" {% if sort == 'calories_desc' %}selected{% endif %}>Калорії: від більших</option>
-        </select>
-      </div>
-
-      <div class="md:col-span-3 flex items-center justify-start md:justify-end gap-5 text-xs font-mono select-none">
-        <label class="inline-flex items-center gap-2 cursor-pointer">
+    <div class="bg-white border border-db-linen rounded-xl p-4 shadow-sm">
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-3 sm:gap-4 items-center">
+        <div class="md:col-span-5 relative">
+          <label for="search-input" class="sr-only">Пошук за назвою чи інгредієнтами</label>
           <input
-            type="checkbox"
-            name="is_vegetarian"
-            value="true"
-            {% if is_vegetarian %}checked{% endif %}
-            class="accent-fv-noir rounded-none w-4 h-4"
+            type="text"
+            id="search-input"
+            name="q"
+            value="{{ search_query }}"
+            placeholder="Пошук за назвою чи інгредієнтами..."
+            class="db-input w-full pl-10 pr-4 py-2.5 text-base sm:text-sm font-sans rounded-lg bg-db-paper border border-db-linen text-db-text placeholder:text-db-subtle focus:bg-white focus:border-db-crust-dark focus:outline-none transition-colors"
           >
-          <span class="text-fv-noir uppercase tracking-wider text-[11px]">Вегетаріанське</span>
-        </label>
+          <svg class="w-4 h-4 text-db-subtle absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+        </div>
 
-        <label class="inline-flex items-center gap-2 cursor-pointer">
+        <div class="md:col-span-2">
+          <label for="max-price-input" class="sr-only">Максимальна ціна в гривнях</label>
           <input
-            type="checkbox"
-            name="is_spicy"
-            value="true"
-            {% if is_spicy %}checked{% endif %}
-            class="accent-fv-noir rounded-none w-4 h-4"
+            type="number"
+            id="max-price-input"
+            name="max_price"
+            value="{{ max_price }}"
+            placeholder="Макс. ціна (₴)"
+            min="0"
+            step="1"
+            class="db-input w-full px-3.5 py-2.5 text-base sm:text-sm font-sans rounded-lg bg-db-paper border border-db-linen text-db-text placeholder:text-db-subtle focus:bg-white focus:border-db-crust-dark focus:outline-none transition-colors"
           >
-          <span class="text-fv-noir uppercase tracking-wider text-[11px]">Гостре</span>
-        </label>
+        </div>
 
-        <a href="{% url 'menu:catalog' %}" class="text-[11px] uppercase tracking-wider text-fv-slate hover:text-fv-noir underline">
-          Очистити
-        </a>
+        <div class="md:col-span-2">
+          <label for="sort-select" class="sr-only">Сортування страв</label>
+          <select
+            id="sort-select"
+            name="sort"
+            class="db-input db-select-arrow w-full px-3.5 py-2.5 pr-9 text-base sm:text-sm font-sans rounded-lg bg-db-paper border border-db-linen text-db-text focus:bg-white focus:border-db-crust-dark focus:outline-none appearance-none cursor-pointer transition-colors"
+          >
+            <option value="default"     {% if sort == 'default'     %}selected{% endif %}>За замовчуванням</option>
+            <option value="price_asc"   {% if sort == 'price_asc'   %}selected{% endif %}>Ціна: від низької</option>
+            <option value="price_desc"  {% if sort == 'price_desc'  %}selected{% endif %}>Ціна: від високої</option>
+            <option value="name_asc"    {% if sort == 'name_asc'    %}selected{% endif %}>Назва: А → Я</option>
+            <option value="name_desc"   {% if sort == 'name_desc'   %}selected{% endif %}>Назва: Я → А</option>
+            <option value="calories_asc"  {% if sort == 'calories_asc'  %}selected{% endif %}>Калорії: від менших</option>
+            <option value="calories_desc" {% if sort == 'calories_desc' %}selected{% endif %}>Калорії: від більших</option>
+          </select>
+        </div>
+
+        <div class="md:col-span-3 flex flex-wrap items-center justify-between md:justify-end gap-x-4 gap-y-2 text-sm font-sans select-none">
+          <label class="inline-flex items-center gap-2 cursor-pointer min-h-[40px]">
+            <input
+              type="checkbox"
+              name="is_vegetarian"
+              value="true"
+              {% if is_vegetarian %}checked{% endif %}
+              class="accent-db-crust-dark rounded w-4 h-4 border-db-linen cursor-pointer"
+            >
+            <span class="text-db-text font-medium">Вегетаріанське</span>
+          </label>
+
+          <label class="inline-flex items-center gap-2 cursor-pointer min-h-[40px]">
+            <input
+              type="checkbox"
+              name="is_spicy"
+              value="true"
+              {% if is_spicy %}checked{% endif %}
+              class="accent-db-crust-dark rounded w-4 h-4 border-db-linen cursor-pointer"
+            >
+            <span class="text-db-text font-medium">Гостре</span>
+          </label>
+
+          <a href="{% url 'menu:catalog' %}" class="inline-flex items-center min-h-[40px] px-1.5 text-sm font-medium text-db-subtle hover:text-db-crust-dark underline underline-offset-4 decoration-db-linen hover:decoration-db-crust transition-colors">
+            Скинути
+          </a>
+        </div>
       </div>
+    </div>
+
+    <div id="catalog-loading" class="htmx-indicator pointer-events-none flex items-center justify-center gap-2 text-xs font-sans text-db-muted h-5" aria-live="polite">
+      <svg class="w-4 h-4 animate-spin text-db-crust-dark motion-reduce:animate-none" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+      </svg>
+      <span>Оновлюємо меню...</span>
     </div>
   </form>
 
@@ -282,10 +316,10 @@
       {% for dish in dishes %}
         {% include "menu/_dish_card.html" %}
       {% empty %}
-        <div class="col-span-full py-16 text-center border border-dashed border-fv-noir/20 bg-white">
-          <p class="font-serif italic text-lg text-fv-noir mb-2">Страв за обраними критеріями не знайдено</p>
-          <p class="font-mono text-xs text-fv-slate uppercase tracking-wider mb-4">Спробуйте очистити пошуковий фільтр</p>
-          <a href="{% url 'menu:catalog' %}" class="inline-block px-6 py-2.5 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors">
+        <div class="col-span-full py-16 px-6 text-center rounded-2xl border border-dashed border-db-linen bg-white">
+          <p class="font-serif text-2xl sm:text-3xl font-medium text-db-text mb-2">Страв за обраними критеріями не знайдено</p>
+          <p class="font-sans text-sm text-db-muted mb-6">Спробуйте змінити параметри пошуку або скинути фільтри</p>
+          <a href="{% url 'menu:catalog' %}" class="db-btn-primary inline-flex items-center justify-center min-h-[44px] px-6 py-2.5 rounded-lg bg-db-noir text-white text-sm font-sans font-medium hover:bg-db-ink transition-colors">
             Показати все меню
           </a>
         </div>
@@ -293,32 +327,34 @@
     </div>
 
     {% if paginator.num_pages > 1 %}
-    <nav class="mt-10 flex items-center justify-center gap-1 font-mono text-xs" aria-label="Пагінація">
+    <nav class="mt-10 flex flex-wrap items-center justify-center gap-1.5" aria-label="Пагінація">
 
       {% if page_obj.has_previous %}
         <a href="?{% query_transform page=page_obj.previous_page_number %}"
            hx-get="?{% query_transform page=page_obj.previous_page_number %}"
            hx-target="#dish-grid"
            hx-swap="outerHTML"
+           hx-indicator="#catalog-loading"
            hx-push-url="true"
-           class="px-3 py-2 border border-fv-noir/20 text-fv-noir hover:bg-fv-noir hover:text-white transition-colors"
+           class="inline-flex items-center justify-center min-w-[40px] h-10 px-3 rounded-lg bg-white border border-db-linen text-db-text font-mono text-sm hover:border-db-noir/40 hover:bg-db-boucle transition-[color,background-color,border-color] duration-150"
            aria-label="Попередня сторінка">←</a>
       {% else %}
-        <span class="px-3 py-2 border border-fv-noir/10 text-fv-noir/30 cursor-not-allowed">←</span>
+        <span class="inline-flex items-center justify-center min-w-[40px] h-10 px-3 rounded-lg bg-db-paper border border-db-linen/60 text-db-subtle/40 font-mono text-sm cursor-not-allowed" aria-disabled="true">←</span>
       {% endif %}
 
       {% for num in paginator.page_range %}
         {% if num == page_obj.number %}
-          <span class="px-3 py-2 bg-fv-noir text-white border border-fv-noir" aria-current="page">{{ num }}</span>
+          <span class="inline-flex items-center justify-center min-w-[40px] h-10 px-3 rounded-lg bg-db-noir text-white border border-db-noir font-mono tabular-nums db-tabular text-sm font-semibold" aria-current="page">{{ num }}</span>
         {% elif num == 1 or num == paginator.num_pages or num >= page_obj.number|add:"-2" and num <= page_obj.number|add:"2" %}
           <a href="?{% query_transform page=num %}"
              hx-get="?{% query_transform page=num %}"
              hx-target="#dish-grid"
              hx-swap="outerHTML"
+             hx-indicator="#catalog-loading"
              hx-push-url="true"
-             class="px-3 py-2 border border-fv-noir/20 text-fv-noir hover:bg-fv-noir hover:text-white transition-colors">{{ num }}</a>
+             class="inline-flex items-center justify-center min-w-[40px] h-10 px-3 rounded-lg bg-white border border-db-linen text-db-text font-mono tabular-nums db-tabular text-sm hover:border-db-noir/40 hover:bg-db-boucle transition-[color,background-color,border-color] duration-150">{{ num }}</a>
         {% elif num == page_obj.number|add:"-3" or num == page_obj.number|add:"3" %}
-          <span class="px-3 py-2 text-fv-slate">…</span>
+          <span class="inline-flex items-center justify-center min-w-[32px] h-10 text-db-subtle font-sans text-sm">…</span>
         {% endif %}
       {% endfor %}
 
@@ -327,16 +363,17 @@
            hx-get="?{% query_transform page=page_obj.next_page_number %}"
            hx-target="#dish-grid"
            hx-swap="outerHTML"
+           hx-indicator="#catalog-loading"
            hx-push-url="true"
-           class="px-3 py-2 border border-fv-noir/20 text-fv-noir hover:bg-fv-noir hover:text-white transition-colors"
+           class="inline-flex items-center justify-center min-w-[40px] h-10 px-3 rounded-lg bg-white border border-db-linen text-db-text font-mono text-sm hover:border-db-noir/40 hover:bg-db-boucle transition-[color,background-color,border-color] duration-150"
            aria-label="Наступна сторінка">→</a>
       {% else %}
-        <span class="px-3 py-2 border border-fv-noir/10 text-fv-noir/30 cursor-not-allowed">→</span>
+        <span class="inline-flex items-center justify-center min-w-[40px] h-10 px-3 rounded-lg bg-db-paper border border-db-linen/60 text-db-subtle/40 font-mono text-sm cursor-not-allowed" aria-disabled="true">→</span>
       {% endif %}
 
     </nav>
-    <p class="mt-3 text-center font-mono text-[11px] text-fv-slate uppercase tracking-widest">
-      Сторінка {{ page_obj.number }} з {{ paginator.num_pages }} · Всього {{ total_dishes }} страв
+    <p class="mt-3 text-center font-sans text-xs text-db-subtle">
+      Сторінка <span class="font-mono tabular-nums db-tabular text-db-text">{{ page_obj.number }}</span> з <span class="font-mono tabular-nums db-tabular text-db-text">{{ paginator.num_pages }}</span> · Всього <span class="font-mono tabular-nums db-tabular text-db-text">{{ total_dishes }}</span> страв
     </p>
     {% endif %}
   </div>
@@ -352,143 +389,167 @@
     role="dialog"
     aria-modal="true"
   >
-    <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+    <div class="flex min-h-full items-center justify-center p-4 sm:p-6">
       <div
         x-show="modalOpen"
-        x-transition:enter="ease-out duration-300"
+        x-transition:enter="ease-out duration-200"
         x-transition:enter-start="opacity-0"
         x-transition:enter-end="opacity-100"
-        x-transition:leave="ease-in duration-200"
+        x-transition:leave="ease-in duration-150"
         x-transition:leave-start="opacity-100"
         x-transition:leave-end="opacity-0"
-        class="fixed inset-0 bg-black/50 backdrop-blur-sm transition-opacity"
+        class="fixed inset-0 bg-db-ink/60 backdrop-blur-sm transition-opacity"
         @click="closeModal()"
       ></div>
-
-      <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
 
       <div
         x-ref="modalPanel"
         x-show="modalOpen"
-        x-transition:enter="ease-out duration-300"
-        x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+        x-transition:enter="ease-out duration-200"
+        x-transition:enter-start="opacity-0 translate-y-3 sm:scale-95"
         x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100"
-        x-transition:leave="ease-in duration-200"
+        x-transition:leave="ease-in duration-150"
         x-transition:leave-start="opacity-100 translate-y-0 sm:scale-100"
-        x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
-        class="inline-block align-bottom bg-white border border-fv-noir/30 text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full"
+        x-transition:leave-end="opacity-0 translate-y-3 sm:scale-95"
+        class="relative z-10 w-full max-w-2xl bg-white border border-db-linen rounded-2xl text-left overflow-hidden shadow-2xl transform transition-[opacity,transform]"
       >
-        <div class="flex justify-between items-center px-6 py-4 border-b border-fv-noir/10">
-          <span class="font-mono text-xs uppercase tracking-widest text-fv-slate" x-text="modalDish.category"></span>
-          <button type="button" x-ref="modalCloseBtn" @click="closeModal()" class="text-fv-slate hover:text-fv-noir transition-colors" aria-label="Закрити">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div class="flex justify-between items-center px-5 sm:px-6 py-3.5 border-b border-db-linen">
+          <span class="font-sans text-xs font-medium text-db-crust-dark bg-db-boucle px-2.5 py-1 rounded-md" x-text="modalDish.category"></span>
+          <button
+            type="button"
+            x-ref="modalCloseBtn"
+            @click="closeModal()"
+            class="w-11 h-11 -mr-2 rounded-lg flex items-center justify-center text-db-muted hover:text-db-text hover:bg-db-boucle transition-colors"
+            aria-label="Закрити"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
             </svg>
           </button>
         </div>
 
-        <div class="p-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <div class="bg-fv-offwhite aspect-square p-4 flex items-center justify-center overflow-hidden">
+        <div class="p-5 sm:p-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div class="aspect-[4/3] sm:aspect-[4/5] rounded-xl overflow-hidden bg-db-boucle relative">
             <template x-if="modalDish.image">
-              <img :src="modalDish.image" :alt="modalDish.title" class="w-full h-full object-contain mix-blend-multiply">
+              <img :src="modalDish.image" :alt="modalDish.title" class="w-full h-full object-cover">
             </template>
             <template x-if="!modalDish.image">
-              <span class="font-mono text-xs text-fv-slate uppercase">Double Bite</span>
+              <div class="w-full h-full flex items-center justify-center text-db-subtle font-serif italic text-sm">
+                Double Bite
+              </div>
             </template>
+            <div class="absolute top-3 left-3 flex flex-wrap gap-1.5 pointer-events-none" x-show="modalDish.isVegetarian || modalDish.isSpicy">
+              <span x-show="modalDish.isVegetarian" class="bg-emerald-800/90 backdrop-blur-sm text-white font-sans font-medium text-[11px] leading-none px-2.5 py-1 rounded-md">Вегетаріанське</span>
+              <span x-show="modalDish.isSpicy" class="bg-red-800/90 backdrop-blur-sm text-white font-sans font-medium text-[11px] leading-none px-2.5 py-1 rounded-md">Гостре</span>
+            </div>
           </div>
 
-          <div class="flex flex-col justify-between space-y-4">
+          <div class="flex flex-col justify-between gap-5">
             <div>
-              <h2 id="modal-title" class="font-sans font-bold text-xl text-fv-noir mb-2" x-text="modalDish.title"></h2>
-              <p class="text-xs text-fv-slate leading-relaxed font-normal mb-4" x-text="modalDish.description"></p>
+              <h2 id="modal-title" class="font-serif text-2xl sm:text-3xl font-medium text-db-text leading-tight mb-2" x-text="modalDish.title"></h2>
+              <p class="font-sans text-sm text-db-muted leading-relaxed mb-4" x-text="modalDish.description"></p>
 
-              <div class="space-y-2 py-3 border-t border-b border-fv-noir/10 text-xs font-mono text-fv-slate">
-                <div class="flex justify-between">
-                  <span>Вага страви:</span>
-                  <span class="text-fv-noir font-medium" x-text="modalDish.weight + ' г'"></span>
+              <div class="space-y-2 py-3 border-t border-b border-db-linen text-xs">
+                <div class="flex items-center justify-between gap-3">
+                  <span class="font-sans text-db-subtle">Вага страви</span>
+                  <span class="font-mono tabular-nums db-tabular text-db-text font-medium whitespace-nowrap" x-text="modalDish.weight + ' г'"></span>
                 </div>
-                <div class="flex justify-between" x-show="modalDish.calories > 0">
-                  <span>Калорійність:</span>
-                  <span class="text-fv-noir font-medium" x-text="modalDish.calories + ' ккал'"></span>
+                <div class="flex items-center justify-between gap-3" x-show="modalDish.calories > 0">
+                  <span class="font-sans text-db-subtle">Калорійність</span>
+                  <span class="font-mono tabular-nums db-tabular text-db-text font-medium whitespace-nowrap" x-text="modalDish.calories + ' ккал'"></span>
                 </div>
-                <div class="flex justify-between" x-show="modalDish.allergens">
-                  <span>Алергени:</span>
-                  <span class="text-fv-noir font-medium" x-text="modalDish.allergens"></span>
+                <div class="flex items-start justify-between gap-3" x-show="modalDish.allergens">
+                  <span class="font-sans text-db-subtle shrink-0">Алергени</span>
+                  <span class="font-sans text-db-text font-medium text-right" x-text="modalDish.allergens"></span>
                 </div>
               </div>
 
               <div class="space-y-2 pt-3" x-show="modalDish.options && modalDish.options.length > 0">
-                <span class="font-mono text-[11px] uppercase tracking-wider text-fv-slate block">Опція / модифікатор</span>
-                <div class="grid grid-cols-1 gap-1.5">
+                <span class="font-sans text-xs font-medium text-db-muted block">Опція або модифікатор</span>
+                <div class="grid grid-cols-1 gap-2">
                   <button
                     type="button"
                     @click="setModalOption('', '0')"
-                    :class="modalSelectedOptionId === '' ? 'border-fv-noir bg-fv-noir text-white' : 'border-fv-noir/20 bg-white text-fv-noir hover:bg-fv-offwhite'"
-                    class="p-2.5 border text-left font-mono transition-colors flex justify-between items-center text-xs"
+                    :class="modalSelectedOptionId === '' ? 'border-db-crust bg-db-boucle text-db-text' : 'border-db-linen bg-white text-db-text hover:border-db-noir/30 hover:bg-db-paper'"
+                    class="p-2.5 rounded-lg border text-left font-sans transition-[color,background-color,border-color] duration-150 flex justify-between items-center gap-3 text-sm"
                   >
-                    <span class="font-medium">Стандарт</span>
-                    <span class="text-[11px] opacity-80 font-semibold">Базова</span>
+                    <span class="flex items-center gap-2.5 min-w-0">
+                      <span
+                        :class="modalSelectedOptionId === '' ? 'border-db-crust' : 'border-db-linen'"
+                        class="w-4 h-4 rounded-full border flex items-center justify-center shrink-0"
+                        aria-hidden="true"
+                      >
+                        <span x-show="modalSelectedOptionId === ''" class="w-2 h-2 rounded-full bg-db-crust"></span>
+                      </span>
+                      <span class="font-medium truncate">Стандарт</span>
+                    </span>
+                    <span class="font-mono text-xs text-db-subtle font-medium whitespace-nowrap shrink-0">Базова</span>
                   </button>
                   <template x-for="opt in (modalDish.options || [])" :key="opt.id">
                     <button
                       type="button"
                       @click="setModalOption(opt.id, opt.priceDelta)"
-                      :class="modalSelectedOptionId === String(opt.id) ? 'border-fv-noir bg-fv-noir text-white' : 'border-fv-noir/20 bg-white text-fv-noir hover:bg-fv-offwhite'"
-                      class="p-2.5 border text-left font-mono transition-colors flex justify-between items-center text-xs"
+                      :class="modalSelectedOptionId === String(opt.id) ? 'border-db-crust bg-db-boucle text-db-text' : 'border-db-linen bg-white text-db-text hover:border-db-noir/30 hover:bg-db-paper'"
+                      class="p-2.5 rounded-lg border text-left font-sans transition-[color,background-color,border-color] duration-150 flex justify-between items-center gap-3 text-sm"
                     >
-                      <span class="font-medium" x-text="opt.name"></span>
-                      <span class="text-[11px] opacity-80 font-semibold" x-text="formatOptionDelta(opt.priceDelta)"></span>
+                      <span class="flex items-center gap-2.5 min-w-0">
+                        <span
+                          :class="modalSelectedOptionId === String(opt.id) ? 'border-db-crust' : 'border-db-linen'"
+                          class="w-4 h-4 rounded-full border flex items-center justify-center shrink-0"
+                          aria-hidden="true"
+                        >
+                          <span x-show="modalSelectedOptionId === String(opt.id)" class="w-2 h-2 rounded-full bg-db-crust"></span>
+                        </span>
+                        <span class="font-medium truncate" x-text="opt.name"></span>
+                      </span>
+                      <span class="font-mono tabular-nums db-tabular text-xs text-db-muted font-medium whitespace-nowrap shrink-0" x-text="formatOptionDelta(opt.priceDelta)"></span>
                     </button>
                   </template>
                 </div>
               </div>
             </div>
 
-            <div class="pt-4 space-y-3">
+            <div class="pt-4 border-t border-db-linen space-y-4">
               <div class="flex items-center justify-between gap-3">
-                <span class="text-xs font-mono text-fv-slate uppercase">Кількість:</span>
-                <div class="flex items-center border border-fv-noir/20 bg-white">
+                <div class="inline-flex items-center rounded-lg border border-db-linen bg-db-paper overflow-hidden">
                   <button
                     type="button"
                     @click="decrementModalQty()"
-                    class="w-9 h-9 flex items-center justify-center text-fv-noir hover:bg-fv-offwhite transition-colors text-base font-mono"
+                    class="w-11 h-11 flex items-center justify-center text-db-text hover:bg-db-boucle transition-colors text-base font-mono"
                     aria-label="Зменшити кількість"
                   >
                     -
                   </button>
-                  <span class="w-9 h-9 flex items-center justify-center font-mono font-bold text-sm text-fv-noir" x-text="modalQuantity"></span>
+                  <span class="w-10 h-11 flex items-center justify-center font-mono tabular-nums db-tabular font-semibold text-sm text-db-text bg-white" x-text="modalQuantity"></span>
                   <button
                     type="button"
                     @click="incrementModalQty()"
-                    class="w-9 h-9 flex items-center justify-center text-fv-noir hover:bg-fv-offwhite transition-colors text-base font-mono"
+                    class="w-11 h-11 flex items-center justify-center text-db-text hover:bg-db-boucle transition-colors text-base font-mono"
                     aria-label="Збільшити кількість"
                   >
                     +
                   </button>
                 </div>
-              </div>
 
-              <div class="flex justify-between items-baseline">
-                <span class="text-xs font-mono text-fv-slate uppercase">Вартість:</span>
                 <div class="text-right">
-                  <span class="font-mono font-bold text-xl text-fv-noir" x-text="modalTotalPrice + ' грн'"></span>
-                  <span class="block font-mono text-[11px] text-fv-slate" x-show="modalQuantity > 1" x-text="modalUnitPrice.toFixed(2) + ' грн / од.'"></span>
+                  <span class="font-mono tabular-nums db-tabular font-semibold text-xl text-db-text" x-text="modalTotalPrice"></span>
+                  <span class="block font-mono tabular-nums db-tabular text-xs text-db-subtle" x-show="modalQuantity > 1" x-text="modalUnitPriceFormatted + ' / од.'"></span>
                 </div>
               </div>
 
-              <div class="grid grid-cols-2 gap-3">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <a
                   :href="modalDish.detailUrl"
-                  class="py-3 px-3 text-center bg-fv-offwhite text-fv-noir border border-fv-noir/20 text-xs font-mono uppercase tracking-wider hover:bg-fv-lightgray transition-colors font-medium"
+                  class="db-btn-secondary inline-flex items-center justify-center min-h-[44px] px-4 rounded-lg bg-db-paper text-db-text border border-db-linen text-sm font-sans font-medium hover:border-db-noir/40 hover:bg-db-boucle transition-[color,background-color,border-color] duration-150 text-center"
                 >
                   Детальна сторінка
                 </a>
                 <button
                   type="button"
                   :disabled="modalSubmitting"
-                  :class="modalSubmitting ? 'opacity-60 cursor-not-allowed' : 'hover:bg-black'"
+                  :class="modalSubmitting ? 'opacity-60 cursor-not-allowed' : 'hover:bg-db-ink'"
                   @click="addModalToCart($event)"
-                  class="py-3 px-3 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider transition-colors font-medium text-center"
+                  class="db-btn-primary inline-flex items-center justify-center min-h-[44px] px-4 rounded-lg bg-db-noir text-white text-sm font-sans font-medium transition-[color,background-color,opacity] duration-150 text-center"
                 >
                   До кошика
                 </button>

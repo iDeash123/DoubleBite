@@ -4,6 +4,7 @@ from django.contrib import admin
 from django.contrib.sitemaps.views import sitemap
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.urls import include, path
+from django.views.generic import TemplateView
 from django.views.static import serve
 from menu.sitemaps import CategorySitemap, DishSitemap, StaticViewSitemap
 from menu.views import HomeView, robots_txt_view
@@ -20,6 +21,8 @@ urlpatterns = [
     path('sitemap.xml', sitemap, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
     path(settings.DJANGO_ADMIN_URL, admin.site.urls),
     path('', HomeView.as_view(), name='home'),
+    path('privacy/', TemplateView.as_view(template_name='legal/privacy.html'), name='privacy'),
+    path('terms/', TemplateView.as_view(template_name='legal/terms.html'), name='terms'),
     path('accounts/signup/', RegisterView.as_view()),
     path('accounts/password/reset/', CustomPasswordResetView.as_view()),
     path('accounts/', include('accounts.urls')),

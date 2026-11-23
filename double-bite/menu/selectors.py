@@ -2,6 +2,7 @@ import json
 import logging
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from config.constants import DEFAULT_FREE_DELIVERY_THRESHOLD
 from django.conf import settings
@@ -9,6 +10,7 @@ from django.core.exceptions import SynchronousOnlyOperation
 from django.db import DatabaseError, connection
 from django.db.models import Q, QuerySet
 from django.templatetags.static import static
+from django.utils import timezone
 
 from .models import Category, Dish
 
@@ -625,6 +627,7 @@ def _match_collection_dishes(collections_data: list[dict[str, Any]], db_dishes: 
             item['price'] = str(int(real_d.price) if real_d.price % 1 == 0 else real_d.price)
             item['weight_grams'] = real_d.weight_grams or item['weight_grams']
             item['calories'] = real_d.calories or item['calories']
+            item['detail_url'] = real_d.get_absolute_url()
             if real_d.image and real_d.image.url:
                 item['image'] = real_d.image.url
 
@@ -639,7 +642,7 @@ def get_home_page_context(total_amount: Decimal | None = None) -> dict[str, Any]
             'title': c['title'],
             'subtitle': c['subtitle'],
             'description': c['description'],
-            'dishes': [dict(item, id=None) for item in c['dishes']],
+            'dishes': [dict(item, id=None, detail_url='') for item in c['dishes']],
         }
         for c in DEFAULT_COLLECTIONS_DATA
     ]
@@ -684,6 +687,9 @@ def get_home_page_context(total_amount: Decimal | None = None) -> dict[str, Any]
         else:
             free_delivery_percent = min(100, max(0, int((current_total * 100) // threshold_dec)))
 
+    kyiv_now = timezone.localtime(timezone=ZoneInfo('Europe/Kyiv'))
+    kitchen_is_open = 10 <= kyiv_now.hour < 22
+
     return {
         'hero_dishes': hero_dishes,
         'hero_dishes_json': json.dumps(hero_dishes, ensure_ascii=False),
@@ -691,6 +697,7 @@ def get_home_page_context(total_amount: Decimal | None = None) -> dict[str, Any]
         'collections_json': json.dumps(collections_data, ensure_ascii=False),
         'featured_dishes': featured_dishes,
         'categories': categories,
+        'kitchen_is_open': kitchen_is_open,
         'free_delivery_threshold': free_delivery_threshold,
         'free_delivery_remaining': free_delivery_remaining,
         'meets_free_delivery': meets_free_delivery,

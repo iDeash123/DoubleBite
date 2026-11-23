@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% load l10n static %}
+{% load l10n static menu_extras %}
 
-{% block title %}{{ dish.title }} — {{ dish.price }} грн | Double Bite™{% endblock %}
-{% block meta_title %}{{ dish.title }} — {{ dish.price }} грн | Double Bite™{% endblock %}
+{% block title %}{{ dish.title }} — {{ dish.price|format_price }} | Double Bite™{% endblock %}
+{% block meta_title %}{{ dish.title }} — {{ dish.price|format_price }} | Double Bite™{% endblock %}
 {% block meta_description %}{{ dish.description|default:dish.title|truncatewords:25 }} Доставка авторських страв Double Bite у Києві.{% endblock %}
 
 {% block canonical_url %}{{ request.scheme }}://{{ request.get_host }}{{ dish.get_absolute_url }}{% endblock %}
@@ -23,11 +23,22 @@
        selectedOptionId: '',
        optionDelta: 0,
        quantity: 1,
+       formatPrice(amount) {
+         const num = parseFloat(amount || 0);
+         if (!Number.isFinite(num)) return '0 ₴';
+         const rounded = Math.round(num * 100) / 100;
+         const isWhole = Math.abs(rounded - Math.round(rounded)) < 0.001;
+         const formatted = isWhole ? String(Math.round(rounded)) : rounded.toFixed(2).replace('.', ',');
+         return formatted + ' ₴';
+       },
        get unitPrice() {
          return this.basePrice + this.optionDelta;
        },
+       get unitPriceFormatted() {
+         return this.formatPrice(this.unitPrice);
+       },
        get totalPrice() {
-         return (this.unitPrice * this.quantity).toFixed(2);
+         return this.formatPrice(this.unitPrice * this.quantity);
        },
        setOption(id, delta) {
          this.selectedOptionId = id;
@@ -38,134 +49,163 @@
        },
        decrement() {
          if (this.quantity > 1) this.quantity--;
+       },
+       askAiConcierge() {
+         window.dispatchEvent(new CustomEvent('open-ai-chat', {
+           detail: { query: 'Розкажи детальніше про «{{ dish.title|escapejs }}»: склад, алергени та з чим найкраще поєднати?' }
+         }));
        }
      }">
 
-  <nav class="flex items-center text-xs font-mono uppercase tracking-wider text-fv-slate mb-8 overflow-x-auto pb-2 border-b border-fv-noir/10" aria-label="Хлібні крихти">
+  <nav class="flex items-center text-sm font-sans text-db-muted mb-6 sm:mb-8 overflow-x-auto no-scrollbar pb-3 border-b border-db-linen" aria-label="Хлібні крихти">
     {% for crumb in breadcrumbs %}
       {% if not forloop.first %}
-        <span class="mx-2 text-fv-slate/40 select-none">/</span>
+        <span class="mx-2 text-db-subtle/50 select-none" aria-hidden="true">/</span>
       {% endif %}
       {% if crumb.url %}
-        <a href="{{ crumb.url }}" class="hover:text-fv-noir transition-colors whitespace-nowrap">{{ crumb.title }}</a>
+        <a href="{{ crumb.url }}" class="hover:text-db-crust-dark transition-colors whitespace-nowrap">{{ crumb.title }}</a>
       {% else %}
-        <span class="text-fv-noir font-semibold whitespace-nowrap">{{ crumb.title }}</span>
+        <span class="text-db-text font-medium whitespace-nowrap" aria-current="page">{{ crumb.title }}</span>
       {% endif %}
     {% endfor %}
   </nav>
 
   <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
-    
+
     <div class="lg:col-span-7">
-      <div class="bg-fv-offwhite aspect-square p-8 sm:p-12 border border-fv-noir/15 flex items-center justify-center relative overflow-hidden group">
+      <div class="aspect-[4/3] sm:aspect-[5/4] rounded-2xl overflow-hidden bg-db-boucle border border-db-linen relative group">
         {% with img_url=dish.image.url %}
           {% if dish.image and img_url %}
             <img
               src="{{ img_url }}"
               alt="{{ dish.title }}"
-              loading="lazy"
+              loading="eager"
+              fetchpriority="high"
               decoding="async"
-              class="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-700"
+              class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 motion-reduce:transform-none"
             >
+            <div class="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-db-ink/20 to-transparent" aria-hidden="true"></div>
           {% else %}
-            <div class="flex flex-col items-center justify-center text-fv-slate/40">
-              <svg class="w-20 h-20 stroke-current" fill="none" viewBox="0 0 24 24">
+            <div class="w-full h-full flex flex-col items-center justify-center text-db-subtle/60">
+              <svg class="w-16 h-16 stroke-current" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
               </svg>
-              <span class="font-mono text-xs uppercase tracking-widest mt-2 text-fv-slate/60">Double Bite</span>
+              <span class="font-serif italic text-sm mt-2 text-db-subtle">Double Bite</span>
             </div>
           {% endif %}
         {% endwith %}
 
-        <div class="absolute top-4 left-4 flex flex-col gap-1.5 z-10">
-          {% if dish.is_vegetarian %}
-            <span class="bg-emerald-700 text-white font-mono text-[10px] px-2.5 py-1 tracking-wider uppercase">
-              Вегетаріанське
-            </span>
-          {% endif %}
-          {% if dish.is_spicy %}
-            <span class="bg-red-700 text-white font-mono text-[10px] px-2.5 py-1 tracking-wider uppercase">
-              Гостре
-            </span>
-          {% endif %}
-        </div>
+        {% if dish.is_vegetarian or dish.is_spicy %}
+          <div class="absolute top-4 left-4 flex flex-wrap gap-2 z-10 pointer-events-none">
+            {% if dish.is_vegetarian %}
+              <span class="bg-emerald-800/90 backdrop-blur-sm text-white font-sans font-medium text-xs px-3 py-1.5 rounded-md">
+                Вегетаріанське
+              </span>
+            {% endif %}
+            {% if dish.is_spicy %}
+              <span class="bg-red-800/90 backdrop-blur-sm text-white font-sans font-medium text-xs px-3 py-1.5 rounded-md">
+                Гостре
+              </span>
+            {% endif %}
+          </div>
+        {% endif %}
       </div>
     </div>
 
     <div class="lg:col-span-5 space-y-6">
-      
+
       <div>
-        <div class="inline-block px-2.5 py-1 bg-fv-offwhite text-fv-slate text-[11px] font-mono uppercase tracking-widest mb-3 border border-fv-noir/10">
+        <a
+          href="/menu/?category={{ dish.category.slug }}"
+          class="inline-flex items-center px-3 py-1 rounded-md bg-db-boucle border border-db-linen text-db-crust-dark text-xs font-sans font-medium hover:border-db-crust transition-colors mb-3"
+        >
           {{ dish.category.name }}
-        </div>
-        <h1 class="font-sans font-black text-2xl sm:text-3xl lg:text-4xl text-fv-noir tracking-tight leading-tight uppercase mb-3">
+        </a>
+        <h1 class="font-serif text-3xl sm:text-4xl lg:text-5xl font-medium text-db-text tracking-tight leading-[1.08] mb-3">
           {{ dish.title }}
         </h1>
         <div class="flex items-baseline gap-3">
-          <span class="font-mono font-bold text-2xl sm:text-3xl text-fv-noir">
-            <span x-text="totalPrice">{{ dish.price }}</span> грн
-          </span>
-          <span class="font-mono text-xs text-fv-slate uppercase tracking-wider" x-show="quantity > 1">
-            (<span x-text="unitPrice.toFixed(2)"></span> грн / од.)
+          <span class="font-mono tabular-nums db-tabular font-semibold text-2xl sm:text-3xl text-db-text" x-text="totalPrice">{{ dish.price|format_price }}</span>
+          <span class="font-mono tabular-nums db-tabular text-xs text-db-subtle" x-show="quantity > 1" x-cloak>
+            (<span x-text="unitPriceFormatted">{{ dish.price|format_price }}</span> / од.)
           </span>
         </div>
       </div>
 
       {% if dish.description %}
-        <div class="border-t border-fv-noir/10 pt-4">
-          <h2 class="font-mono text-xs uppercase tracking-wider text-fv-slate mb-2">Опис та рецептура</h2>
-          <p class="text-sm text-fv-noir leading-relaxed font-normal">
+        <div class="border-t border-db-linen pt-5">
+          <h2 class="font-sans text-sm font-semibold text-db-text mb-1.5">Опис та рецептура</h2>
+          <p class="font-sans text-sm sm:text-[15px] text-db-muted leading-relaxed">
             {{ dish.description }}
           </p>
         </div>
       {% endif %}
 
-      <div class="grid grid-cols-3 gap-3 py-4 border-t border-b border-fv-noir/10 text-center font-mono">
-        <div class="bg-fv-offwhite p-3 border border-fv-noir/10">
-          <div class="text-[10px] uppercase text-fv-slate tracking-widest mb-1">Вага</div>
-          <div class="font-bold text-sm text-fv-noir">{{ dish.weight_grams }} г</div>
+      <div class="grid grid-cols-3 gap-2 sm:gap-3 py-5 border-t border-b border-db-linen">
+        <div class="rounded-xl bg-db-boucle border border-db-linen px-2 py-3 sm:p-3.5 text-center">
+          <div class="text-[11px] sm:text-xs font-sans text-db-subtle mb-1">Вага</div>
+          <div class="font-mono tabular-nums db-tabular font-semibold text-xs sm:text-sm text-db-text whitespace-nowrap">{{ dish.weight_grams }} г</div>
         </div>
-        <div class="bg-fv-offwhite p-3 border border-fv-noir/10">
-          <div class="text-[10px] uppercase text-fv-slate tracking-widest mb-1">Калорії</div>
-          <div class="font-bold text-sm text-fv-noir">{{ dish.calories|default:"-" }} ккал</div>
+        <div class="rounded-xl bg-db-boucle border border-db-linen px-2 py-3 sm:p-3.5 text-center">
+          <div class="text-[11px] sm:text-xs font-sans text-db-subtle mb-1">Калорії</div>
+          <div class="font-mono tabular-nums db-tabular font-semibold text-xs sm:text-sm text-db-text whitespace-nowrap">{% if dish.calories %}{{ dish.calories }} ккал{% else %}—{% endif %}</div>
         </div>
-        <div class="bg-fv-offwhite p-3 border border-fv-noir/10">
-          <div class="text-[10px] uppercase text-fv-slate tracking-widest mb-1">Статус</div>
-          <div class="font-bold text-sm text-emerald-700 uppercase">В наявності</div>
+        <div class="rounded-xl bg-db-boucle border border-db-linen px-2 py-3 sm:p-3.5 text-center">
+          <div class="text-[11px] sm:text-xs font-sans text-db-subtle mb-1">Статус</div>
+          <div class="font-sans font-semibold text-xs sm:text-sm text-emerald-700 whitespace-nowrap">В наявності</div>
         </div>
       </div>
 
       {% if dish.allergens %}
-        <div class="text-xs font-mono text-fv-slate">
-          <span class="text-fv-noir uppercase tracking-wider font-semibold">Алергени:</span> {{ dish.allergens }}
+        <div class="flex items-start gap-2 rounded-xl bg-db-paper border border-db-linen px-4 py-3 text-sm font-sans text-db-muted">
+          <span class="text-db-text font-medium shrink-0">Алергени:</span>
+          <span>{{ dish.allergens }}</span>
         </div>
       {% endif %}
 
       {% if options %}
-        <div class="space-y-3 pt-2">
-          <label class="font-mono text-xs uppercase tracking-wider text-fv-slate block">
-            Оберіть модифікатор / розмір
-          </label>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div class="space-y-3 pt-1">
+          <span class="font-sans text-sm font-medium text-db-text block">
+            Оберіть модифікатор або розмір
+          </span>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <button
               type="button"
               @click="setOption('', '0')"
-              :class="selectedOptionId === '' ? 'border-fv-noir bg-fv-noir text-white' : 'border-fv-noir/20 bg-white text-fv-noir hover:bg-fv-offwhite'"
-              class="p-3 border text-left font-mono transition-colors flex justify-between items-center"
+              :class="selectedOptionId === '' ? 'border-db-crust bg-db-boucle text-db-text' : 'border-db-linen bg-white text-db-text hover:border-db-noir/30 hover:bg-db-paper'"
+              class="p-3 rounded-lg border text-left font-sans transition-[color,background-color,border-color] duration-150 flex justify-between items-center gap-2.5"
             >
-              <span class="text-xs font-medium">Стандарт</span>
-              <span class="text-[11px] opacity-80 font-semibold">Базова</span>
+              <span class="flex items-center gap-2.5 min-w-0">
+                <span
+                  :class="selectedOptionId === '' ? 'border-db-crust' : 'border-db-linen'"
+                  class="w-4 h-4 rounded-full border flex items-center justify-center shrink-0"
+                  aria-hidden="true"
+                >
+                  <span x-show="selectedOptionId === ''" class="w-2 h-2 rounded-full bg-db-crust"></span>
+                </span>
+                <span class="text-sm font-medium truncate">Стандарт</span>
+              </span>
+              <span class="font-mono text-xs text-db-subtle font-medium whitespace-nowrap shrink-0">Базова</span>
             </button>
             {% for opt in options %}
               <button
                 type="button"
                 @click="setOption('{{ opt.id }}', '{{ opt.price_delta|unlocalize }}')"
-                :class="selectedOptionId === '{{ opt.id }}' ? 'border-fv-noir bg-fv-noir text-white' : 'border-fv-noir/20 bg-white text-fv-noir hover:bg-fv-offwhite'"
-                class="p-3 border text-left font-mono transition-colors flex justify-between items-center"
+                :class="selectedOptionId === '{{ opt.id }}' ? 'border-db-crust bg-db-boucle text-db-text' : 'border-db-linen bg-white text-db-text hover:border-db-noir/30 hover:bg-db-paper'"
+                class="p-3 rounded-lg border text-left font-sans transition-[color,background-color,border-color] duration-150 flex justify-between items-center gap-2.5"
               >
-                <span class="text-xs font-medium">{{ opt.name }}</span>
-                <span class="text-[11px] opacity-80 font-semibold">
-                  {% if opt.price_delta > 0 %}+{{ opt.price_delta|unlocalize }} грн{% elif opt.price_delta < 0 %}{{ opt.price_delta|unlocalize }} грн{% else %}0.00 грн{% endif %}
+                <span class="flex items-center gap-2.5 min-w-0">
+                  <span
+                    :class="selectedOptionId === '{{ opt.id }}' ? 'border-db-crust' : 'border-db-linen'"
+                    class="w-4 h-4 rounded-full border flex items-center justify-center shrink-0"
+                    aria-hidden="true"
+                  >
+                    <span x-show="selectedOptionId === '{{ opt.id }}'" class="w-2 h-2 rounded-full bg-db-crust"></span>
+                  </span>
+                  <span class="text-sm font-medium truncate">{{ opt.name }}</span>
+                </span>
+                <span class="font-mono tabular-nums db-tabular text-xs text-db-muted font-medium whitespace-nowrap shrink-0">
+                  {{ opt.price_delta|format_price_delta }}
                 </span>
               </button>
             {% endfor %}
@@ -173,57 +213,70 @@
         </div>
       {% endif %}
 
-      <form method="post" action="{% url 'orders:cart_add' dish.id %}" class="space-y-4 pt-4 border-t border-fv-noir/10">
-        {% csrf_token %}
-        <input type="hidden" name="dish_id" value="{{ dish.id }}">
-        <input type="hidden" name="option_id" :value="selectedOptionId">
-        <input type="hidden" name="quantity" :value="quantity">
+      <div class="space-y-3 pt-4 border-t border-db-linen">
+        <form method="post" action="{% url 'orders:cart_add' dish.id %}" class="space-y-3">
+          {% csrf_token %}
+          <input type="hidden" name="dish_id" value="{{ dish.id }}">
+          <input type="hidden" name="option_id" :value="selectedOptionId">
+          <input type="hidden" name="quantity" :value="quantity">
 
-        <div class="flex items-center gap-4">
-          <div class="flex items-center border border-fv-noir/20 bg-white">
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <div class="inline-flex items-center justify-between sm:justify-start rounded-lg border border-db-linen bg-db-paper overflow-hidden h-12 shrink-0">
+              <button
+                type="button"
+                @click="decrement()"
+                class="w-11 h-12 flex items-center justify-center text-db-text hover:bg-db-boucle transition-colors text-base font-mono"
+                aria-label="Зменшити кількість"
+              >
+                -
+              </button>
+              <span class="w-12 h-12 flex items-center justify-center bg-white font-mono tabular-nums db-tabular font-semibold text-sm text-db-text" x-text="quantity">1</span>
+              <button
+                type="button"
+                @click="increment()"
+                class="w-11 h-12 flex items-center justify-center text-db-text hover:bg-db-boucle transition-colors text-base font-mono"
+                aria-label="Збільшити кількість"
+              >
+                +
+              </button>
+            </div>
+
             <button
-              type="button"
-              @click="decrement()"
-              class="w-10 h-12 flex items-center justify-center text-fv-noir hover:bg-fv-offwhite transition-colors text-base font-mono"
-              aria-label="Зменшити кількість"
+              type="submit"
+              hx-post="{% url 'orders:cart_add' dish.id %}"
+              hx-target="#cart-badge"
+              hx-swap="outerHTML"
+              hx-include="closest form"
+              class="db-btn-primary flex-1 min-h-[48px] px-6 py-3 rounded-lg bg-db-noir text-white hover:bg-db-ink text-sm font-sans font-medium flex items-center justify-center gap-2 transition-[color,background-color] duration-150"
             >
-              -
-            </button>
-            <span class="w-12 h-12 flex items-center justify-center font-mono font-bold text-sm text-fv-noir" x-text="quantity"></span>
-            <button
-              type="button"
-              @click="increment()"
-              class="w-10 h-12 flex items-center justify-center text-fv-noir hover:bg-fv-offwhite transition-colors text-base font-mono"
-              aria-label="Збільшити кількість"
-            >
-              +
+              <span>Додати до кошика · <span class="font-mono tabular-nums db-tabular" x-text="totalPrice">{{ dish.price|format_price }}</span></span>
             </button>
           </div>
+        </form>
 
-          <button
-            type="submit"
-            hx-post="{% url 'orders:cart_add' dish.id %}"
-            hx-target="#cart-badge"
-            hx-swap="outerHTML"
-            hx-include="closest form"
-            class="flex-1 py-3.5 px-6 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors font-medium flex items-center justify-center gap-2"
-          >
-            <span>Додати до кошика · <span x-text="totalPrice"></span> грн</span>
-          </button>
-        </div>
-      </form>
+        <button
+          type="button"
+          @click="askAiConcierge()"
+          class="db-btn-secondary w-full min-h-[44px] px-4 py-2.5 rounded-lg border border-db-linen bg-white hover:border-db-crust/60 hover:bg-db-boucle text-db-text text-sm font-sans font-medium flex items-center justify-center gap-2 transition-[color,background-color,border-color] duration-150"
+        >
+          <svg class="w-4 h-4 text-db-crust-dark shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <span>Запитати AI-консьєржа про страву</span>
+        </button>
+      </div>
 
-      <div class="pt-4 border-t border-fv-noir/10">
-        <div class="grid grid-cols-2 gap-4 text-[11px] font-mono text-fv-slate">
-          <div class="flex items-center gap-2">
-            <svg class="w-4 h-4 text-fv-noir" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      <div class="pt-4 border-t border-db-linen">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm font-sans text-db-muted">
+          <div class="flex items-center gap-2.5">
+            <svg class="w-4 h-4 text-db-crust-dark shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
-            <span>Доставка 30-45 хв</span>
+            <span>Доставка 25–45 хв</span>
           </div>
-          <div class="flex items-center gap-2">
-            <svg class="w-4 h-4 text-fv-noir" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          <div class="flex items-center gap-2.5">
+            <svg class="w-4 h-4 text-db-crust-dark shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
             <span>Контроль свіжості</span>
           </div>

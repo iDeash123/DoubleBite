@@ -1,70 +1,79 @@
-{% load l10n %}
-<article class="bg-white p-5 sm:p-6 border border-fv-noir/10 flex flex-col justify-between hover:border-fv-noir/30 transition-all group relative">
-  {% with img_url=dish.image.url %}
+{% load l10n menu_extras %}
+<article class="bg-white border border-db-linen rounded-xl overflow-hidden flex flex-col justify-between hover:border-db-noir/30 hover:shadow-md transition-[border-color,box-shadow] duration-200 group">
+  {% with img_url=dish.image.url dish_options=dish.options.all %}
   <div>
-    <div class="bg-fv-offwhite aspect-square p-4 flex items-center justify-center overflow-hidden relative mb-4">
-      {% if dish.image and img_url %}
-        <img
-          src="{{ img_url }}"
-          alt="{{ dish.title }}"
-          {% if forloop.counter <= 4 %}loading="eager" fetchpriority="high"{% else %}loading="lazy"{% endif %}
-          decoding="async"
-          class="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-500"
-        >
-      {% else %}
-        <div class="w-full h-full flex flex-col items-center justify-center text-fv-slate/40">
-          <svg class="w-12 h-12 stroke-current" fill="none" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
-          </svg>
-          <span class="text-[10px] font-mono uppercase tracking-widest mt-1 text-fv-slate/60">Double Bite</span>
+    <div class="aspect-[4/3] overflow-hidden bg-db-boucle relative">
+      <a href="{{ dish.get_absolute_url }}" class="block w-full h-full focus-visible:outline-none" tabindex="-1" aria-label="{{ dish.title }}">
+        {% if dish.image and img_url %}
+          <img
+            src="{{ img_url }}"
+            alt="{{ dish.title }}"
+            {% if forloop.counter <= 4 %}loading="eager" fetchpriority="high"{% else %}loading="lazy"{% endif %}
+            decoding="async"
+            class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 motion-reduce:transform-none"
+          >
+          <div class="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-db-ink/25 to-transparent" aria-hidden="true"></div>
+        {% else %}
+          <div class="w-full h-full flex flex-col items-center justify-center text-db-subtle/60">
+            <svg class="w-10 h-10 stroke-current" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+            </svg>
+            <span class="text-xs font-serif italic mt-1.5 text-db-subtle">Double Bite</span>
+          </div>
+        {% endif %}
+      </a>
+
+      {% if dish.is_vegetarian or dish.is_spicy %}
+        <div class="absolute top-3 left-3 flex flex-wrap gap-1.5 z-10 pointer-events-none">
+          {% if dish.is_vegetarian %}
+            <span class="bg-emerald-800/90 backdrop-blur-sm text-white font-sans font-medium text-[11px] leading-none px-2.5 py-1 rounded-md">Вегетаріанське</span>
+          {% endif %}
+          {% if dish.is_spicy %}
+            <span class="bg-red-800/90 backdrop-blur-sm text-white font-sans font-medium text-[11px] leading-none px-2.5 py-1 rounded-md">Гостре</span>
+          {% endif %}
         </div>
       {% endif %}
-
-      <div class="absolute top-2 left-2 flex flex-col gap-1 z-10">
-        {% if dish.is_vegetarian %}
-          <span class="bg-emerald-700 text-white font-mono text-[9px] px-2 py-0.5 tracking-wider uppercase">Вегетаріанське</span>
-        {% endif %}
-        {% if dish.is_spicy %}
-          <span class="bg-red-700 text-white font-mono text-[9px] px-2 py-0.5 tracking-wider uppercase">Гостре</span>
-        {% endif %}
-      </div>
     </div>
 
-    <div class="space-y-1.5 mb-4">
-      <div class="text-[11px] font-mono text-fv-slate uppercase tracking-wider">
+    <div class="px-5 pt-4 pb-3 space-y-1.5">
+      <div class="text-xs font-sans text-db-subtle">
         {{ dish.category.name }}
       </div>
-      <h3 class="font-sans font-bold text-base text-fv-noir group-hover:text-black transition-colors leading-snug">
-        <a href="{{ dish.get_absolute_url }}" class="hover:underline">
+      <h3 class="font-sans font-semibold text-base text-db-text group-hover:text-db-crust-dark transition-colors leading-snug">
+        <a href="{{ dish.get_absolute_url }}" class="hover:underline decoration-db-crust/50 underline-offset-2">
           {{ dish.title }}
         </a>
       </h3>
       {% if dish.description %}
-        <p class="text-xs text-fv-slate line-clamp-2 leading-relaxed font-normal">
+        <p class="text-[13px] font-sans text-db-muted line-clamp-2 leading-relaxed">
           {{ dish.description }}
         </p>
       {% endif %}
     </div>
-
-    <div class="flex items-center gap-3 text-[11px] font-mono text-fv-slate py-2 border-t border-b border-fv-noir/10 mb-4">
-      <span>{{ dish.weight_grams }} г</span>
-      {% if dish.calories %}
-        <span>·</span>
-        <span>{{ dish.calories }} ккал</span>
-      {% endif %}
-      {% if dish.allergens %}
-        <span>·</span>
-        <span class="truncate" title="{{ dish.allergens }}">{{ dish.allergens }}</span>
-      {% endif %}
-    </div>
   </div>
 
-  <div class="pt-2">
-    <div class="flex items-baseline justify-between mb-3">
-      <span class="text-xs font-mono uppercase text-fv-slate">Вартість</span>
-      <span class="font-mono font-bold text-base sm:text-lg text-fv-noir tracking-tight">
-        {{ dish.price }} грн
+  <div class="px-5 pb-5 pt-1">
+    <div class="flex items-center gap-2 text-xs font-mono tabular-nums db-tabular text-db-muted py-2.5 border-t border-db-linen min-w-0">
+      <span class="whitespace-nowrap shrink-0">{{ dish.weight_grams }} г</span>
+      {% if dish.calories %}
+        <span class="text-db-linen shrink-0" aria-hidden="true">·</span>
+        <span class="whitespace-nowrap shrink-0">{{ dish.calories }} ккал</span>
+      {% endif %}
+      {% if dish.allergens %}
+        <span class="text-db-linen shrink-0" aria-hidden="true">·</span>
+        <span class="truncate min-w-0 font-sans text-db-subtle" title="{{ dish.allergens }}">{{ dish.allergens }}</span>
+      {% endif %}
+    </div>
+
+    <div class="flex items-center justify-between gap-2 pt-2.5 mb-3 border-t border-db-linen">
+      <span class="text-lg font-semibold font-mono tabular-nums db-tabular text-db-text tracking-tight whitespace-nowrap">
+        {{ dish.price|format_price }}
       </span>
+      {% if dish_options %}
+        <span class="text-[11px] font-sans font-medium text-db-crust-dark bg-db-boucle border border-db-crust/25 px-2 py-0.5 rounded-md whitespace-nowrap">
+          Є опції
+        </span>
+      {% endif %}
     </div>
 
     <div class="grid grid-cols-2 gap-2">
@@ -82,12 +91,14 @@
           image: '{% if img_url %}{{ img_url|escapejs }}{% endif %}',
           category: '{{ dish.category.name|escapejs }}',
           detailUrl: '{{ dish.get_absolute_url|escapejs }}',
-          options: [{% for opt in dish.options.all %}{ id: '{{ opt.id }}', name: '{{ opt.name|escapejs }}', priceDelta: '{{ opt.price_delta|unlocalize }}' }{% if not forloop.last %}, {% endif %}{% endfor %}],
+          isVegetarian: {{ dish.is_vegetarian|yesno:'true,false' }},
+          isSpicy: {{ dish.is_spicy|yesno:'true,false' }},
+          options: [{% for opt in dish_options %}{ id: '{{ opt.id }}', name: '{{ opt.name|escapejs }}', priceDelta: '{{ opt.price_delta|unlocalize }}' }{% if not forloop.last %}, {% endif %}{% endfor %}],
           opener: $el
         })"
-        class="py-2.5 px-2 bg-fv-offwhite text-fv-noir text-[11px] font-mono uppercase tracking-wider hover:bg-fv-lightgray transition-colors border border-fv-noir/15 text-center select-none"
+        class="{% if dish_options %}bg-db-boucle text-db-text border border-db-crust/40 hover:border-db-crust hover:bg-db-boucle/80{% else %}bg-db-paper text-db-text border border-db-linen hover:border-db-noir/40 hover:bg-db-boucle{% endif %} min-h-[40px] px-3 py-2 rounded-lg text-sm font-sans font-medium transition-[color,background-color,border-color] duration-150 text-center select-none flex items-center justify-center"
       >
-        Деталі
+        {% if dish_options %}Опції{% else %}Деталі{% endif %}
       </button>
 
       <form method="post" action="{% url 'orders:cart_add' dish.id %}" class="m-0 p-0">
@@ -97,7 +108,7 @@
           hx-post="{% url 'orders:cart_add' dish.id %}"
           hx-target="#cart-badge"
           hx-swap="outerHTML"
-          class="w-full py-2.5 px-2 bg-fv-noir text-white text-[11px] font-mono uppercase tracking-wider hover:bg-black transition-colors text-center select-none font-medium flex items-center justify-center gap-1"
+          class="db-btn-primary w-full min-h-[40px] px-3 py-2 rounded-lg bg-db-noir text-white text-sm font-sans font-medium hover:bg-db-ink transition-[color,background-color] duration-150 text-center select-none flex items-center justify-center gap-1.5"
         >
           <span>В кошик</span>
         </button>

@@ -10,7 +10,7 @@ function deliveryCalculator() {
         eta: '20–25 хв',
         min_amount: {{ free_delivery_threshold|default:500|floatformat:'-2u' }},
         fee: '{{ delivery_fee|default:65|floatformat:'-2u' }} ₴',
-        courier_status: 'Кур\'єр #12 на термо-скутері · 1.8 км від вас',
+        zone_info: 'Власна курʼєрська доставка у термобоксах · Пріоритетна зона',
         description: 'Експрес-зона ресторану: Липки, Арсенальна, Кловська'
       },
       {
@@ -18,15 +18,15 @@ function deliveryCalculator() {
         eta: '25–30 хв',
         min_amount: {{ free_delivery_threshold|default:500|floatformat:'-2u' }},
         fee: '{{ delivery_fee|default:65|floatformat:'-2u' }} ₴',
-        courier_status: 'Кур\'єр #07 біля Золотих Воріт · 2.4 км від вас',
-        description: 'Центр, Золоті Ворота, Лук\'янівка, КПІ'
+        zone_info: 'Власна курʼєрська доставка у термобоксах · Центральна зона',
+        description: 'Центр, Золоті Ворота, Лукʼянівка, КПІ'
       },
       {
         name: 'Подільський',
         eta: '25–30 хв',
         min_amount: {{ free_delivery_threshold|default:500|floatformat:'-2u' }},
         fee: '{{ delivery_fee|default:65|floatformat:'-2u' }} ₴',
-        courier_status: 'Кур\'єр #19 на Подолі · 2.9 км від вас',
+        zone_info: 'Власна курʼєрська доставка у термобоксах · Центральна зона',
         description: 'Контрактова площа, Поштова, Воздвиженка'
       },
       {
@@ -34,7 +34,7 @@ function deliveryCalculator() {
         eta: '35–40 хв',
         min_amount: {{ free_delivery_threshold|default:500|floatformat:'-2u' }},
         fee: '{{ delivery_fee|default:65|floatformat:'-2u' }} ₴',
-        courier_status: 'Кур\'єр #03 біля набережної · 5.1 км від вас',
+        zone_info: 'Власна курʼєрська доставка у термобоксах · Північна зона',
         description: 'Оболонська набережна, Героїв Дніпра, Мінська'
       },
       {
@@ -42,7 +42,7 @@ function deliveryCalculator() {
         eta: '35–45 хв',
         min_amount: {{ free_delivery_threshold|default:500|floatformat:'-2u' }},
         fee: '{{ delivery_fee|default:65|floatformat:'-2u' }} ₴',
-        courier_status: 'Кур\'єр #15 у Голосієві · 5.8 км від вас',
+        zone_info: 'Власна курʼєрська доставка у термобоксах · Південна зона',
         description: 'Деміївка, Голосіївський парк, ВДНГ, Теремки'
       },
       {
@@ -50,7 +50,7 @@ function deliveryCalculator() {
         eta: '40–50 хв',
         min_amount: {{ free_delivery_threshold|default:500|floatformat:'-2u' }},
         fee: '{{ delivery_fee|default:65|floatformat:'-2u' }} ₴',
-        courier_status: 'Кур\'єр #22 на Дарниці · 7.2 км від вас',
+        zone_info: 'Власна курʼєрська доставка у термобоксах · Східна зона',
         description: 'Дніпровський та Дарницький райони, Позняки, Осокорки'
       }
     ],
@@ -75,9 +75,9 @@ function deliveryCalculator() {
         <span class="db-kicker"><span class="db-kicker__num">03</span><span class="db-kicker__line"></span><span>Логістика, термоконтроль та сервіс</span></span>
         <h2 class="db-head__title"><em>Доставка</em>та стандарти температури</h2>
       </div>
-      <div class="db-head__aside" data-reveal style="--d:.15s">
-        <p class="db-head__lead">Власні курʼєри на електроскутерах і термобокси з цифровими сенсорами. Оберіть район — і побачите орієнтовний час прибуття.</p>
-        <span class="db-kicker"><span class="db-pulse"></span>Щоденно 10:00 — 22:00</span>
+      <div class="db-head__aside" data-reveal style="--d:.08s">
+        <p class="db-head__lead">Власна курʼєрська доставка у термобоксах із контролем температури. Оберіть район — і побачите орієнтовний час прибуття.</p>
+        <span class="db-kicker"><svg class="db-bite" aria-hidden="true"><use href="#db-bite"></use></svg>Щоденно 10:00 — 22:00</span>
       </div>
     </header>
 
@@ -86,7 +86,7 @@ function deliveryCalculator() {
       <div class="db-panel" data-reveal>
         <div class="db-panel__head">
           <span>Зональний калькулятор ETA</span>
-          <span class="db-panel__live"><span class="db-pulse"></span>Live logistics</span>
+          <span class="db-panel__zone">Зона доставки</span>
         </div>
 
         <div class="db-eta">
@@ -121,7 +121,7 @@ function deliveryCalculator() {
               </div>
               <div class="db-eta__courier">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg>
-                <span x-text="currentDistrict.courier_status"></span>
+                <span x-text="currentDistrict.zone_info"></span>
               </div>
             </div>
           </div>
@@ -145,9 +145,9 @@ function deliveryCalculator() {
         </div>
       </div>
 
-      <div class="db-thermo" :class="{ 'is-cold': thermoMode === 'cold' }" data-reveal style="--d:.15s">
+      <div class="db-thermo" :class="{ 'is-cold': thermoMode === 'cold' }" data-reveal style="--d:.08s">
         <div class="db-panel__head">
-          <span>Симулятор сенсорів термобоксу</span>
+          <span>Стандарти термобоксу</span>
           <span>Double Bite Sensor™</span>
         </div>
 
@@ -161,13 +161,13 @@ function deliveryCalculator() {
             <circle class="db-gauge__ticks" cx="60" cy="60" r="44" pathLength="270" stroke-dasharray="1 9" />
             <circle class="db-gauge__track" cx="60" cy="60" r="52" pathLength="360" stroke-dasharray="270 360" />
             <circle class="db-gauge__fill" cx="60" cy="60" r="52" pathLength="360"
-              :stroke="thermoMode === 'hot' ? '#f59e0b' : '#22d3ee'"
+              :stroke="thermoMode === 'hot' ? '#C8743A' : '#38bdf8'"
               :style="'stroke-dasharray: 270 360; stroke-dashoffset:' + (thermoMode === 'hot' ? 40 : 225)" />
           </svg>
           <div class="db-gauge__center" aria-live="polite">
-            <span class="db-gauge__temp" :style="'color:' + (thermoMode === 'hot' ? '#fbbf24' : '#67e8f9')" x-text="thermoMode === 'hot' ? '+68.4°C' : '+4.2°C'"></span>
+            <span class="db-gauge__temp" :style="'color:' + (thermoMode === 'hot' ? '#E9A66F' : '#7dd3fc')" x-text="thermoMode === 'hot' ? '+68.4°C' : '+4.2°C'"></span>
             <span class="db-gauge__caption">Температура всередині</span>
-            <span class="db-gauge__badge" :style="'color:' + (thermoMode === 'hot' ? '#fcd34d' : '#67e8f9')" x-text="thermoMode === 'hot' ? 'HEAT PRESERVE ON' : 'COOL SHIELD ON'"></span>
+            <span class="db-gauge__badge" :style="'color:' + (thermoMode === 'hot' ? '#E9A66F' : '#7dd3fc')" x-text="thermoMode === 'hot' ? 'HEAT PRESERVE ON' : 'COOL SHIELD ON'"></span>
           </div>
         </div>
 

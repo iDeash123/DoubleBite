@@ -5,89 +5,97 @@
 {% block meta_description %}Підтвердження електронної пошти для активації облікового запису Double Bite.{% endblock %}
 
 {% block content %}
-<div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-12 sm:py-16">
-  <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
-    <div class="md:col-start-4 md:col-span-6">
-      <div class="bg-white p-8 sm:p-12 border border-fv-noir/20 rounded-none relative">
-        <div class="flex items-center justify-between border-b border-fv-noir/10 pb-4 mb-8 text-xs font-mono">
-          <span class="text-fv-slate uppercase tracking-widest">02 / Верифікація</span>
-          <span class="text-fv-noir font-bold">DOUBLE BITE™</span>
-        </div>
-
-        {% if confirmation %}
-          {% user_display confirmation.email_address.user as user_display_name %}
-          {% if can_confirm %}
-            <div class="mb-8">
-              <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-fv-noir font-sans">Підтвердіть електронну пошту</h1>
-              <p class="font-serif italic text-sm text-fv-slate mt-2">
-                Завершення реєстрації та активація доступу до кабінету
-              </p>
-            </div>
-
-            <div class="p-4 bg-fv-offwhite border border-fv-noir/15 text-xs font-mono text-fv-noir leading-relaxed mb-8">
-              Будь ласка, підтвердіть, що адреса
-              <a href="mailto:{{ confirmation.email_address.email }}" class="font-bold underline">{{ confirmation.email_address.email }}</a>
-              належить користувачу <strong>{{ user_display_name }}</strong>.
-            </div>
-
-            {% url 'account_confirm_email' confirmation.key as action_url %}
-            <form method="post" action="{{ action_url }}" class="space-y-6">
-              {% csrf_token %}
-              {{ redirect_field }}
-              <button
-                type="submit"
-                class="w-full py-4 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors rounded-none shadow-xs"
-              >
-                Підтвердити email
-              </button>
-            </form>
-          {% else %}
-            <div class="mb-8">
-              <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-fv-noir font-sans">Адресу вже підтверджено</h1>
-              <p class="font-serif italic text-sm text-fv-slate mt-2">
-                Неможливо повторно підтвердити електронну пошту
-              </p>
-            </div>
-
-            <div class="p-4 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-mono leading-relaxed mb-8">
-              Неможливо підтвердити <strong>{{ email }}</strong>, оскільки ця адреса вже підтверджена в іншому акаунті.
-            </div>
-
-            <a
-              href="{% url 'accounts:login' %}"
-              class="block text-center w-full py-4 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors rounded-none shadow-xs"
-            >
-              Перейти до входу →
-            </a>
-          {% endif %}
-        {% else %}
-          <div class="mb-8">
-            <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-red-600 font-sans">Посилання недійсне</h1>
-            <p class="font-serif italic text-sm text-fv-slate mt-2">
-              Термін дії посилання вичерпано або ключ підтвердження некоректний
+<div class="max-w-[1440px] mx-auto px-4 sm:px-8 py-10 sm:py-16">
+  <div class="max-w-lg mx-auto">
+    <div class="bg-white p-6 sm:p-10 border border-db-linen rounded-2xl shadow-sm">
+      {% if confirmation %}
+        {% user_display confirmation.email_address.user as user_display_name %}
+        {% if can_confirm %}
+          <div class="mb-6">
+            <p class="font-sans text-xs font-medium text-db-crust-dark mb-2">
+              Підтвердження пошти
+            </p>
+            <h1 class="font-serif text-3xl sm:text-4xl font-medium tracking-tight text-db-text">
+              Підтвердіть електронну пошту
+            </h1>
+            <p class="font-sans text-sm text-db-muted mt-2 leading-relaxed">
+              Завершення реєстрації та активація доступу до кабінету
             </p>
           </div>
 
-          <div class="p-4 bg-red-50 border border-red-500 text-red-700 text-xs font-mono leading-relaxed mb-8">
-            Посилання для підтвердження електронної пошти застаріло або недійсне. Увійдіть у систему або надішліть новий запит на підтвердження.
+          <div class="p-4 sm:p-5 rounded-xl bg-db-paper border border-db-linen font-sans text-sm text-db-text leading-relaxed mb-8">
+            Будь ласка, підтвердіть, що адреса
+            <a href="mailto:{{ confirmation.email_address.email }}" class="font-semibold text-db-crust-dark hover:underline break-all">{{ confirmation.email_address.email }}</a>
+            належить користувачу <strong class="font-semibold">{{ user_display_name }}</strong>.
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <a
-              href="{% url 'account_email' %}"
-              class="block text-center w-full py-4 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors rounded-none shadow-xs"
+          {% url 'account_confirm_email' confirmation.key as action_url %}
+          <form method="post" action="{{ action_url }}" class="space-y-5">
+            {% csrf_token %}
+            {{ redirect_field }}
+            <button
+              type="submit"
+              class="w-full min-h-[44px] px-5 py-3 bg-db-noir text-white font-sans text-sm font-medium hover:bg-db-ink transition-colors rounded-lg"
             >
-              Керувати email
-            </a>
-            <a
-              href="{% url 'accounts:login' %}"
-              class="block text-center w-full py-4 border border-fv-noir/30 text-fv-noir text-xs font-mono uppercase tracking-wider hover:border-fv-noir hover:bg-fv-offwhite transition-colors rounded-none"
-            >
-              Увійти в акаунт
-            </a>
+              Підтвердити email
+            </button>
+          </form>
+        {% else %}
+          <div class="mb-6">
+            <p class="font-sans text-xs font-medium text-amber-800 mb-2">
+              Підтвердження пошти
+            </p>
+            <h1 class="font-serif text-3xl sm:text-4xl font-medium tracking-tight text-db-text">
+              Адресу вже підтверджено
+            </h1>
+            <p class="font-sans text-sm text-db-muted mt-2 leading-relaxed">
+              Неможливо повторно підтвердити електронну пошту
+            </p>
           </div>
+
+          <div class="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-sans text-sm leading-relaxed mb-8">
+            Неможливо підтвердити <strong class="font-semibold break-all">{{ email }}</strong>, оскільки ця адреса вже підтверджена в іншому акаунті.
+          </div>
+
+          <a
+            href="{% url 'accounts:login' %}"
+            class="flex items-center justify-center w-full min-h-[44px] px-5 py-3 bg-db-noir text-white font-sans text-sm font-medium hover:bg-db-ink transition-colors rounded-lg"
+          >
+            Перейти до входу →
+          </a>
         {% endif %}
-      </div>
+      {% else %}
+        <div class="mb-6">
+          <p class="font-sans text-xs font-medium text-red-700 mb-2">
+            Помилка підтвердження
+          </p>
+          <h1 class="font-serif text-3xl sm:text-4xl font-medium tracking-tight text-db-text">
+            Посилання недійсне
+          </h1>
+          <p class="font-sans text-sm text-db-muted mt-2 leading-relaxed">
+            Термін дії посилання вичерпано або ключ підтвердження некоректний
+          </p>
+        </div>
+
+        <div class="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 font-sans text-sm leading-relaxed mb-8">
+          Посилання для підтвердження електронної пошти застаріло або недійсне. Увійдіть у систему або надішліть новий запит на підтвердження.
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <a
+            href="{% url 'account_email' %}"
+            class="flex items-center justify-center w-full min-h-[44px] px-4 py-3 bg-db-noir text-white font-sans text-sm font-medium hover:bg-db-ink transition-colors rounded-lg"
+          >
+            Керувати email
+          </a>
+          <a
+            href="{% url 'accounts:login' %}"
+            class="flex items-center justify-center w-full min-h-[44px] px-4 py-3 bg-white border border-db-linen text-db-text font-sans text-sm font-medium hover:border-db-noir/40 hover:bg-db-paper transition-colors rounded-lg"
+          >
+            Увійти в акаунт
+          </a>
+        </div>
+      {% endif %}
     </div>
   </div>
 </div>

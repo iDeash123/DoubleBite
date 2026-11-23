@@ -287,7 +287,7 @@ class SeoEndpointTests(TestCase):
             dish_content,
         )
         self.assertIn('Double Bite™</title>', dish_content)
-        self.assertIn('грн', dish_content)
+        self.assertIn('₴', dish_content)
 
     def test_catalog_and_category_open_graph_tags(self):
         catalog_resp = self.client.get('/menu/')

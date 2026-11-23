@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Умови використання — Double Bite™{% endblock %}
+{% block meta_description %}Публічна оферта та умови користування сервісом замовлення і доставки авторських страв Double Bite у Києві.{% endblock %}
+
+{% block content %}
+<article class="max-w-4xl mx-auto px-4 sm:px-8 py-12 sm:py-16">
+  <header class="pb-8 mb-8 border-b border-db-linen">
+    <p class="text-xs font-medium uppercase tracking-wider text-db-crust-dark mb-2">
+      Публічна оферта
+    </p>
+    <h1 class="font-serif text-3xl sm:text-5xl font-medium text-db-text mb-3">
+      Умови використання
+    </h1>
+    <p class="text-sm text-db-subtle font-sans">
+      Останнє оновлення: <span class="font-mono tabular-nums">2026</span> · Сервіс доставки ресторанних страв Double Bite™ (Київ)
+    </p>
+  </header>
+
+  <div class="bg-white border border-db-linen rounded-2xl p-6 sm:p-10 space-y-8 text-sm sm:text-base font-sans text-db-muted leading-relaxed shadow-sm">
+    <section class="space-y-3">
+      <h2 class="font-serif text-2xl font-medium text-db-text">1. Сторони та предмет угоди</h2>
+      <p>
+        Оформлюючи замовлення на сайті Double Bite™, ви погоджуєтеся з цими Умовами використання щодо приготування та доставки готових ресторанних страв по місту Києву.
+      </p>
+      <div class="rounded-xl bg-db-paper border border-db-linen p-4 text-sm space-y-1">
+        <p class="font-medium text-db-text">Виконавець (оператор):</p>
+        <p>[ЗАПОВНИТИ: реквізити оператора]</p>
+        <p>Адреса кухні: {{ restaurant_address }}</p>
+        <p>Контактний телефон: <span class="font-mono tabular-nums">{{ restaurant_hotline }}</span></p>
+      </div>
+    </section>
+
+    <section class="space-y-3">
+      <h2 class="font-serif text-2xl font-medium text-db-text">2. Оформлення замовлення та графік роботи</h2>
+      <ul class="list-disc pl-5 space-y-2">
+        <li>Кухня та власна курʼєрська служба працюють щодня з <span class="font-mono tabular-nums text-db-text">10:00</span> до <span class="font-mono tabular-nums text-db-text">22:00</span> за київським часом.</li>
+        <li>Ціни на сайті вказані в українських гривнях (<span class="font-mono">₴</span>) та є актуальними на момент підтвердження замовлення.</li>
+        <li>Орієнтовний час доставки по Києву становить <span class="font-mono tabular-nums text-db-text">25–45 хв</span> і залежить від району та дорожньої ситуації.</li>
+        <li>Актуальна вартість доставки та поріг безкоштовної доставки відображаються у кошику до моменту підтвердження замовлення.</li>
+      </ul>
+    </section>
+
+    <section class="space-y-3">
+      <h2 class="font-serif text-2xl font-medium text-db-text">3. Оплата та повернення</h2>
+      <p>
+        Оплата замовлення можлива онлайн банківською карткою через платіжну систему <strong class="font-medium text-db-text">Stripe</strong> (включно з Apple Pay та Google Pay за наявності підтримки пристроєм), готівкою курʼєру або карткою через термінал при отриманні.
+      </p>
+      <p>
+        Якщо замовлення ще не передано в приготування, ви можете скасувати або змінити його, зателефонувавши на гарячу лінію <span class="font-mono tabular-nums text-db-text">{{ restaurant_hotline }}</span>. У разі невідповідності комплектації чи якості страви ми оперативно замінимо позицію або повернемо кошти на картку відповідно до чинного законодавства України.
+      </p>
+    </section>
+
+    <section class="space-y-3">
+      <h2 class="font-serif text-2xl font-medium text-db-text">4. Алергени та персональні вподобання</h2>
+      <p>
+        Склад, вага, калорійність і перелік основних алергенів зазначені на сторінці кожної страви. Якщо у вас є харчова алергія або непереносимість, будь ласка, обовʼязково вкажіть це в коментарі до замовлення або уточніть перед оплатою в нашого адміністратора.
+      </p>
+    </section>
+
+    <section class="space-y-3">
+      <h2 class="font-serif text-2xl font-medium text-db-text">5. Обробка даних</h2>
+      <p>
+        Порядок збору, зберігання та захисту персональних даних (email, телефон, адреса доставки, взаємодія зі Stripe) детально описаний у нашій <a href="{% url 'privacy' %}" class="text-db-crust-dark font-medium hover:underline">Політиці конфіденційності</a>.
+      </p>
+    </section>
+  </div>
+
+  <div class="mt-8 flex flex-wrap items-center justify-between gap-4 text-sm">
+    <a href="{% url 'privacy' %}" class="font-medium text-db-crust-dark hover:underline">
+      ← Політика конфіденційності
+    </a>
+    <a href="/menu/" class="min-h-[44px] px-5 py-2.5 rounded-lg bg-db-noir text-white hover:bg-db-ink inline-flex items-center justify-center font-medium transition-colors">
+      Перейти до меню
+    </a>
+  </div>
+</article>
+{% endblock %}

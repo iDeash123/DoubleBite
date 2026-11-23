@@ -1,4 +1,4 @@
-{% load l10n %}
+{% load l10n menu_extras %}
 <div id="cart-drawer"
      x-data="{
        drawerOpen: false,
@@ -17,7 +17,7 @@
      x-show="drawerOpen"
      x-cloak
      class="fixed inset-0 z-[70] overflow-hidden select-none">
-  
+
   <div x-show="drawerOpen"
        x-transition:enter="ease-out duration-300"
        x-transition:enter-start="opacity-0"
@@ -26,26 +26,31 @@
        x-transition:leave-start="opacity-100"
        x-transition:leave-end="opacity-0"
        @click="closeDrawer()"
-       class="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity"></div>
+       class="absolute inset-0 bg-db-ink/50 backdrop-blur-sm transition-opacity"></div>
 
   <div x-show="drawerOpen"
-       x-transition:enter="transform transition ease-in-out duration-300"
+       x-transition:enter="transform transition ease-out duration-300"
        x-transition:enter-start="translate-x-full"
        x-transition:enter-end="translate-x-0"
-       x-transition:leave="transform transition ease-in-out duration-300"
+       x-transition:leave="transform transition ease-in duration-200"
        x-transition:leave-start="translate-x-0"
        x-transition:leave-end="translate-x-full"
-       class="absolute inset-y-0 right-0 max-w-md w-full bg-white shadow-2xl flex flex-col justify-between border-l border-fv-noir/20">
+       class="absolute inset-y-0 right-0 max-w-md w-full bg-white shadow-2xl flex flex-col justify-between border-l border-db-linen">
 
-    <div class="p-5 border-b border-fv-noir/10 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <h3 class="text-sm font-bold uppercase tracking-wider text-fv-noir font-mono">Кошик замовлень</h3>
-        <span id="cart-drawer-count" class="text-xs font-mono bg-fv-offwhite px-2 py-0.5 border border-fv-noir/10 text-fv-slate">
+    <div class="px-5 py-4 border-b border-db-linen bg-db-paper/60 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2.5 min-w-0">
+        <h3 class="font-sans text-base font-semibold text-db-text truncate">Кошик замовлень</h3>
+        <span id="cart-drawer-count" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono db-tabular font-medium bg-db-boucle text-db-muted border border-db-linen shrink-0">
           {{ total_quantity|default:0 }} од.
         </span>
       </div>
-      <button type="button" @click="closeDrawer()" class="p-1.5 hover:bg-fv-offwhite text-fv-noir transition-colors text-base font-mono" aria-label="Закрити кошик">
-        ✕
+      <button type="button"
+              @click="closeDrawer()"
+              class="min-w-[40px] min-h-[40px] rounded-lg flex items-center justify-center text-db-muted hover:text-db-text hover:bg-db-boucle transition-colors shrink-0"
+              aria-label="Закрити кошик">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
       </button>
     </div>
 
@@ -53,109 +58,168 @@
     <div id="cart-drawer-container" class="flex-1 flex flex-col justify-between overflow-hidden">
       {% if not cart or not items %}
         <div class="flex-1 flex flex-col items-center justify-center p-8 text-center">
-          <svg class="w-12 h-12 text-fv-slate/40 mb-3 stroke-current" fill="none" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/>
-          </svg>
-          <p class="font-serif italic text-lg text-fv-noir mb-1">Кошик порожній</p>
-          <p class="font-mono text-xs text-fv-slate uppercase tracking-wider mb-6">Оберіть страви з меню</p>
-          <a href="{% url 'menu:catalog' %}" @click="closeDrawer()" class="px-6 py-2.5 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors">
+          <div class="w-14 h-14 rounded-2xl bg-db-boucle border border-db-linen flex items-center justify-center mb-4 text-db-crust">
+            <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/>
+            </svg>
+          </div>
+          <p class="font-serif text-2xl font-medium text-db-text mb-1.5">Кошик порожній</p>
+          <p class="font-sans text-sm text-db-muted mb-6 max-w-[240px]">Оберіть авторські страви з меню — доставимо за 25–45 хв</p>
+          <a href="{% url 'menu:catalog' %}"
+             @click="closeDrawer()"
+             class="inline-flex items-center justify-center min-h-[44px] px-6 py-2.5 rounded-lg bg-db-noir text-white text-sm font-sans font-medium hover:bg-db-ink transition-colors">
             Перейти до меню
           </a>
         </div>
       {% else %}
-        <div class="p-5 overflow-y-auto flex-1 divide-y divide-fv-noir/10 space-y-3">
+        <div class="p-5 overflow-y-auto flex-1 divide-y divide-db-linen">
           {% for item in items %}
-            <div class="pt-3 first:pt-0 flex gap-3 {% if not item.is_available %}opacity-50{% endif %}">
-              <div class="w-16 h-16 bg-fv-offwhite p-1.5 border border-fv-noir/10 flex items-center justify-center shrink-0">
-                {% with img_url=item.dish.image.url %}
-                  {% if item.dish.image and img_url %}
-                    <img src="{{ img_url }}" alt="{{ item.dish.title }}" class="w-full h-full object-contain mix-blend-multiply">
-                  {% else %}
-                    <span class="text-[8px] font-mono text-fv-slate">DB</span>
-                  {% endif %}
-                {% endwith %}
+            <div class="py-3.5 first:pt-0 last:pb-0 flex gap-3.5 {% if not item.is_available %}opacity-60{% endif %}">
+              <div class="w-16 h-16 rounded-lg overflow-hidden bg-db-boucle border border-db-linen flex items-center justify-center shrink-0">
+                {% if item.dish.image %}
+                  {% with img_url=item.dish.image.url %}
+                    {% if img_url %}
+                      <img src="{{ img_url }}" alt="{{ item.dish.title }}" class="w-full h-full object-cover">
+                    {% else %}
+                      <span class="text-[10px] font-mono text-db-subtle">DB</span>
+                    {% endif %}
+                  {% endwith %}
+                {% else %}
+                  <span class="text-[10px] font-mono text-db-subtle">DB</span>
+                {% endif %}
               </div>
-              <div class="flex-1 flex flex-col justify-between">
+              <div class="flex-1 min-w-0 flex flex-col justify-between">
                 <div>
-                  <div class="flex justify-between items-start">
-                    <h4 class="text-xs font-bold text-fv-noir font-sans leading-tight">
-                      <a href="{{ item.dish.get_absolute_url }}" class="hover:underline">
+                  <div class="flex justify-between items-start gap-2">
+                    <h4 class="font-sans text-sm font-semibold text-db-text leading-snug">
+                      <a href="{{ item.dish.get_absolute_url }}" @click="closeDrawer()" class="hover:text-db-crust-dark transition-colors">
                         {{ item.dish.title }}
                       </a>
                     </h4>
-                    <span class="text-xs font-mono font-bold text-fv-noir ml-2 shrink-0">{{ item.total_price }} грн</span>
+                    <span class="font-mono db-tabular text-sm font-semibold text-db-text shrink-0 whitespace-nowrap">{{ item.total_price|format_price }}</span>
                   </div>
                   {% if item.selected_options %}
-                    <div class="text-[10px] font-mono text-fv-slate mt-0.5">
+                    <div class="text-xs font-sans text-db-muted mt-0.5 leading-snug">
                       {% for opt in item.selected_options %}
                         <span>+ {{ opt.name }}{% if not forloop.last %}, {% endif %}</span>
                       {% endfor %}
                     </div>
                   {% endif %}
                   {% if not item.is_available %}
-                    <div class="text-[10px] font-mono text-red-600 font-medium">⚠️ Тимчасово недоступна</div>
+                    <div class="inline-flex items-center gap-1 text-xs font-sans font-medium text-red-700 mt-1">
+                      <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+                      </svg>
+                      <span>Тимчасово недоступна</span>
+                    </div>
                   {% endif %}
                 </div>
-                <div class="flex items-center justify-between pt-2">
-                  <div class="flex items-center border border-fv-noir/20 text-xs font-mono">
+                <div class="flex items-center justify-between pt-2.5">
+                  <div class="inline-flex items-center rounded-lg border border-db-linen bg-db-paper">
                     <button type="button"
                             hx-post="{% url 'orders:cart_update' item.id %}"
                             hx-vals='{"quantity": {{ item.quantity|add:"-1" }}}'
                             hx-target="#cart-drawer-container"
                             hx-swap="outerHTML"
-                            class="px-2 py-0.5 hover:bg-fv-offwhite text-fv-noir font-mono"
-                            aria-label="Зменшити кількість">-</button>
-                    <span class="px-2 py-0.5 font-bold">{{ item.quantity }}</span>
+                            class="w-9 h-9 flex items-center justify-center rounded-l-lg text-db-text hover:bg-db-boucle transition-colors"
+                            aria-label="Зменшити кількість">
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14"/>
+                      </svg>
+                    </button>
+                    <span class="min-w-[2rem] px-1 text-center font-mono db-tabular text-xs font-semibold text-db-text">{{ item.quantity }}</span>
                     <button type="button"
                             hx-post="{% url 'orders:cart_update' item.id %}"
                             hx-vals='{"quantity": {{ item.quantity|add:"1" }}}'
                             hx-target="#cart-drawer-container"
                             hx-swap="outerHTML"
-                            class="px-2 py-0.5 hover:bg-fv-offwhite text-fv-noir font-mono"
-                            aria-label="Збільшити кількість">+</button>
+                            class="w-9 h-9 flex items-center justify-center rounded-r-lg text-db-text hover:bg-db-boucle transition-colors"
+                            aria-label="Збільшити кількість">
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14m-7-7h14"/>
+                      </svg>
+                    </button>
                   </div>
                   <button type="button"
                           hx-post="{% url 'orders:cart_remove' item.id %}"
                           hx-target="#cart-drawer-container"
                           hx-swap="outerHTML"
-                          class="text-fv-slate hover:text-red-600 text-xs font-mono"
-                          aria-label="Видалити страву">✕</button>
+                          class="w-9 h-9 rounded-lg flex items-center justify-center text-db-subtle hover:text-red-700 hover:bg-red-50 transition-colors"
+                          aria-label="Видалити страву">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                    </svg>
+                  </button>
                 </div>
               </div>
             </div>
           {% endfor %}
         </div>
 
-        <div class="p-5 border-t border-fv-noir/10 bg-fv-offwhite space-y-3">
-          <div class="flex justify-between text-xs font-mono text-fv-slate">
-            <span>Вартість страв</span>
-            <span class="text-fv-noir font-bold">{{ total_amount }} грн</span>
-          </div>
-          <div class="flex justify-between text-xs font-mono text-fv-slate">
-            <span>Доставка</span>
-            <span class="{% if meets_free_delivery %}text-emerald-700 uppercase{% else %}text-fv-noir{% endif %} font-bold">{% if meets_free_delivery %}Безкоштовно{% else %}{{ delivery_fee|unlocalize }} грн{% endif %}</span>
-          </div>
-
-          {% if not meets_min_amount %}
-            <div class="p-2.5 bg-amber-50 border border-amber-300 text-amber-900 text-[11px] font-mono">
-              Мінімум для замовлення: <strong>{{ min_order_amount }} грн</strong>.
+        <div class="px-5 py-4 border-t border-db-linen bg-db-paper space-y-3">
+          {% if meets_free_delivery %}
+            <div class="rounded-xl bg-emerald-50 border border-emerald-200 px-3.5 py-2.5 flex items-center gap-2">
+              <svg class="w-4 h-4 text-emerald-700 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+              </svg>
+              <span class="font-sans text-xs font-medium text-emerald-800">Безкоштовна доставка активована</span>
+            </div>
+          {% else %}
+            <div class="rounded-xl bg-white border border-db-linen px-3.5 py-2.5 space-y-2">
+              <p class="font-sans text-xs text-db-muted leading-snug">
+                Додайте ще <strong class="font-mono db-tabular font-semibold text-db-text">{{ free_delivery_remaining|format_price }}</strong> до безкоштовної доставки
+              </p>
+              <div class="w-full h-1.5 rounded-full bg-db-linen overflow-hidden" role="progressbar" aria-valuenow="{{ free_delivery_percent|default:0|unlocalize }}" aria-valuemin="0" aria-valuemax="100" aria-label="Прогрес до безкоштовної доставки">
+                <div class="h-full rounded-full bg-db-crust transition-[width] duration-300" style="width: {{ free_delivery_percent|default:0|unlocalize }}%"></div>
+              </div>
             </div>
           {% endif %}
 
-          <div class="grid grid-cols-2 gap-2 pt-2">
+          <div class="space-y-1.5 text-sm font-sans">
+            <div class="flex justify-between items-center text-db-muted">
+              <span>Вартість страв</span>
+              <span class="font-mono db-tabular font-semibold text-db-text">{{ total_amount|format_price }}</span>
+            </div>
+            <div class="flex justify-between items-center text-db-muted">
+              <span>Доставка</span>
+              {% if meets_free_delivery %}
+                <span class="font-sans font-medium text-emerald-700">Безкоштовно</span>
+              {% else %}
+                <span class="font-mono db-tabular font-medium text-db-text">{{ delivery_fee|format_price }}</span>
+              {% endif %}
+            </div>
+            {% if not meets_free_delivery %}
+              <p class="text-[11px] text-db-subtle leading-snug pt-0.5">
+                Доставка сплачується окремо курʼєру. Від {{ free_delivery_threshold|format_price }} — безкоштовно.
+              </p>
+            {% endif %}
+          </div>
+
+          {% if not meets_min_amount %}
+            <div class="rounded-xl p-3 bg-amber-50 border border-amber-200 text-amber-900 text-xs font-sans flex items-start gap-2">
+              <svg class="w-4 h-4 text-amber-700 shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+              </svg>
+              <span>Мінімум для замовлення: <strong class="font-mono db-tabular font-semibold">{{ min_order_amount|format_price }}</strong>.</span>
+            </div>
+          {% endif %}
+
+          <div class="grid grid-cols-2 gap-2.5 pt-1">
             <a href="{% url 'orders:cart' %}"
                @click="closeDrawer()"
-               class="py-3 px-3 border border-fv-noir/30 bg-white text-fv-noir text-xs font-mono uppercase tracking-wider text-center hover:bg-fv-lightgray transition-colors">
-              Переглянути
+               class="min-h-[44px] px-3 py-2.5 rounded-lg border border-db-linen bg-white text-db-text text-[13px] sm:text-sm font-sans font-medium flex items-center justify-center text-center leading-tight hover:border-db-noir/40 hover:bg-db-boucle transition-colors">
+              Переглянути кошик
             </a>
             {% if meets_min_amount %}
               <a href="{% url 'orders:checkout' %}"
                  @click="closeDrawer()"
-                 class="py-3 px-3 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider text-center hover:bg-black transition-colors">
+                 class="min-h-[44px] px-3 py-2.5 rounded-lg bg-db-noir text-white text-sm font-sans font-medium flex items-center justify-center text-center hover:bg-db-ink transition-colors">
                 Оформити
               </a>
             {% else %}
-              <button type="button" disabled class="py-3 px-3 bg-fv-slate/40 text-white text-xs font-mono uppercase tracking-wider text-center cursor-not-allowed">
+              <button type="button"
+                      disabled
+                      class="min-h-[44px] px-3 py-2.5 rounded-lg bg-db-linen text-db-subtle text-sm font-sans font-medium flex items-center justify-center text-center cursor-not-allowed">
                 Оформити
               </button>
             {% endif %}
@@ -164,19 +228,18 @@
       {% endif %}
 
       {% if request.META.HTTP_HX_REQUEST or request.headers.hx_request %}
-      <span id="cart-drawer-count" hx-swap-oob="true" class="text-xs font-mono bg-fv-offwhite px-2 py-0.5 border border-fv-noir/10 text-fv-slate">
+      <span id="cart-drawer-count" hx-swap-oob="true" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono db-tabular font-medium bg-db-boucle text-db-muted border border-db-linen shrink-0">
         {{ total_quantity|default:0 }} од.
       </span>
-      <span id="cart-badge" hx-swap-oob="true" class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
+      <span id="cart-badge" hx-swap-oob="true" class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[10px] font-mono font-semibold tabular-nums bg-db-crust-dark text-white rounded-full leading-none select-none">
         {{ total_quantity|default:0 }}
       </span>
-      <span id="cart-badge-mobile" hx-swap-oob="true" class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[10px] font-mono font-bold bg-fv-noir text-white rounded-none leading-none border border-white/20 select-none">
+      <span id="cart-badge-mobile" hx-swap-oob="true" class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[10px] font-mono font-semibold tabular-nums bg-db-crust-dark text-white rounded-full leading-none select-none">
         {{ total_quantity|default:0 }}
       </span>
       {% endif %}
     </div>
     {% endpartialdef %}
-
 
   </div>
 </div>

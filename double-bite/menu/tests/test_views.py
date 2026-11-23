@@ -205,7 +205,7 @@ class MenuViewsTest(TestCase):
         content = response.content.decode('utf-8')
         self.assertIn('Маргарита', content)
         self.assertIn('250', content)
-        self.assertIn('грн', content)
+        self.assertIn('₴', content)
         self.assertIn('Велика (40 см)', content)
 
     def test_dish_detail_category_slug_success(self):
@@ -476,9 +476,9 @@ class MenuViewsTest(TestCase):
         self.assertIn("@click=\"setOption('', '0')\"", content)
         self.assertIn('Стандарт', content)
         self.assertIn('Базова', content)
-        self.assertIn('-25.00 грн', content)
-        self.assertNotIn('+-25.00 грн', content)
-        self.assertIn('+60.00 грн', content)
+        self.assertIn('-25 ₴', content)
+        self.assertNotIn('+-25 ₴', content)
+        self.assertIn('+60 ₴', content)
 
     @override_settings(
         FREE_DELIVERY_THRESHOLD=Decimal('500.00'),
@@ -493,13 +493,13 @@ class MenuViewsTest(TestCase):
         self.assertEqual(drawer_resp.status_code, 200)
         drawer_html = drawer_resp.content.decode('utf-8')
         self.assertIn(f'href="{self.dish_margarita.get_absolute_url()}"', drawer_html)
-        self.assertIn('65.00 грн', drawer_html)
+        self.assertIn('65 ₴', drawer_html)
 
         cart_resp = self.client.get(reverse('orders:cart'))
         self.assertEqual(cart_resp.status_code, 200)
         cart_html = cart_resp.content.decode('utf-8')
         self.assertIn(f'href="{self.dish_margarita.get_absolute_url()}"', cart_html)
-        self.assertIn('65.00 грн', cart_html)
+        self.assertIn('65 ₴', cart_html)
 
         self.client.post(
             reverse('orders:cart_add', kwargs={'dish_id': self.dish_margarita.id}),

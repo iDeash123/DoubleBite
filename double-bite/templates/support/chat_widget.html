@@ -284,11 +284,13 @@ window.__formatMarkdown = function(text) {
   @open-dish-modal.window="hiddenByModal = true; open = false"
   @modal-opened.window="hiddenByModal = true; open = false"
   @modal-closed.window="hiddenByModal = false"
+  @keydown.escape.window="if (open) closeChat()"
   @open-ai-chat.window="hiddenByModal = false; open = true; if ($event.detail) { const q = typeof $event.detail === 'string' ? $event.detail : ($event.detail.query || $event.detail.message || ''); if (q) { input = q; } }"
   class="select-none">
 
   <button
     id="ai-chat-toggle-btn"
+    type="button"
     x-show="!hiddenByModal"
     x-transition:enter="transition ease-out duration-150"
     x-transition:enter-start="opacity-0 scale-90"
@@ -297,12 +299,18 @@ window.__formatMarkdown = function(text) {
     x-transition:leave-start="opacity-100 scale-100"
     x-transition:leave-end="opacity-0 scale-90"
     @click="hiddenByModal = false; open = !open; if (!open) abortActiveStream();"
-    class="fixed bottom-6 right-6 z-40 bg-fv-noir text-white hover:bg-black font-mono text-xs uppercase px-4 py-3.5 border border-fv-noir shadow-2xl flex items-center gap-2.5 transition-all cursor-pointer rounded-none"
+    :aria-expanded="open.toString()"
+    aria-label="AI Консьєрж підтримки"
     title="AI Консьєрж підтримки"
+    class="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-40 w-12 h-12 sm:w-auto sm:h-auto sm:px-4 sm:py-3 rounded-full bg-db-noir text-white hover:bg-db-ink border border-white/10 shadow-xl inline-flex items-center justify-center gap-2.5 transition-[background-color,transform,opacity] duration-150 cursor-pointer"
   >
-    <span :class="isEscalated ? 'bg-amber-400' : 'bg-emerald-400'" class="w-2 h-2 rounded-full inline-block animate-pulse"></span>
-    <span class="tracking-wider" x-text="isEscalated ? 'Адміністратор' : 'AI Консьєрж'"></span>
-    <svg class="w-3.5 h-3.5 text-white/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <span
+      :class="[isEscalated ? 'bg-amber-400' : 'bg-emerald-400', loading ? 'animate-pulse motion-reduce:animate-none' : '']"
+      class="absolute top-2 right-2 sm:static w-2 h-2 rounded-full inline-block shrink-0"
+      aria-hidden="true"
+    ></span>
+    <span class="hidden sm:inline text-sm font-sans font-medium" x-text="isEscalated ? 'Адміністратор' : 'AI Консьєрж'"></span>
+    <svg class="w-5 h-5 sm:w-4 sm:h-4 text-white/90 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
     </svg>
   </button>
@@ -316,34 +324,78 @@ window.__formatMarkdown = function(text) {
     x-transition:leave="transition ease-in duration-150"
     x-transition:leave-start="opacity-100 translate-y-0"
     x-transition:leave-end="opacity-0 translate-y-4"
-    class="fixed bottom-20 sm:bottom-24 right-4 sm:right-6 z-50 w-96 max-w-[calc(100vw-2rem)] bg-white border border-fv-noir/20 shadow-2xl rounded-none flex flex-col h-[520px] max-h-[calc(100vh-7rem)]"
+    role="dialog"
+    aria-label="AI-консьєрж Double Bite"
+    class="fixed inset-x-3 bottom-3 sm:inset-x-auto sm:bottom-20 sm:right-6 z-50 sm:w-96 bg-white border border-db-linen shadow-2xl rounded-2xl overflow-hidden flex flex-col h-[72svh] sm:h-[520px] max-h-[calc(100svh-5.5rem)]"
   >
-    <div class="p-4 border-b border-fv-noir/10 flex items-center justify-between bg-white">
-      <div>
+    <div class="px-4 py-3.5 border-b border-db-linen flex items-center justify-between gap-2 bg-db-paper/70">
+      <div class="min-w-0">
         <div class="flex items-center gap-2">
-          <span class="font-bold text-sm font-sans tracking-tight text-fv-noir">double bite<span class="text-[10px] font-mono align-top ml-0.5">™</span></span>
-          <span :class="isEscalated ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-fv-offwhite text-fv-slate border-fv-noir/10'" class="text-[9px] font-mono uppercase tracking-widest px-1.5 py-0.5 border" x-text="isEscalated ? 'Адміністратор' : 'Mistral AI'"></span>
+          <svg class="w-4 h-4 text-db-crust-dark shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path d="M18.28 13.53 A9 9 0 1 1 13.38 1.66 A4.2 4.2 0 0 0 17.72 7.57 A3.4 3.4 0 0 0 18.28 13.53 Z"/>
+          </svg>
+          <span class="font-bold text-sm font-sans tracking-tight text-db-noir">double bite<span class="text-[10px] font-mono align-top ml-0.5 text-db-crust-dark">™</span></span>
+          <span
+            :class="isEscalated ? 'bg-amber-50 text-amber-900 border-amber-200' : 'bg-db-boucle text-db-muted border-db-linen'"
+            class="text-[11px] font-sans font-medium px-2 py-0.5 border rounded-full"
+            x-text="isEscalated ? 'Адміністратор' : 'Mistral AI'"
+          ></span>
         </div>
-        <div class="text-[10px] font-mono uppercase tracking-wider text-fv-slate mt-0.5" x-text="isEscalated ? '⚠️ Підключено персонал · {{ restaurant_hotline|default:'+380 44 123 45 67'|escapejs }}' : 'Персональний гастро-консьєрж'"></div>
+        <div class="flex items-center gap-1.5 text-xs font-sans text-db-subtle mt-1">
+          <svg x-show="isEscalated" class="w-3.5 h-3.5 text-amber-700 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+          <span class="truncate" x-text="isEscalated ? 'Підключено персонал · {{ restaurant_hotline|default:'+380 44 123 45 67'|escapejs }}' : 'Персональний гастро-консьєрж'"></span>
+        </div>
       </div>
-      <div class="flex items-center gap-2">
-        <button @click="resetChat()" title="Почати новий діалог" class="text-[10px] font-mono uppercase px-2 py-1 bg-fv-offwhite hover:bg-fv-lightgray text-fv-noir border border-fv-noir/10 transition-colors">
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button
+          type="button"
+          @click="resetChat()"
+          title="Почати новий діалог"
+          class="min-h-[36px] px-2.5 py-1.5 rounded-lg text-xs font-sans font-medium bg-white hover:bg-db-boucle text-db-text border border-db-linen transition-colors cursor-pointer"
+        >
           Новий діалог
         </button>
-        <button @click="closeChat()" class="p-1 text-fv-slate hover:text-fv-noir transition-colors text-base font-mono">
-          ✕
+        <button
+          type="button"
+          @click="closeChat()"
+          aria-label="Закрити чат"
+          class="min-w-[36px] min-h-[36px] inline-flex items-center justify-center rounded-lg text-db-subtle hover:text-db-text hover:bg-db-boucle transition-colors cursor-pointer"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
         </button>
       </div>
     </div>
 
-    <div class="px-4 py-2 bg-fv-offwhite border-b border-fv-noir/10 flex flex-wrap gap-1.5">
-      <button @click="sendQuick('Що порадиш на вечерю?')" :disabled="isEscalated || loading" class="text-[10px] font-mono uppercase px-2 py-0.5 bg-white border border-fv-noir/10 text-fv-noir hover:border-fv-noir transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+    <div class="px-4 py-2.5 bg-db-paper border-b border-db-linen flex flex-wrap gap-2">
+      <button
+        type="button"
+        @click="sendQuick('Що порадиш на вечерю?')"
+        :disabled="isEscalated || loading"
+        class="min-h-[36px] px-3 py-1.5 rounded-full text-xs font-sans font-medium bg-white border border-db-linen text-db-text hover:border-db-crust hover:text-db-crust-dark transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+      >
         Вечеря
       </button>
-      <button @click="sendQuick('Які є веганські страви?')" :disabled="isEscalated || loading" class="text-[10px] font-mono uppercase px-2 py-0.5 bg-white border border-fv-noir/10 text-fv-noir hover:border-fv-noir transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+      <button
+        type="button"
+        @click="sendQuick('Які є веганські страви?')"
+        :disabled="isEscalated || loading"
+        class="min-h-[36px] px-3 py-1.5 rounded-full text-xs font-sans font-medium bg-white border border-db-linen text-db-text hover:border-db-crust hover:text-db-crust-dark transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+      >
         Веган
       </button>
-      <button @click="sendQuick('Який час та вартість доставки?')" :disabled="isEscalated || loading" class="text-[10px] font-mono uppercase px-2 py-0.5 bg-white border border-fv-noir/10 text-fv-noir hover:border-fv-noir transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+      <button
+        type="button"
+        @click="sendQuick('Який час та вартість доставки?')"
+        :disabled="isEscalated || loading"
+        class="min-h-[36px] px-3 py-1.5 rounded-full text-xs font-sans font-medium bg-white border border-db-linen text-db-text hover:border-db-crust hover:text-db-crust-dark transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+      >
         Доставка
       </button>
     </div>
@@ -353,25 +405,25 @@ window.__formatMarkdown = function(text) {
         <div :class="msg.sender === 'user' ? 'flex justify-end' : 'flex justify-start'">
           <div
             :class="msg.sender === 'user'
-              ? 'bg-fv-noir text-white p-3 text-xs font-sans max-w-[85%] rounded-none'
+              ? 'bg-db-noir text-white px-3.5 py-2.5 text-[13px] font-sans leading-relaxed max-w-[85%] rounded-2xl rounded-br-sm'
               : (msg.sender === 'system'
-                ? 'bg-amber-50 text-amber-900 border border-amber-300 p-3 text-xs font-sans max-w-[85%] rounded-none leading-relaxed'
+                ? 'bg-amber-50 text-amber-950 border border-amber-200 px-3.5 py-2.5 text-[13px] font-sans leading-relaxed max-w-[85%] rounded-2xl rounded-bl-sm'
                 : (msg.sender === 'operator'
-                  ? 'bg-emerald-50 text-fv-noir border border-emerald-300 p-3 text-xs font-sans max-w-[85%] rounded-none leading-relaxed'
-                  : 'bg-fv-offwhite text-fv-noir border border-fv-noir/10 p-3 text-xs font-sans max-w-[85%] rounded-none leading-relaxed'))"
+                  ? 'bg-emerald-50 text-db-text border border-emerald-200 px-3.5 py-2.5 text-[13px] font-sans leading-relaxed max-w-[85%] rounded-2xl rounded-bl-sm'
+                  : 'bg-db-boucle text-db-text px-3.5 py-2.5 text-[13px] font-sans leading-relaxed max-w-[85%] rounded-2xl rounded-bl-sm'))"
           >
             <div
-              :class="msg.sender === 'user' ? 'text-white/50 text-right' : 'text-fv-slate text-left'"
-              class="text-[9px] font-mono uppercase tracking-wider mb-1"
-              x-text="msg.sender === 'user' ? 'Ви' : (msg.sender === 'operator' ? 'Адміністратор ресторану' : (msg.sender === 'system' ? 'Система' : 'Double Bite Concierge'))"
+              :class="msg.sender === 'user' ? 'text-white/65 text-right' : 'text-db-subtle text-left'"
+              class="text-[11px] font-sans font-medium mb-1"
+              x-text="msg.sender === 'user' ? 'Ви' : (msg.sender === 'operator' ? 'Адміністратор ресторану' : (msg.sender === 'system' ? 'Система' : 'Double Bite Консьєрж'))"
             ></div>
-            <div x-show="msg.content" class="whitespace-pre-wrap" x-effect="$el.innerHTML = window.__formatMarkdown(msg.content)"></div>
-            <div x-show="msg.error" :class="msg.content ? 'mt-2' : ''" class="p-2 bg-red-50 border border-red-200 text-red-800 text-[11px] font-mono whitespace-pre-wrap" x-text="msg.error"></div>
-            <div x-show="msg.cartUpdated" class="mt-2 pt-2 border-t border-fv-noir/10">
+            <div x-show="msg.content" class="whitespace-pre-wrap break-words" x-effect="$el.innerHTML = window.__formatMarkdown(msg.content)"></div>
+            <div x-show="msg.error" :class="msg.content ? 'mt-2' : ''" class="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-800 text-xs font-sans whitespace-pre-wrap" x-text="msg.error"></div>
+            <div x-show="msg.cartUpdated" class="mt-2.5 pt-2.5 border-t border-db-linen">
               <button
                 type="button"
                 @click="window.dispatchEvent(new CustomEvent('open-cart-drawer'))"
-                class="text-[10px] font-mono uppercase tracking-wider px-2.5 py-1 bg-fv-noir text-white hover:bg-black transition-colors cursor-pointer rounded-none"
+                class="min-h-[36px] px-3 py-1.5 rounded-lg bg-db-noir text-white hover:bg-db-ink text-xs font-sans font-medium transition-colors cursor-pointer"
               >
                 Відкрити кошик
               </button>
@@ -379,24 +431,31 @@ window.__formatMarkdown = function(text) {
           </div>
         </div>
       </template>
-      <div x-show="loading" class="text-xs font-mono text-fv-slate flex items-center gap-1.5 pt-2">
-        <span class="w-1.5 h-1.5 rounded-full bg-fv-slate animate-ping"></span>
-        <span>Консьєрж формує відповідь...</span>
+      <div x-show="loading" class="flex justify-start" aria-live="polite">
+        <div class="inline-flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl rounded-bl-sm bg-db-boucle text-db-muted text-xs font-sans">
+          <span class="inline-flex items-center gap-1" aria-hidden="true">
+            <span class="w-1.5 h-1.5 rounded-full bg-db-crust-dark animate-bounce motion-reduce:animate-none [animation-delay:-0.3s]"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-db-crust-dark animate-bounce motion-reduce:animate-none [animation-delay:-0.15s]"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-db-crust-dark animate-bounce motion-reduce:animate-none"></span>
+          </span>
+          <span>Консьєрж формує відповідь…</span>
+        </div>
       </div>
     </div>
 
-    <form @submit.prevent="sendMessage()" class="p-3 border-t border-fv-noir/10 bg-fv-offwhite flex gap-2">
+    <form @submit.prevent="sendMessage()" class="p-3 border-t border-db-linen bg-db-paper flex items-center gap-2">
       <input
         type="text"
         x-model="input"
         :disabled="isEscalated || loading"
-        placeholder="Запитайте про страви чи доставку..."
-        class="flex-1 px-3 py-2 text-xs font-mono bg-white border border-fv-noir/20 text-fv-noir placeholder:text-fv-slate focus:outline-none focus:border-fv-noir rounded-none disabled:bg-fv-offwhite disabled:cursor-not-allowed"
+        placeholder="Запитайте про меню…"
+        aria-label="Повідомлення для AI-консьєржа"
+        class="flex-1 min-w-0 min-h-[44px] px-3.5 py-2 text-base sm:text-sm font-sans bg-white border border-db-linen text-db-text placeholder:text-db-subtle focus:outline-none focus:border-db-crust-dark focus:ring-2 focus:ring-db-crust/20 rounded-xl transition-colors disabled:bg-db-boucle disabled:cursor-not-allowed"
       >
       <button
         type="submit"
         :disabled="isEscalated || loading"
-        class="px-4 py-2 bg-fv-noir text-white text-xs font-mono uppercase tracking-wider hover:bg-black transition-colors rounded-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+        class="min-h-[44px] px-4 py-2 bg-db-noir text-white hover:bg-db-ink text-sm font-sans font-medium transition-colors rounded-xl whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
       >
         Надіслати
       </button>
