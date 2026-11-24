@@ -150,8 +150,21 @@ class MistralSupportAgent:
             role = msg.get('role', 'user')
             if role == 'operator':
                 role = 'assistant'
-            content = msg.get('content', '')
-            messages.append({'role': role, 'content': content})
+            if role not in ('user', 'assistant'):
+                continue
+            content = str(msg.get('content', '') or '')
+            if len(messages) == 1 and role == 'assistant':
+                # Mistral requires the first non-system turn to be 'user'
+                # (can happen if the 20-message window slices off a prior user turn).
+                continue
+            if messages[-1]['role'] == role:
+                if content:
+                    prev = messages[-1]['content']
+                    messages[-1]['content'] = (
+                        f'{prev}\n\n{content}' if prev else content
+                    )
+            else:
+                messages.append({'role': role, 'content': content})
 
         try:
             async for chunk in self._stream_mistral(messages, request, session):

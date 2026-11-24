@@ -6,6 +6,8 @@ app_name = 'support'
 
 urlpatterns = [
     path('chat/stream/', views.chat_stream_view, name='chat_stream'),
+    path('chat/escalate/', views.chat_escalate_view, name='chat_escalate'),
+    path('chat/message/', views.chat_message_view, name='chat_message'),
     path('chat/reset/', views.chat_reset_view, name='chat_reset'),
     path('chat/history/', views.chat_history_view, name='chat_history'),
 ]

@@ -4,11 +4,18 @@ import secrets
 import threading
 import uuid
 from contextlib import nullcontext
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from config.constants import (
+    DEFAULT_SUPPORT_WORK_END_HOUR,
+    DEFAULT_SUPPORT_WORK_START_HOUR,
+)
 from config.transactions import schedule_on_commit
 from config.validators import extract_phone_digits
-from django.core.cache import cache
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest
 from django.utils import timezone
@@ -16,19 +23,111 @@ from orders.middleware import get_guest_token, get_pre_login_guest_token
 from orders.models import Order
 
 from support.models import (
+    ChatMessage,
     ChatSession,
     ChatSessionStatus,
     FAQKnowledge,
+    MessageRole,
+    MessageSource,
     SupportTicket,
     TicketReason,
     TicketStatus,
 )
+from support.permissions import is_support_operator
 
 logger = logging.getLogger('support')
 
 _INT32_MAX = 2**31 - 1
 _ACTIVE_SESSION_STATUSES = (ChatSessionStatus.ACTIVE, ChatSessionStatus.ESCALATED)
+_OPEN_TICKET_STATUSES = (TicketStatus.OPEN, TicketStatus.IN_PROGRESS)
 _SQLITE_SUPPORT_LOCK = threading.RLock()
+MAX_SUPPORT_MESSAGE_LENGTH = 2000
+
+
+class SupportDeskError(Exception):
+    """Base domain error for live operator support desk operations."""
+
+
+class SessionNotFoundError(SupportDeskError):
+    """Raised when a target chat session cannot be found."""
+
+
+class OperatorPermissionError(SupportDeskError):
+    """Raised when a caller does not have support operator privileges."""
+
+
+class InvalidSessionStateError(SupportDeskError):
+    """Raised when a state transition is invalid for the current session status."""
+
+
+class SessionOwnershipConflictError(SupportDeskError):
+    """Raised when another operator owns the session or it has not been claimed."""
+
+    def __init__(self, message: str, *, owner: Any = None) -> None:
+        super().__init__(message)
+        self.owner = owner
+
+
+class InvalidMessageError(SupportDeskError):
+    """Raised when a chat message is empty or exceeds length limits."""
+
+
+@dataclass(frozen=True)
+class DeskActionResult:
+    session: ChatSession
+    ticket: SupportTicket | None = None
+    system_message: ChatMessage | None = None
+
+
+def get_support_working_hours() -> tuple[int, int]:
+    start = int(
+        getattr(settings, 'SUPPORT_WORK_START_HOUR', DEFAULT_SUPPORT_WORK_START_HOUR)
+    )
+    end = int(
+        getattr(settings, 'SUPPORT_WORK_END_HOUR', DEFAULT_SUPPORT_WORK_END_HOUR)
+    )
+    return start, end
+
+
+def get_working_hours_label() -> str:
+    start_hour, end_hour = get_support_working_hours()
+    return f'{start_hour:02d}:00–{end_hour:02d}:00'
+
+
+def is_within_working_hours(now: datetime | None = None) -> bool:
+    tz_name = getattr(settings, 'TIME_ZONE', 'Europe/Kyiv') or 'Europe/Kyiv'
+    tz = ZoneInfo(tz_name)
+    current = timezone.now() if now is None else now
+    if timezone.is_naive(current):
+        local_dt = current.replace(tzinfo=tz)
+    else:
+        local_dt = current.astimezone(tz)
+    start_hour, end_hour = get_support_working_hours()
+    return start_hour <= local_dt.hour < end_hour
+
+
+def format_off_hours_notice() -> str:
+    start_hour, _ = get_support_working_hours()
+    label = get_working_hours_label()
+    return (
+        f'Зараз неробочий час ({label}). Ваше звернення збережено — '
+        f'залиште деталі, і адміністратор відповість з {start_hour:02d}:00.'
+    )
+
+
+def get_operator_display_name(user: Any) -> str:
+    if user is None:
+        return 'Адміністратор ресторану'
+    get_full_name = getattr(user, 'get_full_name', None)
+    full_name = str(get_full_name() or '').strip() if callable(get_full_name) else ''
+    if full_name:
+        return full_name
+    first_name = str(getattr(user, 'first_name', '') or '').strip()
+    last_name = str(getattr(user, 'last_name', '') or '').strip()
+    combined = f'{first_name} {last_name}'.strip()
+    if combined:
+        return combined
+    return str(getattr(user, 'email', '') or 'Адміністратор ресторану')
 
 _APOSTROPHES_RE = re.compile(r'[’ʼ`]')
 _WORD_RE = re.compile(r"[0-9a-zа-яіїєґ']+")
@@ -236,6 +335,113 @@ class ChatSessionService:
         )
 
     @staticmethod
+    def get_latest_session(request: HttpRequest) -> ChatSession | None:
+        active = ChatSessionService.get_active_session(request)
+        if active is not None:
+            return active
+
+        user = _get_authenticated_user(request)
+        if user is not None:
+            candidates: list[ChatSession] = []
+            resolved = (
+                ChatSession.objects.filter(
+                    user=user,
+                    status=ChatSessionStatus.RESOLVED,
+                )
+                .order_by('-updated_at', '-created_at')
+                .first()
+            )
+            if resolved is not None:
+                candidates.append(resolved)
+
+            candidate_tokens = _get_candidate_guest_tokens(request)
+            if candidate_tokens:
+                guest_resolved = (
+                    ChatSession.objects.filter(
+                        guest_token__in=candidate_tokens,
+                        user__isnull=True,
+                        status=ChatSessionStatus.RESOLVED,
+                    )
+                    .order_by('-updated_at', '-created_at')
+                    .first()
+                )
+                if guest_resolved is not None:
+                    candidates.append(guest_resolved)
+
+            if not candidates:
+                return None
+            return max(candidates, key=lambda s: (s.updated_at, s.created_at))
+
+        guest_token = get_guest_token(request, create=False)
+        if not guest_token:
+            return None
+        return (
+            ChatSession.objects.filter(
+                guest_token=guest_token,
+                user__isnull=True,
+                status=ChatSessionStatus.RESOLVED,
+            )
+            .order_by('-updated_at', '-created_at')
+            .first()
+        )
+
+    @staticmethod
+    def attach_guest_session_to_user(
+        request: HttpRequest,
+        session: ChatSession,
+    ) -> ChatSession:
+        """Link an existing active/escalated guest session to request.user without creating new sessions."""
+        user = _get_authenticated_user(request)
+        if user is None or session.user_id is not None:
+            return session
+
+        candidate_tokens = _get_candidate_guest_tokens(request)
+        if not session.guest_token or session.guest_token not in candidate_tokens:
+            return session
+
+        with _sqlite_support_guard(), transaction.atomic():
+            active_user_session = (
+                ChatSession.objects.select_for_update()
+                .filter(user=user, status__in=_ACTIVE_SESSION_STATUSES)
+                .first()
+            )
+            if active_user_session is not None:
+                return active_user_session
+
+            locked_guest = (
+                ChatSession.objects.select_for_update()
+                .filter(pk=session.pk)
+                .first()
+            )
+            if locked_guest is None:
+                return session
+            if (
+                locked_guest.user_id is not None
+                or locked_guest.status not in _ACTIVE_SESSION_STATUSES
+            ):
+                _sync_session_attrs(session, locked_guest)
+                return locked_guest
+
+            try:
+                with transaction.atomic():
+                    locked_guest.user = user
+                    locked_guest.guest_token = ''
+                    locked_guest.save(
+                        update_fields=['user', 'guest_token', 'updated_at']
+                    )
+                    _sync_session_attrs(session, locked_guest)
+                    return locked_guest
+            except IntegrityError:
+                existing = (
+                    ChatSession.objects.select_for_update()
+                    .filter(user=user, status__in=_ACTIVE_SESSION_STATUSES)
+                    .first()
+                )
+                if existing is not None:
+                    return existing
+                raise
+
+    @staticmethod
     def get_or_create_active_session(request: HttpRequest) -> ChatSession:
         user = _get_authenticated_user(request)
         if user is not None:
@@ -367,24 +573,30 @@ class ChatSessionService:
     @staticmethod
     def reset_active_session(request: HttpRequest) -> ChatSession:
         user = _get_authenticated_user(request)
-        now = timezone.now()
 
         if user is not None:
+            candidate_tokens = _get_candidate_guest_tokens(request)
             with _sqlite_support_guard(), transaction.atomic():
                 locked_sessions = list(
-                    ChatSession.objects.select_for_update().filter(
+                    ChatSession.objects.select_for_update()
+                    .filter(
                         user=user,
                         status__in=_ACTIVE_SESSION_STATUSES,
                     )
+                    .order_by('pk')
                 )
-                if locked_sessions:
-                    ChatSession.objects.filter(
-                        pk__in=[s.pk for s in locked_sessions]
-                    ).update(
-                        status=ChatSessionStatus.RESOLVED,
-                        is_escalated=False,
-                        updated_at=now,
+                if candidate_tokens:
+                    locked_guest_sessions = list(
+                        ChatSession.objects.select_for_update()
+                        .filter(
+                            user__isnull=True,
+                            guest_token__in=candidate_tokens,
+                            status__in=_ACTIVE_SESSION_STATUSES,
+                        )
+                        .order_by('pk')
                     )
+                    locked_sessions.extend(locked_guest_sessions)
+                _resolve_sessions_and_tickets(locked_sessions, timezone.now())
                 try:
                     with transaction.atomic():
                         return ChatSession.objects.create(
@@ -410,20 +622,15 @@ class ChatSessionService:
                 )
 
             locked_sessions = list(
-                ChatSession.objects.select_for_update().filter(
+                ChatSession.objects.select_for_update()
+                .filter(
                     guest_token=guest_token,
                     user__isnull=True,
                     status__in=_ACTIVE_SESSION_STATUSES,
                 )
+                .order_by('pk')
             )
-            if locked_sessions:
-                ChatSession.objects.filter(
-                    pk__in=[s.pk for s in locked_sessions]
-                ).update(
-                    status=ChatSessionStatus.RESOLVED,
-                    is_escalated=False,
-                    updated_at=now,
-                )
+            _resolve_sessions_and_tickets(locked_sessions, timezone.now())
             try:
                 with transaction.atomic():
                     return ChatSession.objects.create(
@@ -446,66 +653,52 @@ class ChatSessionService:
 
     @staticmethod
     def escalate_session(
-        session: ChatSession,
+        session: ChatSession | uuid.UUID | str,
         reason: str,
         details: str,
         order: Order | None = None,
         customer_phone: str = '',
+        *,
+        now: datetime | None = None,
     ) -> SupportTicket:
         valid_reasons = {choice[0] for choice in TicketReason.choices}
         normalized_reason = reason if reason in valid_reasons else TicketReason.HUMAN_REQUESTED
         cleaned_details = str(details or '')[:1000]
-        cooldown_key = f'escalation_cooldown:{session.pk}'
 
         with _sqlite_support_guard(), transaction.atomic():
-            locked_session = (
-                ChatSession.objects.select_for_update(of=('self',))
-                .select_related('user')
-                .get(pk=session.pk)
-            )
+            locked_session = _lock_session(session)
+            if locked_session.status == ChatSessionStatus.RESOLVED:
+                raise InvalidSessionStateError(
+                    'Неможливо ескалювати завершену сесію чату.'
+                )
 
             existing_ticket = (
                 SupportTicket.objects.select_for_update()
                 .filter(
                     session=locked_session,
-                    status__in=[TicketStatus.OPEN, TicketStatus.IN_PROGRESS],
+                    status__in=_OPEN_TICKET_STATUSES,
                 )
                 .order_by('-created_at', '-id')
                 .first()
             )
             if existing_ticket is not None:
+                if (
+                    locked_session.status != ChatSessionStatus.ESCALATED
+                    or not locked_session.is_escalated
+                ):
+                    locked_session.status = ChatSessionStatus.ESCALATED
+                    locked_session.is_escalated = True
+                    locked_session.save(
+                        update_fields=['status', 'is_escalated', 'updated_at']
+                    )
                 _sync_session_attrs(session, locked_session)
                 return existing_ticket
 
-            if cache.get(cooldown_key):
-                recent_ticket = (
-                    SupportTicket.objects.filter(session=locked_session)
-                    .order_by('-created_at', '-id')
-                    .first()
-                )
-                if recent_ticket is not None:
-                    _sync_session_attrs(session, locked_session)
-                    return recent_ticket
-
-            raw_phone = str(customer_phone or '').strip()
-            if not raw_phone and locked_session.user and hasattr(locked_session.user, 'phone'):
-                raw_phone = str(locked_session.user.phone or '').strip()
-            if not raw_phone and order:
-                raw_phone = str(order.customer_phone or '').strip()
-
-            digits = extract_phone_digits(raw_phone, max_len=20)
-            if 7 <= len(digits) <= 15:
-                phone = f'+{digits}' if raw_phone.startswith('+') else digits
-            else:
-                phone = ''
-
-            locked_session.is_escalated = True
-            locked_session.status = ChatSessionStatus.ESCALATED
-            locked_session.escalation_reason = cleaned_details
-            locked_session.save(
-                update_fields=['is_escalated', 'status', 'escalation_reason', 'updated_at']
+            phone = _resolve_customer_phone(
+                locked_session,
+                order=order,
+                customer_phone=customer_phone,
             )
-            _sync_session_attrs(session, locked_session)
 
             try:
                 with transaction.atomic():
@@ -521,28 +714,727 @@ class ChatSessionService:
                 existing_ticket = (
                     SupportTicket.objects.filter(
                         session=locked_session,
-                        status__in=[TicketStatus.OPEN, TicketStatus.IN_PROGRESS],
+                        status__in=_OPEN_TICKET_STATUSES,
                     )
                     .order_by('-created_at', '-id')
                     .first()
                 )
                 if existing_ticket is not None:
+                    if (
+                        locked_session.status != ChatSessionStatus.ESCALATED
+                        or not locked_session.is_escalated
+                    ):
+                        locked_session.status = ChatSessionStatus.ESCALATED
+                        locked_session.is_escalated = True
+                        locked_session.save(
+                            update_fields=['status', 'is_escalated', 'updated_at']
+                        )
+                    _sync_session_attrs(session, locked_session)
                     return existing_ticket
                 raise
 
-            cache.set(cooldown_key, True, timeout=60)
+            system_text = (
+                f'Звернення #{ticket.id} передано адміністратору. '
+                'Ви можете дописати деталі прямо тут.'
+            )
+            if not is_within_working_hours(now=now):
+                system_text = f'{system_text}\n{format_off_hours_notice()}'
+
+            sys_msg = ChatMessage.objects.create(
+                session=locked_session,
+                role=MessageRole.SYSTEM,
+                source=MessageSource.SYSTEM,
+                content=system_text,
+            )
+            locked_session.is_escalated = True
+            locked_session.status = ChatSessionStatus.ESCALATED
+            locked_session.escalation_reason = cleaned_details
+            locked_session.assigned_operator = None
+            locked_session.assigned_at = None
+            locked_session.last_message_at = sys_msg.created_at
+            locked_session.updated_at = sys_msg.created_at
+            locked_session.save(
+                update_fields=[
+                    'is_escalated',
+                    'status',
+                    'escalation_reason',
+                    'assigned_operator',
+                    'assigned_at',
+                    'last_message_at',
+                    'updated_at',
+                ]
+            )
+            _sync_session_attrs(session, locked_session)
+
             from support.emails import send_ticket_escalated_email
 
             schedule_on_commit(send_ticket_escalated_email, ticket)
             return ticket
 
 
-def _sync_session_attrs(target: ChatSession, source: ChatSession) -> None:
-    if target is source:
+def _resolve_sessions_and_tickets(
+    locked_sessions: list[ChatSession],
+    now: datetime,
+) -> None:
+    if not locked_sessions:
+        return
+    session_pks = [s.pk for s in locked_sessions]
+    open_tickets = list(
+        SupportTicket.objects.select_for_update()
+        .filter(
+            session_id__in=session_pks,
+            status__in=_OPEN_TICKET_STATUSES,
+        )
+        .order_by('pk')
+    )
+    if open_tickets:
+        SupportTicket.objects.filter(
+            pk__in=[t.pk for t in open_tickets]
+        ).update(
+            status=TicketStatus.RESOLVED,
+            resolved_at=now,
+        )
+    ChatSession.objects.filter(pk__in=session_pks).update(
+        status=ChatSessionStatus.RESOLVED,
+        is_escalated=False,
+        assigned_operator=None,
+        assigned_at=None,
+        updated_at=now,
+    )
+
+
+def _resolve_customer_phone(
+    session: ChatSession,
+    order: Order | None = None,
+    customer_phone: str = '',
+) -> str:
+    raw_phone = str(customer_phone or '').strip()
+    if not raw_phone and session.user and hasattr(session.user, 'phone'):
+        raw_phone = str(session.user.phone or '').strip()
+    if not raw_phone and order:
+        raw_phone = str(order.customer_phone or '').strip()
+
+    digits = extract_phone_digits(raw_phone, max_len=20)
+    if 7 <= len(digits) <= 15:
+        return f'+{digits}' if raw_phone.startswith('+') else digits
+    return ''
+
+
+def _resolve_session_uuid(session_or_uuid: ChatSession | uuid.UUID | str) -> uuid.UUID:
+    if isinstance(session_or_uuid, ChatSession):
+        return session_or_uuid.session_uuid
+    if isinstance(session_or_uuid, uuid.UUID):
+        return session_or_uuid
+    if isinstance(session_or_uuid, str):
+        try:
+            return uuid.UUID(session_or_uuid)
+        except ValueError as exc:
+            raise SessionNotFoundError('Сесію чату не знайдено.') from exc
+    raise SessionNotFoundError('Сесію чату не знайдено.')
+
+
+def _lock_session(session_or_uuid: ChatSession | uuid.UUID | str) -> ChatSession:
+    session_uuid = _resolve_session_uuid(session_or_uuid)
+    try:
+        return (
+            ChatSession.objects.select_for_update(of=('self',))
+            .select_related('user', 'assigned_operator')
+            .get(pk=session_uuid)
+        )
+    except ChatSession.DoesNotExist as exc:
+        raise SessionNotFoundError('Сесію чату не знайдено.') from exc
+
+
+def _require_operator(operator: Any, *, allow_none: bool = False) -> None:
+    if operator is None and allow_none:
+        return
+    if not is_support_operator(operator) or getattr(operator, 'pk', None) is None:
+        raise OperatorPermissionError('Доступ дозволено лише менеджерам підтримки.')
+
+
+def validate_message_content(content: Any) -> str:
+    if content is None:
+        raise InvalidMessageError('Повідомлення не може бути порожнім.')
+    if not isinstance(content, str):
+        raise InvalidMessageError('Повідомлення має бути текстом.')
+    if '\x00' in content:
+        raise InvalidMessageError('Повідомлення містить неприпустимі символи.')
+    cleaned = content.strip()
+    if not cleaned:
+        raise InvalidMessageError('Повідомлення не може бути порожнім.')
+    if len(cleaned) > MAX_SUPPORT_MESSAGE_LENGTH:
+        raise InvalidMessageError(
+            f'Повідомлення не може перевищувати {MAX_SUPPORT_MESSAGE_LENGTH} символів.'
+        )
+    return cleaned
+
+
+_validate_message_content = validate_message_content
+
+
+_VALID_MESSAGE_SOURCES = frozenset(choice[0] for choice in MessageSource.choices)
+_CUSTOMER_MESSAGE_SOURCES = frozenset({MessageSource.WEB})
+_OPERATOR_MESSAGE_SOURCES = frozenset({MessageSource.WEB, MessageSource.TELEGRAM})
+
+
+def _validate_message_source(
+    source: str,
+    *,
+    allowed: frozenset[str] = _VALID_MESSAGE_SOURCES,
+) -> str:
+    if source not in allowed:
+        raise ValueError(f'Некоректне джерело повідомлення: {source!r}')
+    return source
+
+
+def _proactive_takeover_locked(
+    locked_session: ChatSession,
+    operator: Any,
+    details: str = '',
+) -> DeskActionResult:
+    now = timezone.now()
+    cleaned_details = (
+        str(details or '').strip()[:1000] or 'Менеджер перехопив діалог із AI.'
+    )
+
+    ticket = (
+        SupportTicket.objects.select_for_update()
+        .filter(session=locked_session, status__in=_OPEN_TICKET_STATUSES)
+        .order_by('-created_at', '-id')
+        .first()
+    )
+    if ticket is not None:
+        ticket.status = TicketStatus.IN_PROGRESS
+        ticket.assigned_operator = operator
+        ticket.save(update_fields=['status', 'assigned_operator'])
+    else:
+        ticket = SupportTicket.objects.create(
+            session=locked_session,
+            customer_phone=_resolve_customer_phone(locked_session),
+            reason=TicketReason.OPERATOR_TAKEOVER,
+            details=cleaned_details,
+            status=TicketStatus.IN_PROGRESS,
+            assigned_operator=operator,
+        )
+
+    sys_msg = ChatMessage.objects.create(
+        session=locked_session,
+        role=MessageRole.SYSTEM,
+        source=MessageSource.SYSTEM,
+        content='До діалогу підключився адміністратор ресторану.',
+    )
+    locked_session.status = ChatSessionStatus.ESCALATED
+    locked_session.is_escalated = True
+    locked_session.escalation_reason = cleaned_details
+    locked_session.assigned_operator = operator
+    locked_session.assigned_at = now
+    locked_session.last_message_at = sys_msg.created_at
+    locked_session.updated_at = sys_msg.created_at
+    locked_session.save(
+        update_fields=[
+            'status',
+            'is_escalated',
+            'escalation_reason',
+            'assigned_operator',
+            'assigned_at',
+            'last_message_at',
+            'updated_at',
+        ]
+    )
+    return DeskActionResult(
+        session=locked_session,
+        ticket=ticket,
+        system_message=sys_msg,
+    )
+
+
+class SupportDeskService:
+    @staticmethod
+    def claim_session(
+        session: ChatSession | uuid.UUID | str,
+        operator: Any,
+    ) -> DeskActionResult:
+        _require_operator(operator)
+        with _sqlite_support_guard(), transaction.atomic():
+            locked_session = _lock_session(session)
+            if locked_session.status != ChatSessionStatus.ESCALATED:
+                raise InvalidSessionStateError(
+                    'Взяти в роботу можна лише ескальовану сесію.'
+                )
+
+            ticket = (
+                SupportTicket.objects.select_for_update()
+                .filter(session=locked_session, status__in=_OPEN_TICKET_STATUSES)
+                .order_by('-created_at', '-id')
+                .first()
+            )
+
+            if locked_session.assigned_operator_id is not None:
+                if locked_session.assigned_operator_id != operator.id:
+                    owner = locked_session.assigned_operator
+                    raise SessionOwnershipConflictError(
+                        f'Діалог вже веде {get_operator_display_name(owner)}.',
+                        owner=owner,
+                    )
+                if ticket is not None and (
+                    ticket.status != TicketStatus.IN_PROGRESS
+                    or ticket.assigned_operator_id != operator.id
+                ):
+                    ticket.status = TicketStatus.IN_PROGRESS
+                    ticket.assigned_operator = operator
+                    ticket.save(update_fields=['status', 'assigned_operator'])
+                _sync_session_attrs(session, locked_session)
+                return DeskActionResult(
+                    session=locked_session,
+                    ticket=ticket,
+                    system_message=None,
+                )
+
+            now = timezone.now()
+            sys_msg = ChatMessage.objects.create(
+                session=locked_session,
+                role=MessageRole.SYSTEM,
+                source=MessageSource.SYSTEM,
+                content='До діалогу підключився адміністратор ресторану.',
+            )
+            locked_session.assigned_operator = operator
+            locked_session.assigned_at = now
+            locked_session.last_message_at = sys_msg.created_at
+            locked_session.updated_at = sys_msg.created_at
+            locked_session.save(
+                update_fields=[
+                    'assigned_operator',
+                    'assigned_at',
+                    'last_message_at',
+                    'updated_at',
+                ]
+            )
+            if ticket is not None:
+                ticket.status = TicketStatus.IN_PROGRESS
+                ticket.assigned_operator = operator
+                ticket.save(update_fields=['status', 'assigned_operator'])
+
+            _sync_session_attrs(session, locked_session)
+            return DeskActionResult(
+                session=locked_session,
+                ticket=ticket,
+                system_message=sys_msg,
+            )
+
+    @staticmethod
+    def proactive_takeover(
+        session: ChatSession | uuid.UUID | str,
+        operator: Any,
+        details: str = '',
+    ) -> DeskActionResult:
+        _require_operator(operator)
+        with _sqlite_support_guard(), transaction.atomic():
+            locked_session = _lock_session(session)
+            if locked_session.status != ChatSessionStatus.ACTIVE:
+                raise InvalidSessionStateError(
+                    'Проактивно перехопити можна лише активну AI-сесію.'
+                )
+            result = _proactive_takeover_locked(
+                locked_session,
+                operator,
+                details=details,
+            )
+            _sync_session_attrs(session, locked_session)
+            return result
+
+    @staticmethod
+    def takeover_session(
+        session: ChatSession | uuid.UUID | str,
+        operator: Any,
+        *,
+        allow_proactive: bool = False,
+        details: str = '',
+    ) -> DeskActionResult:
+        _require_operator(operator)
+        with _sqlite_support_guard(), transaction.atomic():
+            locked_session = _lock_session(session)
+            if locked_session.status == ChatSessionStatus.ACTIVE:
+                if allow_proactive:
+                    result = _proactive_takeover_locked(
+                        locked_session,
+                        operator,
+                        details=details,
+                    )
+                    _sync_session_attrs(session, locked_session)
+                    return result
+                raise InvalidSessionStateError(
+                    'Для перехоплення активної AI-сесії використайте проактивне перехоплення.'
+                )
+            if locked_session.status != ChatSessionStatus.ESCALATED:
+                raise InvalidSessionStateError(
+                    'Перехопити можна лише ескальовану сесію.'
+                )
+
+            ticket = (
+                SupportTicket.objects.select_for_update()
+                .filter(session=locked_session, status__in=_OPEN_TICKET_STATUSES)
+                .order_by('-created_at', '-id')
+                .first()
+            )
+            if locked_session.assigned_operator_id == operator.id:
+                if ticket is not None and (
+                    ticket.status != TicketStatus.IN_PROGRESS
+                    or ticket.assigned_operator_id != operator.id
+                ):
+                    ticket.status = TicketStatus.IN_PROGRESS
+                    ticket.assigned_operator = operator
+                    ticket.save(update_fields=['status', 'assigned_operator'])
+                _sync_session_attrs(session, locked_session)
+                return DeskActionResult(
+                    session=locked_session,
+                    ticket=ticket,
+                    system_message=None,
+                )
+
+            had_previous_operator = locked_session.assigned_operator_id is not None
+            sys_text = (
+                'Діалог продовжить інший адміністратор ресторану.'
+                if had_previous_operator
+                else 'До діалогу підключився адміністратор ресторану.'
+            )
+            now = timezone.now()
+            sys_msg = ChatMessage.objects.create(
+                session=locked_session,
+                role=MessageRole.SYSTEM,
+                source=MessageSource.SYSTEM,
+                content=sys_text,
+            )
+            locked_session.assigned_operator = operator
+            locked_session.assigned_at = now
+            locked_session.last_message_at = sys_msg.created_at
+            locked_session.updated_at = sys_msg.created_at
+            locked_session.save(
+                update_fields=[
+                    'assigned_operator',
+                    'assigned_at',
+                    'last_message_at',
+                    'updated_at',
+                ]
+            )
+            if ticket is not None:
+                ticket.status = TicketStatus.IN_PROGRESS
+                ticket.assigned_operator = operator
+                ticket.save(update_fields=['status', 'assigned_operator'])
+
+            _sync_session_attrs(session, locked_session)
+            return DeskActionResult(
+                session=locked_session,
+                ticket=ticket,
+                system_message=sys_msg,
+            )
+
+    @staticmethod
+    def send_customer_message(
+        session: ChatSession | uuid.UUID | str,
+        content: str,
+        *,
+        source: str = MessageSource.WEB,
+    ) -> ChatMessage:
+        cleaned = _validate_message_content(content)
+        validated_source = _validate_message_source(
+            source, allowed=_CUSTOMER_MESSAGE_SOURCES
+        )
+        with _sqlite_support_guard(), transaction.atomic():
+            locked_session = _lock_session(session)
+            if locked_session.status != ChatSessionStatus.ESCALATED:
+                raise InvalidSessionStateError(
+                    'Повідомлення оператору можна надсилати лише в ескальованій сесії.'
+                )
+            msg = ChatMessage.objects.create(
+                session=locked_session,
+                role=MessageRole.USER,
+                source=validated_source,
+                content=cleaned,
+            )
+            locked_session.last_message_at = msg.created_at
+            locked_session.updated_at = msg.created_at
+            locked_session.save(update_fields=['last_message_at', 'updated_at'])
+            _sync_session_attrs(session, locked_session)
+            return msg
+
+    @staticmethod
+    def send_operator_message(
+        session: ChatSession | uuid.UUID | str,
+        operator: Any,
+        content: str,
+        *,
+        source: str = MessageSource.WEB,
+    ) -> ChatMessage:
+        validated_source = _validate_message_source(
+            source, allowed=_OPERATOR_MESSAGE_SOURCES
+        )
+        _require_operator(
+            operator,
+            allow_none=(validated_source == MessageSource.TELEGRAM),
+        )
+        cleaned = _validate_message_content(content)
+
+        with _sqlite_support_guard(), transaction.atomic():
+            locked_session = _lock_session(session)
+            if locked_session.status != ChatSessionStatus.ESCALATED:
+                raise InvalidSessionStateError(
+                    'Відповідати можна лише в ескальованій сесії.'
+                )
+
+            session_update_fields = [
+                'last_message_at',
+                'operator_last_read_id',
+                'updated_at',
+            ]
+
+            if validated_source == MessageSource.TELEGRAM:
+                ticket = (
+                    SupportTicket.objects.select_for_update()
+                    .filter(session=locked_session, status__in=_OPEN_TICKET_STATUSES)
+                    .order_by('-created_at', '-id')
+                    .first()
+                )
+                was_already_in_progress = (
+                    ticket is not None and ticket.status == TicketStatus.IN_PROGRESS
+                )
+                became_in_progress = False
+                if ticket is not None:
+                    ticket_fields: list[str] = []
+                    if ticket.status == TicketStatus.OPEN:
+                        ticket.status = TicketStatus.IN_PROGRESS
+                        ticket_fields.append('status')
+                        became_in_progress = True
+                    if operator is not None and ticket.assigned_operator_id is None:
+                        ticket.assigned_operator = operator
+                        ticket_fields.append('assigned_operator')
+                    if ticket_fields:
+                        ticket.save(update_fields=ticket_fields)
+                if operator is not None and locked_session.assigned_operator_id is None:
+                    locked_session.assigned_operator = operator
+                    locked_session.assigned_at = timezone.now()
+                    session_update_fields.extend(['assigned_operator', 'assigned_at'])
+                    if not was_already_in_progress:
+                        became_in_progress = True
+                if became_in_progress:
+                    ChatMessage.objects.create(
+                        session=locked_session,
+                        role=MessageRole.SYSTEM,
+                        source=MessageSource.SYSTEM,
+                        content='До діалогу підключився адміністратор ресторану.',
+                    )
+            else:
+                if locked_session.assigned_operator_id is None:
+                    raise SessionOwnershipConflictError(
+                        'Спочатку візьміть звернення в роботу.',
+                        owner=None,
+                    )
+                if locked_session.assigned_operator_id != operator.id:
+                    owner = locked_session.assigned_operator
+                    raise SessionOwnershipConflictError(
+                        f'Діалог веде {get_operator_display_name(owner)}.',
+                        owner=owner,
+                    )
+
+            msg = ChatMessage.objects.create(
+                session=locked_session,
+                role=MessageRole.OPERATOR,
+                sender_user=operator,
+                source=validated_source,
+                content=cleaned,
+            )
+            locked_session.last_message_at = msg.created_at
+            locked_session.operator_last_read_id = max(
+                locked_session.operator_last_read_id,
+                msg.id,
+            )
+            locked_session.updated_at = msg.created_at
+            locked_session.save(update_fields=session_update_fields)
+            _sync_session_attrs(session, locked_session)
+            return msg
+
+    @staticmethod
+    def return_to_ai(
+        session: ChatSession | uuid.UUID | str,
+        operator: Any,
+        *,
+        source: str = MessageSource.WEB,
+    ) -> DeskActionResult:
+        validated_source = _validate_message_source(
+            source, allowed=_OPERATOR_MESSAGE_SOURCES
+        )
+        _require_operator(
+            operator,
+            allow_none=(validated_source == MessageSource.TELEGRAM),
+        )
+        with _sqlite_support_guard(), transaction.atomic():
+            locked_session = _lock_session(session)
+            if locked_session.status != ChatSessionStatus.ESCALATED:
+                raise InvalidSessionStateError(
+                    'Повернути AI можна лише для ескальованої сесії.'
+                )
+
+            now = timezone.now()
+            open_tickets = list(
+                SupportTicket.objects.select_for_update()
+                .filter(session=locked_session, status__in=_OPEN_TICKET_STATUSES)
+                .order_by('-created_at', '-id')
+            )
+            ticket = open_tickets[0] if open_tickets else None
+            if open_tickets:
+                SupportTicket.objects.filter(
+                    pk__in=[t.pk for t in open_tickets]
+                ).update(
+                    status=TicketStatus.RESOLVED,
+                    resolved_at=now,
+                )
+                ticket.status = TicketStatus.RESOLVED
+                ticket.resolved_at = now
+
+            sys_msg = ChatMessage.objects.create(
+                session=locked_session,
+                role=MessageRole.SYSTEM,
+                source=MessageSource.SYSTEM,
+                content=(
+                    'Адміністратор завершив діалог. '
+                    'Далі вам допомагає AI-консьєрж Double Bite.'
+                ),
+            )
+            locked_session.status = ChatSessionStatus.ACTIVE
+            locked_session.is_escalated = False
+            locked_session.assigned_operator = None
+            locked_session.assigned_at = None
+            locked_session.last_message_at = sys_msg.created_at
+            locked_session.updated_at = sys_msg.created_at
+            locked_session.save(
+                update_fields=[
+                    'status',
+                    'is_escalated',
+                    'assigned_operator',
+                    'assigned_at',
+                    'last_message_at',
+                    'updated_at',
+                ]
+            )
+            _sync_session_attrs(session, locked_session)
+            return DeskActionResult(
+                session=locked_session,
+                ticket=ticket,
+                system_message=sys_msg,
+            )
+
+    @staticmethod
+    def resolve_session(
+        session: ChatSession | uuid.UUID | str,
+        operator: Any,
+        *,
+        source: str = MessageSource.WEB,
+    ) -> DeskActionResult:
+        validated_source = _validate_message_source(
+            source, allowed=_OPERATOR_MESSAGE_SOURCES
+        )
+        _require_operator(
+            operator,
+            allow_none=(validated_source == MessageSource.TELEGRAM),
+        )
+        with _sqlite_support_guard(), transaction.atomic():
+            locked_session = _lock_session(session)
+            if locked_session.status not in _ACTIVE_SESSION_STATUSES:
+                raise InvalidSessionStateError('Сесію чату вже завершено.')
+
+            now = timezone.now()
+            open_tickets = list(
+                SupportTicket.objects.select_for_update()
+                .filter(session=locked_session, status__in=_OPEN_TICKET_STATUSES)
+                .order_by('-created_at', '-id')
+            )
+            ticket = open_tickets[0] if open_tickets else None
+            if open_tickets:
+                SupportTicket.objects.filter(
+                    pk__in=[t.pk for t in open_tickets]
+                ).update(
+                    status=TicketStatus.RESOLVED,
+                    resolved_at=now,
+                )
+                ticket.status = TicketStatus.RESOLVED
+                ticket.resolved_at = now
+
+            sys_msg = ChatMessage.objects.create(
+                session=locked_session,
+                role=MessageRole.SYSTEM,
+                source=MessageSource.SYSTEM,
+                content=(
+                    'Звернення завершено. Якщо виникнуть нові запитання — '
+                    'натисніть «Новий діалог».'
+                ),
+            )
+            locked_session.status = ChatSessionStatus.RESOLVED
+            locked_session.is_escalated = False
+            locked_session.assigned_operator = None
+            locked_session.assigned_at = None
+            locked_session.last_message_at = sys_msg.created_at
+            locked_session.updated_at = sys_msg.created_at
+            locked_session.save(
+                update_fields=[
+                    'status',
+                    'is_escalated',
+                    'assigned_operator',
+                    'assigned_at',
+                    'last_message_at',
+                    'updated_at',
+                ]
+            )
+            _sync_session_attrs(session, locked_session)
+            return DeskActionResult(
+                session=locked_session,
+                ticket=ticket,
+                system_message=sys_msg,
+            )
+
+    @staticmethod
+    def mark_session_read(
+        session: ChatSession | uuid.UUID | str,
+        operator: Any,
+        last_message_id: int | None = None,
+    ) -> int:
+        _require_operator(operator)
+        if last_message_id is not None and (
+            isinstance(last_message_id, bool)
+            or not isinstance(last_message_id, int)
+            or last_message_id < 0
+        ):
+            raise ValueError('last_message_id must be a non-negative integer')
+
+        with _sqlite_support_guard(), transaction.atomic():
+            locked_session = _lock_session(session)
+            latest_id = (
+                locked_session.messages.order_by('-id')
+                .values_list('id', flat=True)
+                .first()
+                or 0
+            )
+            target_id = (
+                latest_id
+                if last_message_id is None
+                else min(last_message_id, latest_id)
+            )
+            new_read_id = max(locked_session.operator_last_read_id, target_id)
+            if new_read_id > locked_session.operator_last_read_id:
+                locked_session.operator_last_read_id = new_read_id
+                locked_session.save(update_fields=['operator_last_read_id'])
+            _sync_session_attrs(session, locked_session)
+            return locked_session.operator_last_read_id
+
+
+def _sync_session_attrs(target: Any, source: ChatSession) -> None:
+    if not isinstance(target, ChatSession) or target is source:
         return
     target.is_escalated = source.is_escalated
     target.status = source.status
     target.escalation_reason = source.escalation_reason
+    target.assigned_operator = source.assigned_operator
+    target.assigned_at = source.assigned_at
+    target.last_message_at = source.last_message_at
+    target.operator_last_read_id = source.operator_last_read_id
     target.updated_at = source.updated_at
 
 

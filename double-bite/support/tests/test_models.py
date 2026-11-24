@@ -217,6 +217,7 @@ class SupportMigration0002Test(TransactionTestCase):
         target_0002 = [('support', '0002_guest_token_constraints_and_message_ordering')]
 
         executor = MigrationExecutor(connection)
+        leaf_targets = executor.loader.graph.leaf_nodes('support')
         executor.migrate(target_0001)
         try:
             old_apps = executor.loader.project_state(target_0001).apps
@@ -306,4 +307,4 @@ class SupportMigration0002Test(TransactionTestCase):
             self.assertIsNotNone(ticket_old_after.resolved_at)
             self.assertEqual(ticket_new_after.status, 'IN_PROGRESS')
         finally:
-            MigrationExecutor(connection).migrate(target_0002)
+            MigrationExecutor(connection).migrate(leaf_targets)
