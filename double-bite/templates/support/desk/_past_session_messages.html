@@ -1,0 +1,36 @@
+<div class="mt-2.5 rounded-xl bg-white border border-db-linen overflow-hidden">
+  <div class="px-3 py-2 bg-db-boucle/70 border-b border-db-linen flex items-center justify-between gap-2">
+    <span class="font-sans text-xs font-semibold text-db-text">
+      {% if ticket %}Тікет #{{ ticket.id }} · {{ ticket.get_reason_display }}{% else %}Минулий діалог{% endif %}
+    </span>
+    {% if date_label %}
+      <span class="font-mono tabular-nums text-[11px] text-db-subtle">{{ date_label }}</span>
+    {% endif %}
+  </div>
+
+  <div class="max-h-60 overflow-y-auto p-3 space-y-2" data-lenis-prevent>
+    {% if messages %}
+      {% for msg in messages %}
+        {% if msg.sender == 'system' %}
+          <div class="text-center">
+            <span class="inline-block px-2.5 py-1 rounded-full bg-db-boucle text-db-muted font-sans text-[11px]">
+              {{ msg.content }}
+            </span>
+          </div>
+        {% else %}
+          <div class="rounded-lg px-2.5 py-2 text-xs font-sans {% if msg.sender == 'operator' %}bg-db-noir text-white{% elif msg.sender == 'ai' %}bg-db-paper border border-db-linen text-db-text{% else %}bg-db-boucle/70 border border-db-linen text-db-text{% endif %}">
+            <div class="flex items-center justify-between gap-2 mb-0.5 text-[10px] {% if msg.sender == 'operator' %}text-white/75{% else %}text-db-subtle{% endif %}">
+              <span class="font-semibold truncate">
+                {{ msg.sender_label }}{% if msg.source_badge %} · {{ msg.source_badge }}{% endif %}
+              </span>
+              <span class="font-mono tabular-nums shrink-0">{{ msg.created_at_str }}</span>
+            </div>
+            <div class="leading-relaxed break-words">{{ msg.content|linebreaksbr }}</div>
+          </div>
+        {% endif %}
+      {% endfor %}
+    {% else %}
+      <p class="font-sans text-xs text-db-subtle text-center py-2">Повідомлення відсутні.</p>
+    {% endif %}
+  </div>
+</div>

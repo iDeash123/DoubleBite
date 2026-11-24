@@ -145,6 +145,25 @@
           </button>
           {% endif %}
 
+          {% if is_support_operator %}
+            <a
+              href="{% url 'support:desk_index' %}"
+              class="h-10 px-3 rounded-lg border {% if request and '/support/desk/' in request.path %}border-db-crust bg-db-boucle text-db-crust-dark{% else %}border-db-linen bg-white text-db-text hover:border-db-noir/30{% endif %} inline-flex items-center gap-2 text-sm font-sans font-medium transition-colors shrink-0"
+              title="Пульт підтримки"
+              aria-label="Пульт підтримки"
+            >
+              <svg class="w-4 h-4 text-db-crust-dark shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+              </svg>
+              <span>Підтримка</span>
+              {% if support_waiting_count > 0 %}
+                <span class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[10px] font-mono font-semibold tabular-nums bg-db-crust-dark text-white rounded-full leading-none select-none">
+                  {{ support_waiting_count }}
+                </span>
+              {% endif %}
+            </a>
+          {% endif %}
+
           {% if user.is_authenticated %}
             <a
               href="{% url 'accounts:profile' %}"
@@ -314,6 +333,26 @@
           </nav>
 
           <div class="border-t border-db-linen bg-db-paper p-3 space-y-2">
+            {% if is_support_operator %}
+              <a
+                href="{% url 'support:desk_index' %}"
+                @click="mobileOpen = false"
+                class="flex items-center justify-between min-h-[44px] px-3 py-2 rounded-lg border {% if request and '/support/desk/' in request.path %}border-db-crust bg-db-boucle text-db-crust-dark{% else %}border-db-linen bg-white text-db-text hover:border-db-noir/30{% endif %} transition-colors"
+              >
+                <span class="inline-flex items-center gap-2 text-sm font-medium">
+                  <svg class="w-4 h-4 text-db-crust-dark shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                  <span>Підтримка</span>
+                </span>
+                {% if support_waiting_count > 0 %}
+                  <span class="inline-flex items-center justify-center min-w-[20px] h-[20px] px-1.5 text-[10px] font-mono font-semibold tabular-nums bg-db-crust-dark text-white rounded-full leading-none select-none">
+                    {{ support_waiting_count }}
+                  </span>
+                {% endif %}
+              </a>
+            {% endif %}
+
             {% if user.is_authenticated %}
               <a href="{% url 'accounts:profile' %}" @click="mobileOpen = false" class="flex flex-col justify-center min-h-[44px] px-3 py-2 rounded-lg bg-white border border-db-linen text-db-text hover:border-db-noir/30 transition-colors">
                 <span class="text-sm font-medium">Особистий кабінет</span>
@@ -346,6 +385,7 @@
     {% block content %}{% endblock %}
   </main>
 
+  {% block footer %}
   <footer class="bg-db-ink text-white pt-14 sm:pt-16 pb-0 overflow-hidden relative border-t border-white/10 mt-auto">
     <div class="max-w-[1440px] mx-auto px-4 sm:px-8">
 
@@ -436,8 +476,11 @@
 
     </div>
   </footer>
+  {% endblock %}
 
-  {% include "support/chat_widget.html" %}
+  {% if not request or request.path|slice:":14" != "/support/desk/" %}
+    {% include "support/chat_widget.html" %}
+  {% endif %}
   {% include "partials/cart_drawer.html" %}
   {% include "partials/toast_messages.html" %}
 

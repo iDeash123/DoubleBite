@@ -1,0 +1,616 @@
+{% extends "base.html" %}
+
+{% block title %}Пульт підтримки — Double Bite{% endblock %}
+{% block meta_description %}Веб-пульт оператора служби турботи про гостей Double Bite.{% endblock %}
+
+{% block footer %}{% endblock %}
+
+{% block content %}
+<div
+  id="support-desk-app"
+  x-data="supportDeskController({
+    activeTab: '{{ queue.tab|escapejs }}',
+    searchQuery: '{{ queue.query|escapejs }}',
+    activeSessionUuid: '{{ active_session_uuid|escapejs }}',
+    lastMessageId: {{ thread.last_message_id|default:0 }},
+    sessionStatus: '{% if thread %}{{ thread.session.status|escapejs }}{% endif %}',
+    assignedOperatorId: '{% if thread and thread.session.assigned_operator_id %}{{ thread.session.assigned_operator_id }}{% endif %}'
+  })"
+  class="w-full h-[calc(100vh-65px)] md:h-[calc(100vh-73px)] flex overflow-hidden bg-db-paper border-t border-db-linen/50"
+>
+  <aside
+    :class="mobileView === 'queue' ? 'flex w-full lg:w-80 xl:w-[340px]' : 'hidden lg:flex lg:w-80 xl:w-[340px]'"
+    class="flex-col shrink-0 bg-db-paper border-r border-db-linen h-full overflow-hidden"
+    aria-label="Список діалогів"
+  >
+    <div class="px-3.5 pt-3.5 pb-2.5 border-b border-db-linen bg-db-paper shrink-0 space-y-2.5">
+      <div class="flex items-center justify-between gap-2">
+        <h1 class="font-serif text-xl font-medium text-db-text">Пульт підтримки</h1>
+        <span class="font-mono tabular-nums text-[11px] text-db-subtle">10:00–22:00</span>
+      </div>
+      <div class="relative">
+        <label for="desk-search-input" class="sr-only">Пошук звернень</label>
+        <input
+          id="desk-search-input"
+          type="search"
+          x-model="searchQuery"
+          @input.debounce.300ms="refreshQueue()"
+          @search="refreshQueue()"
+          placeholder="Email, імʼя, телефон, #тікет, DB-…"
+          class="w-full min-h-[44px] pl-9 pr-3 py-2 rounded-lg border border-db-linen bg-white text-db-text font-sans text-xs sm:text-sm placeholder:text-db-subtle focus:border-db-crust-dark focus:outline-none"
+        >
+        <svg class="w-4 h-4 text-db-subtle absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+      </div>
+    </div>
+
+    <div id="desk-queue" class="flex-1 min-h-0 overflow-hidden">
+      {% include "support/desk/_queue.html" %}
+    </div>
+  </aside>
+
+  <main
+    id="desk-workspace"
+    :class="mobileView === 'chat' ? 'flex flex-1 min-w-0 h-full' : 'hidden lg:flex lg:flex-1 lg:min-w-0 lg:h-full'"
+    class="overflow-hidden bg-white"
+  >
+    {% if thread %}
+      {% include "support/desk/_thread.html" %}
+    {% else %}
+      <div class="flex-1 flex items-center justify-center p-8 text-center bg-white">
+        <div class="max-w-md space-y-3">
+          <div class="w-12 h-12 rounded-2xl bg-db-boucle border border-db-linen text-db-crust-dark inline-flex items-center justify-center mx-auto">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+          </div>
+          <h2 class="font-serif text-2xl font-medium text-db-text">Немає звернень в очікуванні</h2>
+          <p class="font-sans text-sm text-db-muted leading-relaxed">
+            Оберіть діалог у лівій панелі або переключіться на вкладки «В роботі» чи «Активні AI», щоб переглянути переписку чи перехопити чат.
+          </p>
+        </div>
+      </div>
+    {% endif %}
+  </main>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+function supportDeskController(initial) {
+  return {
+    activeTab: initial.activeTab || 'waiting',
+    searchQuery: initial.searchQuery || '',
+    activeSessionUuid: initial.activeSessionUuid || '',
+    lastMessageId: Number(initial.lastMessageId || 0),
+    sessionStatus: initial.sessionStatus || '',
+    assignedOperatorId: initial.assignedOperatorId || '',
+    replyText: '',
+    sending: false,
+    actionLoading: false,
+    errorBanner: '',
+    mobileView: initial.activeSessionUuid ? 'chat' : 'queue',
+    contextDrawerOpen: false,
+    expandedPast: {},
+    threadLoading: false,
+    pendingQueueRefresh: false,
+    pollTimer: null,
+    pollingInFlight: false,
+    pendingCatchupPoll: false,
+    visibilityHandler: null,
+    beforeRequestHandler: null,
+    afterSwapHandler: null,
+    htmxErrorHandler: null,
+
+    init() {
+      this.syncThreadMetadata();
+      this.scrollMessagesToBottom();
+
+      this.beforeRequestHandler = (evt) => {
+        const elt = evt.detail && evt.detail.elt;
+        if (elt && elt.dataset && elt.dataset.pastSessionBtn) {
+          const box = document.getElementById(`past-history-box-${elt.dataset.pastSessionBtn}`);
+          if (box && box.dataset.loaded === '1') {
+            evt.preventDefault();
+          }
+        }
+      };
+      this.afterSwapHandler = (evt) => {
+        const target = evt.detail && evt.detail.target;
+        if (!target) return;
+        if (target.id === 'desk-workspace') {
+          this.threadLoading = false;
+          this.expandedPast = {};
+          this.syncThreadMetadata();
+          this.scrollMessagesToBottom();
+          if (this.pendingQueueRefresh) {
+            this.pendingQueueRefresh = false;
+            this.refreshQueue();
+          }
+        } else if (target.id && target.id.startsWith('past-history-box-')) {
+          const pastUuid = target.id.slice('past-history-box-'.length);
+          target.dataset.loaded = '1';
+          this.expandedPast[pastUuid] = true;
+        }
+      };
+      this.htmxErrorHandler = (evt) => {
+        if (evt.detail && evt.detail.target && evt.detail.target.id === 'desk-workspace') {
+          this.threadLoading = false;
+          this.pendingQueueRefresh = false;
+        }
+      };
+      document.body.addEventListener('htmx:beforeRequest', this.beforeRequestHandler);
+      document.body.addEventListener('htmx:afterSwap', this.afterSwapHandler);
+      document.body.addEventListener('htmx:responseError', this.htmxErrorHandler);
+      document.body.addEventListener('htmx:sendError', this.htmxErrorHandler);
+
+      this.visibilityHandler = () => {
+        if (document.hidden) {
+          this.stopPolling();
+        } else {
+          this.startPolling(true);
+        }
+      };
+      document.addEventListener('visibilitychange', this.visibilityHandler);
+      this.startPolling(false);
+    },
+
+    destroy() {
+      this.stopPolling();
+      if (this.visibilityHandler) {
+        document.removeEventListener('visibilitychange', this.visibilityHandler);
+      }
+      if (this.beforeRequestHandler) {
+        document.body.removeEventListener('htmx:beforeRequest', this.beforeRequestHandler);
+      }
+      if (this.afterSwapHandler) {
+        document.body.removeEventListener('htmx:afterSwap', this.afterSwapHandler);
+      }
+      if (this.htmxErrorHandler) {
+        document.body.removeEventListener('htmx:responseError', this.htmxErrorHandler);
+        document.body.removeEventListener('htmx:sendError', this.htmxErrorHandler);
+      }
+    },
+
+    getCsrfToken() {
+      let token = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+      if (!token) {
+        const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+        if (match) token = decodeURIComponent(match[1]);
+      }
+      return token;
+    },
+
+    syncThreadMetadata() {
+      const root = document.getElementById('desk-thread-root');
+      if (!root) {
+        this.lastMessageId = 0;
+        this.sessionStatus = '';
+        this.assignedOperatorId = '';
+        return;
+      }
+      this.activeSessionUuid = root.dataset.sessionUuid || this.activeSessionUuid;
+      this.sessionStatus = root.dataset.sessionStatus || '';
+      this.assignedOperatorId = root.dataset.assignedOperatorId || '';
+      this.lastMessageId = Number(root.dataset.lastMessageId || 0);
+    },
+
+    scrollMessagesToBottom() {
+      this.$nextTick(() => {
+        const el = document.getElementById('desk-messages-list');
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+
+    buildQueueUrl() {
+      const params = new URLSearchParams({
+        tab: this.activeTab,
+        q: this.searchQuery || '',
+        active: this.activeSessionUuid || '',
+      });
+      return '/support/desk/partials/queue/?' + params.toString();
+    },
+
+    refreshQueue() {
+      if (!window.htmx) return;
+      window.htmx.ajax('GET', this.buildQueueUrl(), {
+        target: '#desk-queue',
+        swap: 'innerHTML',
+      });
+    },
+
+    refreshThread(uuid = this.activeSessionUuid) {
+      if (!uuid || !window.htmx) return;
+      this.threadLoading = true;
+      window.htmx.ajax('GET', `/support/desk/partials/thread/${encodeURIComponent(uuid)}/`, {
+        target: '#desk-workspace',
+        swap: 'innerHTML',
+      });
+    },
+
+    switchTab(tab) {
+      this.activeTab = tab;
+      this.refreshQueue();
+    },
+
+    selectSession(uuid) {
+      if (!uuid) return;
+      this.activeSessionUuid = uuid;
+      this.errorBanner = '';
+      this.replyText = '';
+      this.contextDrawerOpen = false;
+      this.expandedPast = {};
+      this.mobileView = 'chat';
+      this.pendingQueueRefresh = true;
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, '', `/support/desk/${encodeURIComponent(uuid)}/`);
+      }
+      this.refreshThread(uuid);
+    },
+
+    togglePastSession(uuid) {
+      if (!uuid) return;
+      const box = document.getElementById(`past-history-box-${uuid}`);
+      if (box && box.dataset.loaded === '1') {
+        this.expandedPast[uuid] = !this.expandedPast[uuid];
+      }
+    },
+
+    async runAction(action) {
+      if (!this.activeSessionUuid || this.actionLoading) return;
+      const targetUuid = this.activeSessionUuid;
+      this.actionLoading = true;
+      this.errorBanner = '';
+      try {
+        const res = await fetch(
+          `/support/desk/api/sessions/${encodeURIComponent(targetUuid)}/${action}/`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': this.getCsrfToken(),
+            },
+            body: JSON.stringify({}),
+          }
+        );
+        let data = null;
+        try {
+          data = await res.json();
+        } catch (e) {}
+
+        if (this.activeSessionUuid !== targetUuid) {
+          if (res.ok) {
+            this.refreshQueue();
+          }
+          return;
+        }
+        if (!res.ok) {
+          this.errorBanner = (data && data.error) || 'Не вдалося виконати дію.';
+        }
+        if (res.ok && data) {
+          if (data.status === 'ACTIVE') {
+            this.activeTab = 'ai';
+          } else if (data.status === 'RESOLVED') {
+            this.activeTab = 'resolved';
+          } else if (data.status === 'ESCALATED' && data.assigned_operator_id) {
+            this.activeTab = 'in_progress';
+          }
+        }
+        this.pendingQueueRefresh = true;
+        this.refreshThread(targetUuid);
+      } catch (e) {
+        if (this.activeSessionUuid === targetUuid) {
+          this.errorBanner = 'Помилка мережі. Спробуйте ще раз.';
+        }
+      } finally {
+        this.actionLoading = false;
+      }
+    },
+
+    handleReplyKeydown(evt) {
+      if (evt.key === 'Enter' && !evt.shiftKey) {
+        evt.preventDefault();
+        this.sendReply();
+      }
+    },
+
+    triggerCatchupPoll() {
+      if (document.hidden) return;
+      if (this.pollingInFlight) {
+        this.pendingCatchupPoll = true;
+        return;
+      }
+      this.pollActiveSession();
+    },
+
+    async sendReply() {
+      const content = this.replyText.trim();
+      if (!content || !this.activeSessionUuid || this.sending) return;
+      const targetUuid = this.activeSessionUuid;
+      this.sending = true;
+      this.errorBanner = '';
+      try {
+        const res = await fetch(
+          `/support/desk/api/sessions/${encodeURIComponent(targetUuid)}/reply/`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': this.getCsrfToken(),
+            },
+            body: JSON.stringify({ message: content }),
+          }
+        );
+        let data = null;
+        try {
+          data = await res.json();
+        } catch (e) {}
+
+        if (this.activeSessionUuid !== targetUuid) {
+          if (res.ok) {
+            this.refreshQueue();
+          }
+          return;
+        }
+
+        if (res.ok && data && data.message) {
+          this.replyText = '';
+          this.appendMessages([data.message], { advanceCursor: false });
+          if (this.pollingInFlight) {
+            this.refreshQueue();
+          }
+          this.triggerCatchupPoll();
+        } else {
+          this.errorBanner = (data && data.error) || 'Не вдалося надіслати повідомлення.';
+          if (res.status === 409) {
+            this.pendingQueueRefresh = true;
+            this.refreshThread(targetUuid);
+          }
+        }
+      } catch (e) {
+        if (this.activeSessionUuid === targetUuid) {
+          this.errorBanner = 'Помилка мережі під час надсилання повідомлення.';
+        }
+      } finally {
+        this.sending = false;
+      }
+    },
+
+    createSourceIcon(source) {
+      const svgNS = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(svgNS, 'svg');
+      svg.setAttribute('class', 'w-2.5 h-2.5');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.setAttribute('fill', 'none');
+      svg.setAttribute('stroke', 'currentColor');
+      svg.setAttribute('stroke-width', '2');
+      svg.setAttribute('aria-hidden', 'true');
+
+      if (source === 'TELEGRAM') {
+        const line = document.createElementNS(svgNS, 'line');
+        line.setAttribute('x1', '22');
+        line.setAttribute('y1', '2');
+        line.setAttribute('x2', '11');
+        line.setAttribute('y2', '13');
+        const polygon = document.createElementNS(svgNS, 'polygon');
+        polygon.setAttribute('points', '22 2 15 22 11 13 2 9 22 2');
+        svg.appendChild(line);
+        svg.appendChild(polygon);
+      } else {
+        const rect = document.createElementNS(svgNS, 'rect');
+        rect.setAttribute('x', '2');
+        rect.setAttribute('y', '3');
+        rect.setAttribute('width', '20');
+        rect.setAttribute('height', '14');
+        rect.setAttribute('rx', '2');
+        const line1 = document.createElementNS(svgNS, 'line');
+        line1.setAttribute('x1', '8');
+        line1.setAttribute('y1', '21');
+        line1.setAttribute('x2', '16');
+        line1.setAttribute('y2', '21');
+        const line2 = document.createElementNS(svgNS, 'line');
+        line2.setAttribute('x1', '12');
+        line2.setAttribute('y1', '17');
+        line2.setAttribute('x2', '12');
+        line2.setAttribute('y2', '21');
+        svg.appendChild(rect);
+        svg.appendChild(line1);
+        svg.appendChild(line2);
+      }
+      return svg;
+    },
+
+    appendMessages(messages, options = {}) {
+      const advanceCursor = options.advanceCursor !== false;
+      const container = document.getElementById('desk-messages-list');
+      if (!container || !Array.isArray(messages) || messages.length === 0) return;
+      let added = false;
+
+      const sorted = [...messages]
+        .filter((msg) => msg && msg.id !== undefined && msg.id !== null)
+        .sort((a, b) => Number(a.id) - Number(b.id));
+
+      for (const msg of sorted) {
+        const msgId = Number(msg.id);
+        if (!Number.isFinite(msgId) || msgId <= 0) continue;
+        if (container.querySelector(`[data-message-id="${msgId}"]`)) {
+          if (advanceCursor) {
+            this.lastMessageId = Math.max(this.lastMessageId, msgId);
+          }
+          continue;
+        }
+        const emptyPlaceholder = container.querySelector('#desk-empty-thread-placeholder');
+        if (emptyPlaceholder) emptyPlaceholder.remove();
+
+        const row = document.createElement('div');
+        row.setAttribute('data-message-id', String(msgId));
+
+        if (msg.sender === 'system') {
+          row.className = 'flex justify-center py-1';
+          const pill = document.createElement('div');
+          pill.className = 'max-w-lg px-3.5 py-1.5 rounded-xl bg-db-boucle border border-db-linen text-db-muted font-sans text-xs text-center leading-relaxed whitespace-pre-line';
+          pill.textContent = msg.content || '';
+          row.appendChild(pill);
+        } else {
+          const isRight = msg.sender === 'operator' || msg.sender === 'ai';
+          row.className = isRight ? 'flex justify-end' : 'flex justify-start';
+
+          const bubble = document.createElement('div');
+          if (msg.sender === 'operator') {
+            bubble.className = 'max-w-[82%] sm:max-w-[72%] rounded-2xl rounded-tr-sm px-4 py-2.5 bg-db-noir text-white';
+          } else if (msg.sender === 'ai') {
+            bubble.className = 'max-w-[82%] sm:max-w-[72%] rounded-2xl rounded-tr-sm px-4 py-2.5 bg-white border border-db-linen text-db-text shadow-sm';
+          } else {
+            bubble.className = 'max-w-[82%] sm:max-w-[72%] rounded-2xl rounded-tl-sm px-4 py-2.5 bg-db-paper border border-db-linen text-db-text';
+          }
+
+          const meta = document.createElement('div');
+          meta.className = msg.sender === 'operator'
+            ? 'flex items-center justify-between gap-3 mb-1 text-[11px] text-white/75'
+            : 'flex items-center justify-between gap-3 mb-1 text-[11px] text-db-subtle';
+
+          if (msg.sender === 'operator') {
+            const labelWrap = document.createElement('span');
+            labelWrap.className = 'inline-flex items-center gap-1.5 font-sans font-semibold text-white';
+            const labelText = document.createElement('span');
+            labelText.textContent = msg.sender_label || '';
+            labelWrap.appendChild(labelText);
+            if (msg.source_badge) {
+              const sourcePill = document.createElement('span');
+              sourcePill.className = 'inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/15 text-[10px] font-mono';
+              sourcePill.appendChild(this.createSourceIcon(msg.source));
+              sourcePill.appendChild(document.createTextNode(String(msg.source_badge)));
+              labelWrap.appendChild(sourcePill);
+            }
+            meta.appendChild(labelWrap);
+          } else if (msg.sender === 'ai') {
+            const labelWrap = document.createElement('span');
+            labelWrap.className = 'inline-flex items-center gap-1.5 font-sans font-semibold text-db-text';
+            const aiBadge = document.createElement('span');
+            aiBadge.className = 'px-1.5 py-0.5 rounded bg-db-boucle text-db-crust-dark font-mono text-[10px]';
+            aiBadge.textContent = 'AI';
+            const labelText = document.createElement('span');
+            labelText.textContent = msg.sender_label || '';
+            labelWrap.appendChild(aiBadge);
+            labelWrap.appendChild(labelText);
+            meta.appendChild(labelWrap);
+          } else {
+            const label = document.createElement('span');
+            label.className = 'font-sans font-semibold text-db-text';
+            label.textContent = msg.sender_label || '';
+            meta.appendChild(label);
+          }
+
+          const time = document.createElement('span');
+          time.className = 'font-mono tabular-nums';
+          time.textContent = msg.created_at || '';
+          meta.appendChild(time);
+
+          const body = document.createElement('div');
+          body.className = 'font-sans text-sm leading-relaxed break-words whitespace-pre-line';
+          body.textContent = msg.content || '';
+
+          bubble.appendChild(meta);
+          bubble.appendChild(body);
+          row.appendChild(bubble);
+        }
+
+        let insertBeforeEl = null;
+        const existingRows = container.querySelectorAll('[data-message-id]');
+        for (const existing of existingRows) {
+          const existingId = Number(existing.getAttribute('data-message-id'));
+          if (Number.isFinite(existingId) && existingId > msgId) {
+            insertBeforeEl = existing;
+            break;
+          }
+        }
+        if (insertBeforeEl) {
+          container.insertBefore(row, insertBeforeEl);
+        } else {
+          container.appendChild(row);
+        }
+        if (advanceCursor) {
+          this.lastMessageId = Math.max(this.lastMessageId, msgId);
+        }
+        added = true;
+      }
+
+      if (added) {
+        this.scrollMessagesToBottom();
+      }
+    },
+
+    stopPolling() {
+      if (this.pollTimer) {
+        clearTimeout(this.pollTimer);
+        this.pollTimer = null;
+      }
+    },
+
+    scheduleNextPoll() {
+      this.stopPolling();
+      if (document.hidden) return;
+      this.pollTimer = setTimeout(() => {
+        this.pollTimer = null;
+        this.pollActiveSession();
+      }, 4000);
+    },
+
+    startPolling(immediate = false) {
+      if (document.hidden) {
+        this.stopPolling();
+        return;
+      }
+      if (immediate) {
+        this.pollActiveSession();
+      } else {
+        this.scheduleNextPoll();
+      }
+    },
+
+    async pollActiveSession() {
+      if (document.hidden || this.pollingInFlight) {
+        this.scheduleNextPoll();
+        return;
+      }
+      this.pollingInFlight = true;
+      let queuedAfterSwap = false;
+      try {
+        const isThreadVisible = window.innerWidth >= 1024 || this.mobileView === 'chat';
+        if (this.activeSessionUuid && !this.threadLoading && isThreadVisible) {
+          const polledUuid = this.activeSessionUuid;
+          const url = `/support/desk/api/sessions/${encodeURIComponent(polledUuid)}/messages/?after_id=${encodeURIComponent(String(this.lastMessageId || 0))}`;
+          const res = await fetch(url, { cache: 'no-store' });
+          if (res.ok && this.activeSessionUuid === polledUuid && !this.threadLoading) {
+            const data = await res.json();
+            const newOpId = data.assigned_operator_id ? String(data.assigned_operator_id) : '';
+            if (
+              (data.status && data.status !== this.sessionStatus) ||
+              newOpId !== this.assignedOperatorId
+            ) {
+              this.pendingQueueRefresh = true;
+              queuedAfterSwap = true;
+              this.refreshThread(polledUuid);
+            } else if (Array.isArray(data.messages) && data.messages.length > 0) {
+              this.appendMessages(data.messages, { advanceCursor: true });
+            }
+          }
+        }
+        if (!queuedAfterSwap && !this.threadLoading) {
+          this.refreshQueue();
+        }
+      } catch (e) {
+      } finally {
+        this.pollingInFlight = false;
+        if (this.pendingCatchupPoll && !document.hidden) {
+          this.pendingCatchupPoll = false;
+          this.pollActiveSession();
+        } else {
+          this.scheduleNextPoll();
+        }
+      }
+    },
+  };
+}
+</script>
+{% endblock %}

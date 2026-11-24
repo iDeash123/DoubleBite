@@ -223,6 +223,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'orders.context_processors.cart_context',
+                'support.context_processors.support_context',
             ],
         },
     },

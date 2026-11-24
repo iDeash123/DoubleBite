@@ -1,0 +1,148 @@
+<div class="flex flex-col h-full min-h-0">
+  <div class="px-3 pt-2.5 pb-2.5 border-b border-db-linen bg-db-paper shrink-0">
+    <div class="grid grid-cols-2 gap-1.5" role="tablist" aria-label="Черга звернень">
+      <button
+        type="button"
+        role="tab"
+        aria-selected="{% if queue.tab == 'waiting' %}true{% else %}false{% endif %}"
+        @click="switchTab('waiting')"
+        class="min-h-[44px] px-2.5 py-1.5 rounded-lg border text-xs font-sans font-medium flex items-center justify-between gap-1.5 transition-colors cursor-pointer {% if queue.tab == 'waiting' %}bg-db-noir text-white border-db-noir{% else %}bg-white text-db-text border-db-linen hover:border-db-noir/30{% endif %}"
+      >
+        <span class="truncate">Очікують</span>
+        <span class="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-mono tabular-nums {% if queue.tab == 'waiting' %}bg-db-crust-dark text-white{% elif queue.counts.waiting > 0 %}bg-amber-100 text-amber-900{% else %}bg-db-boucle text-db-muted{% endif %}">
+          {{ queue.counts.waiting }}
+        </span>
+      </button>
+
+      <button
+        type="button"
+        role="tab"
+        aria-selected="{% if queue.tab == 'in_progress' %}true{% else %}false{% endif %}"
+        @click="switchTab('in_progress')"
+        class="min-h-[44px] px-2.5 py-1.5 rounded-lg border text-xs font-sans font-medium flex items-center justify-between gap-1.5 transition-colors cursor-pointer {% if queue.tab == 'in_progress' %}bg-db-noir text-white border-db-noir{% else %}bg-white text-db-text border-db-linen hover:border-db-noir/30{% endif %}"
+      >
+        <span class="truncate">В роботі</span>
+        <span class="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-mono tabular-nums {% if queue.tab == 'in_progress' %}bg-white/20 text-white{% else %}bg-db-boucle text-db-muted{% endif %}">
+          {{ queue.counts.in_progress }}
+        </span>
+      </button>
+
+      <button
+        type="button"
+        role="tab"
+        aria-selected="{% if queue.tab == 'ai' %}true{% else %}false{% endif %}"
+        @click="switchTab('ai')"
+        class="min-h-[44px] px-2.5 py-1.5 rounded-lg border text-xs font-sans font-medium flex items-center justify-between gap-1.5 transition-colors cursor-pointer {% if queue.tab == 'ai' %}bg-db-noir text-white border-db-noir{% else %}bg-white text-db-text border-db-linen hover:border-db-noir/30{% endif %}"
+      >
+        <span class="truncate">Активні AI</span>
+        <span class="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-mono tabular-nums {% if queue.tab == 'ai' %}bg-white/20 text-white{% else %}bg-db-boucle text-db-muted{% endif %}">
+          {{ queue.counts.ai }}
+        </span>
+      </button>
+
+      <button
+        type="button"
+        role="tab"
+        aria-selected="{% if queue.tab == 'resolved' %}true{% else %}false{% endif %}"
+        @click="switchTab('resolved')"
+        class="min-h-[44px] px-2.5 py-1.5 rounded-lg border text-xs font-sans font-medium flex items-center justify-between gap-1.5 transition-colors cursor-pointer {% if queue.tab == 'resolved' %}bg-db-noir text-white border-db-noir{% else %}bg-white text-db-text border-db-linen hover:border-db-noir/30{% endif %}"
+      >
+        <span class="truncate">Завершені</span>
+        <span class="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-mono tabular-nums {% if queue.tab == 'resolved' %}bg-white/20 text-white{% else %}bg-db-boucle text-db-muted{% endif %}">
+          {{ queue.counts.resolved }}
+        </span>
+      </button>
+    </div>
+  </div>
+
+  <div class="flex-1 overflow-y-auto divide-y divide-db-linen/80" data-lenis-prevent>
+    {% if queue.items %}
+      {% for item in queue.items %}
+        <a
+          href="{% url 'support:desk_session' item.session_uuid %}"
+          @click.prevent="selectSession('{{ item.session_uuid }}')"
+          data-session-card="{{ item.session_uuid }}"
+          class="block px-3.5 py-3 transition-colors border-l-2 {% if item.is_active_selected %}bg-white border-l-db-crust-dark{% else %}bg-db-paper hover:bg-white/80 border-l-transparent{% endif %}"
+        >
+          <div class="flex items-start justify-between gap-2 mb-1">
+            <div class="min-w-0 flex items-center gap-1.5">
+              <span class="font-sans text-sm font-semibold text-db-text truncate">
+                {{ item.customer_name }}
+              </span>
+              {% if item.ticket_id %}
+                <span class="font-mono tabular-nums text-[11px] font-semibold text-db-crust-dark shrink-0">
+                  #{{ item.ticket_id }}
+                </span>
+              {% endif %}
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              {% if item.unread_count > 0 %}
+                <span class="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-mono tabular-nums font-semibold bg-db-crust-dark text-white">
+                  {{ item.unread_count }}
+                </span>
+              {% endif %}
+              {% if item.last_activity_at %}
+                <span class="font-mono tabular-nums text-[11px] text-db-subtle">
+                  {{ item.last_activity_at|date:"H:i" }}
+                </span>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-1.5 mb-1.5">
+            {% if item.reason_display %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-sans font-medium bg-db-boucle text-db-text border border-db-linen">
+                {{ item.reason_display }}
+              </span>
+            {% endif %}
+
+            {% if queue.tab == 'waiting' %}
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono tabular-nums bg-amber-50 text-amber-900 border border-amber-200">
+                <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+                <span>{{ item.waiting_label }}</span>
+              </span>
+            {% elif item.owner_label %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-sans font-medium {% if item.is_owned_by_me %}bg-emerald-50 text-emerald-800 border border-emerald-200{% else %}bg-white text-db-muted border border-db-linen{% endif %}">
+                {% if item.is_owned_by_me %}Ви{% else %}{{ item.owner_label }}{% endif %}
+              </span>
+            {% elif queue.tab == 'ai' %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-sans font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
+                AI
+              </span>
+            {% endif %}
+          </div>
+
+          <p class="font-sans text-xs text-db-muted truncate">
+            {{ item.last_message_preview }}
+          </p>
+        </a>
+      {% endfor %}
+    {% else %}
+      <div class="px-5 py-10 text-center space-y-2">
+        <p class="font-sans text-sm font-medium text-db-text">
+          {% if queue.query %}
+            За запитом «{{ queue.query }}» нічого не знайдено
+          {% elif queue.tab == 'waiting' %}
+            Немає звернень в очікуванні
+          {% elif queue.tab == 'in_progress' %}
+            Немає активних діалогів у роботі
+          {% elif queue.tab == 'ai' %}
+            Немає активних AI-сесій
+          {% else %}
+            Архів завершених діалогів порожній
+          {% endif %}
+        </p>
+        <p class="font-sans text-xs text-db-subtle">
+          {% if queue.query %}
+            Спробуйте змінити пошуковий запит або перевірте іншу вкладку.
+          {% else %}
+            Нові діалоги зʼявляться тут автоматично.
+          {% endif %}
+        </p>
+      </div>
+    {% endif %}
+  </div>
+</div>
