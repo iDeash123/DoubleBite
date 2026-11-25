@@ -41,6 +41,7 @@ DEFAULT_SSE_RETRY_MS = 3000
 DEFAULT_SYNC_REDIS_CONNECT_TIMEOUT = 0.4
 DEFAULT_SYNC_REDIS_SOCKET_TIMEOUT = 0.5
 DEFAULT_SYNC_PUBLISH_FAILURE_COOLDOWN = 10.0
+DEFAULT_ASYNC_REDIS_SUBSCRIBE_TIMEOUT = 2.0
 
 OPERATOR_PUBLIC_LABEL = 'Адміністратор ресторану'
 CLIENT_AI_LABEL = 'Double Bite Консьєрж'
@@ -64,6 +65,7 @@ DESK_EVENT_TYPES = frozenset({
 _SYNC_CLIENT_LOCK = threading.Lock()
 _SYNC_REDIS_CLIENTS: dict[str, redis.Redis] = {}
 _SYNC_PUBLISH_BACKOFF_UNTIL: dict[str, float] = {}
+_SYNC_CLIENT_GENERATION = 0
 
 
 def session_channel(session_uuid: uuid.UUID | str) -> str:
@@ -129,7 +131,9 @@ def _create_async_redis_client(redis_url: str) -> aioredis.Redis:
 
 
 def reset_realtime_clients() -> None:
+    global _SYNC_CLIENT_GENERATION
     with _SYNC_CLIENT_LOCK:
+        _SYNC_CLIENT_GENERATION += 1
         clients = list(_SYNC_REDIS_CLIENTS.values())
         _SYNC_REDIS_CLIENTS.clear()
         _SYNC_PUBLISH_BACKOFF_UNTIL.clear()
@@ -138,36 +142,56 @@ def reset_realtime_clients() -> None:
             client.close()
 
 
-def _begin_sync_publish_attempt(redis_url: str) -> tuple[bool, bool]:
-    """Return (should_attempt, is_probe) for a sync publish to redis_url."""
+def _begin_sync_publish_attempt(
+    redis_url: str,
+) -> tuple[bool, bool, int, float | None]:
+    """Return (should_attempt, is_probe, generation, previous_until) for redis_url."""
     cooldown = DEFAULT_SYNC_PUBLISH_FAILURE_COOLDOWN
-    if cooldown <= 0:
-        return True, False
-    now = time.monotonic()
     with _SYNC_CLIENT_LOCK:
+        generation = _SYNC_CLIENT_GENERATION
+        if cooldown <= 0:
+            return True, False, generation, None
         until = _SYNC_PUBLISH_BACKOFF_UNTIL.get(redis_url)
         if until is None:
-            return True, False
+            return True, False, generation, None
+        now = time.monotonic()
         if now < until:
-            return False, False
+            return False, False, generation, until
         # Reserve a single-flight probe lease so concurrent threads do not stampede
         # an unreachable Redis while this caller checks recovery.
         _SYNC_PUBLISH_BACKOFF_UNTIL[redis_url] = now + cooldown
-        return True, True
+        return True, True, generation, until
 
 
-def _record_sync_publish_failure(redis_url: str) -> None:
+def _record_sync_publish_failure(redis_url: str, generation: int) -> None:
     cooldown = DEFAULT_SYNC_PUBLISH_FAILURE_COOLDOWN
     if cooldown <= 0:
         return
-    now = time.monotonic()
     with _SYNC_CLIENT_LOCK:
-        _SYNC_PUBLISH_BACKOFF_UNTIL[redis_url] = now + cooldown
+        if generation != _SYNC_CLIENT_GENERATION:
+            return
+        _SYNC_PUBLISH_BACKOFF_UNTIL[redis_url] = time.monotonic() + cooldown
 
 
-def _clear_sync_publish_backoff(redis_url: str) -> None:
+def _clear_sync_publish_backoff(redis_url: str, generation: int) -> None:
     with _SYNC_CLIENT_LOCK:
+        if generation != _SYNC_CLIENT_GENERATION:
+            return
         _SYNC_PUBLISH_BACKOFF_UNTIL.pop(redis_url, None)
+
+
+def _release_sync_publish_probe_lease(
+    redis_url: str,
+    generation: int,
+    previous_until: float | None,
+) -> None:
+    with _SYNC_CLIENT_LOCK:
+        if generation != _SYNC_CLIENT_GENERATION:
+            return
+        if previous_until is None:
+            _SYNC_PUBLISH_BACKOFF_UNTIL.pop(redis_url, None)
+        else:
+            _SYNC_PUBLISH_BACKOFF_UNTIL[redis_url] = previous_until
 
 
 def _resolve_sender_kind(role: str) -> str:
@@ -470,7 +494,9 @@ def _publish_to_channel(channel: str, payload: dict[str, Any]) -> bool:
     redis_url = get_realtime_redis_url()
     if not redis_url:
         return False
-    should_attempt, is_probe = _begin_sync_publish_attempt(redis_url)
+    should_attempt, is_probe, generation, previous_until = _begin_sync_publish_attempt(
+        redis_url
+    )
     if not should_attempt:
         logger.debug(
             'Skipping Redis publish for channel %s (%s) during failure cooldown',
@@ -478,21 +504,30 @@ def _publish_to_channel(channel: str, payload: dict[str, Any]) -> bool:
             payload.get('type'),
         )
         return False
-    raw = json.dumps(payload, ensure_ascii=False)
+    try:
+        raw = json.dumps(payload, ensure_ascii=False)
+    except BaseException:
+        if is_probe:
+            _release_sync_publish_probe_lease(redis_url, generation, previous_until)
+        raise
     try:
         client = _get_sync_redis_client(redis_url)
         client.publish(channel, raw)
-    except (RedisError, OSError) as exc:
-        _record_sync_publish_failure(redis_url)
+    except (RedisError, OSError, ValueError) as exc:
+        _record_sync_publish_failure(redis_url, generation)
         logger.warning(
             'Redis publish failed for channel %s (%s): %s',
             channel,
             payload.get('type'),
-            exc,
+            exc or type(exc).__name__,
         )
         return False
-    _clear_sync_publish_backoff(redis_url)
+    except BaseException:
+        if is_probe:
+            _release_sync_publish_probe_lease(redis_url, generation, previous_until)
+        raise
     if is_probe:
+        _clear_sync_publish_backoff(redis_url, generation)
         logger.info(
             'Redis publish recovered for channel %s (%s)',
             channel,
@@ -729,13 +764,16 @@ async def _open_redis_pubsub(
     try:
         redis_client = _create_async_redis_client(redis_url)
         pubsub = redis_client.pubsub()
-        await pubsub.subscribe(*channels)
+        await asyncio.wait_for(
+            pubsub.subscribe(*channels),
+            timeout=DEFAULT_ASYNC_REDIS_SUBSCRIBE_TIMEOUT,
+        )
         return redis_client, pubsub
-    except (RedisError, OSError, TimeoutError) as exc:
+    except (RedisError, OSError, TimeoutError, ValueError) as exc:
         logger.warning(
             'Redis subscribe unavailable for %s, falling back to DB polling: %s',
             channels,
-            exc,
+            exc or type(exc).__name__,
         )
         await _close_redis_resources(pubsub, redis_client, unsubscribe=False)
         return None, None

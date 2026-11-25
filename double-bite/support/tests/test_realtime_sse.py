@@ -531,6 +531,163 @@ class RealtimeHelpersUnitTest(TestCase):
             self.assertTrue(realtime.publish_desk_event('queue_update', {'reason': 'post_probe'}))
             self.assertEqual(publish_attempts, 3)
 
+    def test_sync_publish_backoff_handles_malformed_url_probe_rollback_and_reset_race(self):
+        now_box = [300.0]
+
+        # 1. Malformed URL fails safely with ValueError and enters cooldown
+        with (
+            override_settings(SUPPORT_REALTIME_REDIS_URL='redis://localhost:notaport/0'),
+            patch('support.realtime.time.monotonic', side_effect=lambda: now_box[0]),
+            patch(
+                'support.realtime.redis.Redis.from_url',
+                wraps=redis.Redis.from_url,
+            ) as spy_from_url,
+        ):
+            self.assertFalse(realtime.publish_desk_event('queue_update', {'reason': 'bad_url_1'}))
+            self.assertEqual(spy_from_url.call_count, 1)
+            self.assertFalse(realtime.publish_desk_event('queue_update', {'reason': 'bad_url_2'}))
+            self.assertEqual(spy_from_url.call_count, 1)
+
+        realtime.reset_realtime_clients()
+
+        # 2. Non-network exceptions during a probe roll back the single-flight lease
+        # so the very next valid publish probes immediately instead of waiting 10s
+        probe_calls = 0
+        fail_mode = {'kind': 'conn'}
+
+        class ProbeExceptionClient:
+            def publish(self, channel: str, data: str) -> int:
+                nonlocal probe_calls
+                probe_calls += 1
+                if fail_mode['kind'] == 'conn':
+                    raise redis.exceptions.ConnectionError('down')
+                if fail_mode['kind'] == 'runtime':
+                    raise RuntimeError('unexpected internal bug')
+                return 1
+
+        url_probe = 'redis://probe-rollback:6379/0'
+        with (
+            override_settings(SUPPORT_REALTIME_REDIS_URL=url_probe),
+            patch('support.realtime.time.monotonic', side_effect=lambda: now_box[0]),
+            patch(
+                'support.realtime._get_sync_redis_client',
+                return_value=ProbeExceptionClient(),
+            ),
+        ):
+            self.assertFalse(realtime.publish_desk_event('queue_update', {'reason': 'fail_init'}))
+            self.assertEqual(probe_calls, 1)
+
+            # Advance past cooldown; JSON TypeError must not consume the probe lease
+            now_box[0] += realtime.DEFAULT_SYNC_PUBLISH_FAILURE_COOLDOWN + 1.0
+            with self.assertRaises(TypeError):
+                realtime.publish_desk_event('queue_update', {'bad': object()})
+            self.assertEqual(probe_calls, 1)
+
+            # Unexpected RuntimeError during publish must also release the probe lease
+            fail_mode['kind'] = 'runtime'
+            with self.assertRaises(RuntimeError):
+                realtime.publish_desk_event('queue_update', {'reason': 'runtime_err'})
+            self.assertEqual(probe_calls, 2)
+
+            # Next valid call probes immediately (no 10s lockout!) and recovers
+            fail_mode['kind'] = 'ok'
+            self.assertTrue(realtime.publish_desk_event('queue_update', {'reason': 'immediate_probe'}))
+            self.assertEqual(probe_calls, 3)
+
+        realtime.reset_realtime_clients()
+
+        # 3. Overlapping pre-failure non-probe success must NOT wipe a newer failure's backoff
+        t_ok_entered = threading.Event()
+        t_ok_release = threading.Event()
+        call_seq = 0
+        seq_lock = threading.Lock()
+
+        class OverlapClient:
+            def publish(self, channel: str, data: str) -> int:
+                nonlocal call_seq
+                with seq_lock:
+                    call_seq += 1
+                    idx = call_seq
+                if idx == 1:
+                    t_ok_entered.set()
+                    t_ok_release.wait(timeout=2.0)
+                    return 1
+                if idx == 2:
+                    raise redis.exceptions.ConnectionError('just died')
+                return 1
+
+        url_overlap = 'redis://overlap-race:6379/0'
+        with (
+            override_settings(SUPPORT_REALTIME_REDIS_URL=url_overlap),
+            patch('support.realtime.time.monotonic', side_effect=lambda: now_box[0]),
+            patch(
+                'support.realtime._get_sync_redis_client',
+                return_value=OverlapClient(),
+            ),
+        ):
+            ok_results: list[bool] = []
+            t_ok = threading.Thread(
+                target=lambda: ok_results.append(
+                    realtime.publish_desk_event('queue_update', {'reason': 'older_ok'})
+                )
+            )
+            t_ok.start()
+            self.assertTrue(t_ok_entered.wait(timeout=2.0))
+
+            # Thread 2 fails and arms backoff while Thread 1 is still in flight
+            self.assertFalse(realtime.publish_desk_event('queue_update', {'reason': 'newer_fail'}))
+            t_ok_release.set()
+            t_ok.join(timeout=2.0)
+            self.assertEqual(ok_results, [True])
+
+            # Backoff must still be active (Thread 3 skips without hitting OverlapClient)
+            self.assertFalse(realtime.publish_desk_event('queue_update', {'reason': 'still_backed_off'}))
+            self.assertEqual(call_seq, 2)
+
+        realtime.reset_realtime_clients()
+
+        # 4. Pre-reset in-flight failure finishing after reset_realtime_clients() must NOT poison post-reset state
+        reset_entered = threading.Event()
+        reset_release = threading.Event()
+        reset_calls = 0
+
+        class PreResetFailClient:
+            def publish(self, channel: str, data: str) -> int:
+                nonlocal reset_calls
+                reset_calls += 1
+                if reset_calls == 1:
+                    reset_entered.set()
+                    reset_release.wait(timeout=2.0)
+                    raise redis.exceptions.ConnectionError('stale pre-reset failure')
+                return 1
+
+        url_reset = 'redis://reset-race:6379/0'
+        with (
+            override_settings(SUPPORT_REALTIME_REDIS_URL=url_reset),
+            patch('support.realtime.time.monotonic', side_effect=lambda: now_box[0]),
+            patch(
+                'support.realtime._get_sync_redis_client',
+                return_value=PreResetFailClient(),
+            ),
+        ):
+            stale_results: list[bool] = []
+            t_stale = threading.Thread(
+                target=lambda: stale_results.append(
+                    realtime.publish_desk_event('queue_update', {'reason': 'pre_reset'})
+                )
+            )
+            t_stale.start()
+            self.assertTrue(reset_entered.wait(timeout=2.0))
+
+            realtime.reset_realtime_clients()
+            reset_release.set()
+            t_stale.join(timeout=2.0)
+            self.assertEqual(stale_results, [False])
+
+            # Post-reset publish must execute immediately (backoff was NOT poisoned)
+            self.assertTrue(realtime.publish_desk_event('queue_update', {'reason': 'post_reset'}))
+            self.assertEqual(reset_calls, 2)
+
 
 class RealtimeSseEndpointsValidationAndRbacTest(TestCase):
     def setUp(self):
@@ -1704,6 +1861,48 @@ class RealtimeSsePubSubAndFallbackTest(TransactionTestCase):
             self.assertEqual(len(hanging_client.created_pubsubs), 1)
             self.assertTrue(hanging_client.created_pubsubs[0].closed)
             self.assertFalse(hanging_client.created_pubsubs[0].unsubscribed)
+
+    async def test_async_redis_subscribe_times_out_on_hung_server_and_handles_malformed_url(
+        self,
+    ):
+        # 1. Malformed URL returns (None, None) instead of raising ValueError
+        with override_settings(SUPPORT_REALTIME_REDIS_URL='redis://localhost:notaport/0'):
+            rc, ps = await realtime._open_redis_pubsub([realtime.DESK_QUEUE_CHANNEL])
+            self.assertIsNone(rc)
+            self.assertIsNone(ps)
+
+        # 2. Hung subscribe times out cleanly at DEFAULT_ASYNC_REDIS_SUBSCRIBE_TIMEOUT
+        broker = FakeRedisBroker()
+
+        class StalledPubSub(FakeAsyncPubSub):
+            async def subscribe(self, *channels: str) -> None:
+                await asyncio.sleep(10.0)
+
+        class StalledRedisClient(FakeAsyncRedisClient):
+            def pubsub(self) -> StalledPubSub:
+                ps = StalledPubSub(self.broker)
+                self.created_pubsubs.append(ps)
+                return ps
+
+        stalled_client = StalledRedisClient(broker)
+        with (
+            override_settings(SUPPORT_REALTIME_REDIS_URL='redis://stalled:6379/0'),
+            patch('support.realtime.DEFAULT_ASYNC_REDIS_SUBSCRIBE_TIMEOUT', 0.05),
+            patch(
+                'support.realtime._create_async_redis_client',
+                return_value=stalled_client,
+            ),
+        ):
+            rc, ps = await asyncio.wait_for(
+                realtime._open_redis_pubsub([realtime.DESK_QUEUE_CHANNEL]),
+                timeout=1.0,
+            )
+            self.assertIsNone(rc)
+            self.assertIsNone(ps)
+            self.assertTrue(stalled_client.closed)
+            self.assertEqual(len(stalled_client.created_pubsubs), 1)
+            self.assertTrue(stalled_client.created_pubsubs[0].closed)
+            self.assertFalse(stalled_client.created_pubsubs[0].unsubscribed)
 
     async def test_out_of_order_concurrent_commit_across_catchup_is_delivered(self):
         broker = FakeRedisBroker()
@@ -3287,4 +3486,232 @@ class FrontendEventSourceJsBehaviorTest(TestCase):
         self.assertEqual(result['queueDeltaOnVisibilityResume'], 1)
         self.assertEqual(result['emptyDeltaInitial'], 0)
         self.assertEqual(result['emptyDeltaReconnect'], 1)
+        self.assertEqual(result['timersAfterDestroy'], 0)
+
+    def test_desk_controller_error_recovery_dedup_and_circuit_breaker(self):
+        script = f"""
+        const vm = require('vm');
+        const timers = new Map();
+        let nextTimerId = 1;
+        const bodyListeners = {{}};
+        const htmxCalls = [];
+        const historyUrls = [];
+
+        let threadRoot = {{
+          dataset: {{
+            sessionUuid: '11111111-1111-1111-1111-111111111111',
+            sessionStatus: 'ESCALATED',
+            assignedOperatorId: '7',
+            isOwnedByMe: '1',
+            lastMessageId: '10',
+          }},
+        }};
+
+        const doc = {{
+          hidden: false,
+          cookie: 'csrftoken=desk-csrf',
+          body: {{
+            addEventListener: (ev, fn) => {{ (bodyListeners[ev] ||= []).push(fn); }},
+            removeEventListener: (ev, fn) => {{
+              bodyListeners[ev] = (bodyListeners[ev] || []).filter(f => f !== fn);
+            }},
+          }},
+          getElementById: (id) => (id === 'desk-thread-root' ? threadRoot : null),
+          querySelector: () => null,
+          addEventListener: () => {{}},
+          removeEventListener: () => {{}},
+        }};
+
+        const instances = [];
+        class FakeEventSource {{
+          static CONNECTING = 0;
+          static OPEN = 1;
+          static CLOSED = 2;
+          constructor(url) {{
+            this.url = url;
+            this.readyState = FakeEventSource.CONNECTING;
+            this.closed = false;
+            this.handlers = {{}};
+            this.onopen = null;
+            this.onerror = null;
+            instances.push(this);
+          }}
+          addEventListener(type, fn) {{ (this.handlers[type] ||= []).push(fn); }}
+          emitOpen() {{
+            this.readyState = FakeEventSource.OPEN;
+            if (this.onopen) this.onopen({{}});
+          }}
+          emitError(readyState = FakeEventSource.CONNECTING) {{
+            this.readyState = readyState;
+            if (this.onerror) this.onerror({{}});
+          }}
+          close() {{
+            this.closed = true;
+            this.readyState = FakeEventSource.CLOSED;
+          }}
+        }}
+
+        const sandbox = {{
+          document: doc,
+          window: {{
+            innerWidth: 1280,
+            history: {{ replaceState: (_s, _t, u) => historyUrls.push(u) }},
+            htmx: {{
+              ajax: (method, url, opts) => htmxCalls.push({{ method, url, target: opts.target }}),
+            }},
+            EventSource: FakeEventSource,
+          }},
+          EventSource: FakeEventSource,
+          URLSearchParams,
+          encodeURIComponent,
+          decodeURIComponent,
+          JSON,
+          Math,
+          Array,
+          Boolean,
+          String,
+          Number,
+          setTimeout: (fn, ms) => {{
+            const id = nextTimerId++;
+            timers.set(id, {{ fn, ms }});
+            return id;
+          }},
+          clearTimeout: (id) => {{ timers.delete(id); }},
+          fetch: async () => ({{
+            ok: true,
+            json: async () => ({{ status: 'RESOLVED', assigned_operator_id: null, messages: [] }}),
+          }}),
+        }};
+
+        const queueCallsCount = () => htmxCalls.filter(c => c.target === '#desk-queue').length;
+        const dispatchBody = (evName, targetId) => {{
+          for (const fn of (bodyListeners[evName] || [])) {{
+            fn({{ detail: {{ target: {{ id: targetId }} }} }});
+          }}
+        }};
+
+        (async () => {{
+          vm.runInNewContext({json.dumps(self.desk_controller_src)}, sandbox);
+          const desk = sandbox.supportDeskController({{
+            activeTab: 'waiting',
+            searchQuery: '',
+            activeSessionUuid: '11111111-1111-1111-1111-111111111111',
+            lastMessageId: 10,
+            sessionStatus: 'ESCALATED',
+            assignedOperatorId: '7',
+            isOwnedByMe: true,
+          }});
+          desk.$nextTick = (cb) => cb();
+          desk.init();
+          instances[0].emitOpen();
+
+          // 1. CLOSED disconnect -> fallback poll refreshes thread -> afterSwap refreshes queue & reconnects ->
+          //    es2.onopen must NOT trigger a duplicate queue fetch
+          instances[0].emitError(FakeEventSource.CLOSED);
+          const qBeforePollSwap = queueCallsCount();
+          await desk.pollActiveSession();
+          dispatchBody('htmx:afterSwap', 'desk-workspace');
+          const es2 = instances[instances.length - 1];
+          es2.emitOpen();
+          const qDeltaPollSwapReconnect = queueCallsCount() - qBeforePollSwap;
+
+          // 2. Failed selectSession(B) restores activeSessionUuid, metadata, URL, and SSE back to rendered Session A,
+          //    and preserves pendingQueueRefresh
+          const qBeforeFailedSwitch = queueCallsCount();
+          desk.selectSession('22222222-2222-2222-2222-222222222222');
+          dispatchBody('htmx:responseError', 'desk-workspace');
+          const activeAfterFailedSwitch = desk.activeSessionUuid;
+          const sseUrlAfterFailedSwitch = instances[instances.length - 1].url;
+          const restoredHistoryUrl = historyUrls[historyUrls.length - 1];
+          const deferredQueueTimer = Array.from(timers.entries()).find(([, v]) => v.ms === 250);
+          if (deferredQueueTimer) {{
+            timers.delete(deferredQueueTimer[0]);
+            deferredQueueTimer[1].fn();
+          }}
+          const qDeltaAfterFailedSwitch = queueCallsCount() - qBeforeFailedSwitch;
+
+          // 3. Catch-up #desk-queue failure schedules exactly ONE bounded retry while SSE stays open
+          const es3 = instances[instances.length - 1];
+          es3.emitOpen();
+          es3.emitError(FakeEventSource.CONNECTING);
+          const qBeforeCatchupErr = queueCallsCount();
+          es3.emitOpen();
+          dispatchBody('htmx:responseError', 'desk-queue');
+          const retryEntry = Array.from(timers.entries()).find(([, v]) => v.ms === 1000);
+          const catchupRetryArmed = Boolean(retryEntry);
+          if (retryEntry) {{
+            timers.delete(retryEntry[0]);
+            retryEntry[1].fn();
+          }}
+          const qDeltaCatchupRetry = queueCallsCount() - qBeforeCatchupErr;
+          // Second consecutive failure must NOT loop infinitely
+          dispatchBody('htmx:responseError', 'desk-queue');
+          const secondRetryArmed = Array.from(timers.values()).some(v => v.ms === 1000);
+
+          // 4. Rapid double-disconnect: onerror -> onopen -> immediate onerror while #desk-queue swap is in flight ->
+          //    in-flight swap completes -> second onopen MUST still refresh #desk-queue once
+          es3.emitError(FakeEventSource.CONNECTING);
+          const qBeforeDouble = queueCallsCount();
+          es3.emitOpen();
+          es3.emitError(FakeEventSource.CONNECTING);
+          dispatchBody('htmx:afterSwap', 'desk-queue');
+          es3.emitOpen();
+          const qDeltaDoubleDisconnect = queueCallsCount() - qBeforeDouble;
+
+          // 5. Circuit breaker: after 4 CLOSED errors, afterSwap on same session does NOT reconnect EventSource
+          let curEs = es3;
+          for (let i = 0; i < 4; i++) {{
+            curEs.emitError(FakeEventSource.CLOSED);
+            const rec = Array.from(timers.entries()).find(([, v]) => v.ms >= 10000);
+            if (rec) {{
+              timers.delete(rec[0]);
+              rec[1].fn();
+              curEs = instances[instances.length - 1];
+            }}
+          }}
+          const countAfterCircuitBreak = instances.length;
+          desk.refreshThread('11111111-1111-1111-1111-111111111111');
+          dispatchBody('htmx:afterSwap', 'desk-workspace');
+          const countAfterSwapWhileBroken = instances.length;
+
+          desk.destroy();
+          process.stdout.write(JSON.stringify({{
+            qDeltaPollSwapReconnect,
+            activeAfterFailedSwitch,
+            sseUrlAfterFailedSwitch,
+            restoredHistoryUrl,
+            qDeltaAfterFailedSwitch,
+            catchupRetryArmed,
+            qDeltaCatchupRetry,
+            secondRetryArmed,
+            qDeltaDoubleDisconnect,
+            countAfterCircuitBreak,
+            countAfterSwapWhileBroken,
+            timersAfterDestroy: timers.size,
+          }}));
+        }})().catch(err => {{ console.error(err); process.exit(1); }});
+        """
+        result = self._run_node_script(script)
+        self.assertEqual(result['qDeltaPollSwapReconnect'], 1)
+        self.assertEqual(
+            result['activeAfterFailedSwitch'],
+            '11111111-1111-1111-1111-111111111111',
+        )
+        self.assertEqual(
+            result['sseUrlAfterFailedSwitch'],
+            '/support/desk/events/?session_uuid=11111111-1111-1111-1111-111111111111&after_id=10',
+        )
+        self.assertEqual(
+            result['restoredHistoryUrl'],
+            '/support/desk/11111111-1111-1111-1111-111111111111/',
+        )
+        self.assertEqual(result['qDeltaAfterFailedSwitch'], 1)
+        self.assertTrue(result['catchupRetryArmed'])
+        self.assertEqual(result['qDeltaCatchupRetry'], 2)
+        self.assertFalse(result['secondRetryArmed'])
+        self.assertEqual(result['qDeltaDoubleDisconnect'], 2)
+        self.assertEqual(
+            result['countAfterSwapWhileBroken'],
+            result['countAfterCircuitBreak'],
+        )
         self.assertEqual(result['timersAfterDestroy'], 0)

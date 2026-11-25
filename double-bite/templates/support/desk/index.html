@@ -106,6 +106,8 @@ function supportDeskController(initial) {
     sseSessionUuid: '',
     sseConnected: false,
     sseNeedsQueueCatchup: false,
+    queueCatchupInFlight: false,
+    queueCatchupRetryPending: false,
     sseReconnectTimer: null,
     sseClosedErrors: 0,
     queueRefreshTimer: null,
@@ -164,16 +166,27 @@ function supportDeskController(initial) {
             return;
           }
           this.scrollMessagesToBottom();
+          let refreshedQueue = false;
           if (this.pendingQueueRefresh) {
             this.pendingQueueRefresh = false;
             this.refreshQueue();
+            refreshedQueue = true;
           }
           if (!document.hidden && this.getEventSourceCtor()) {
             const desiredUuid = this.activeSessionUuid || '';
-            if (!this.eventSource || this.sseSessionUuid !== desiredUuid) {
+            const needsNewStream =
+              (this.eventSource && this.sseSessionUuid !== desiredUuid) ||
+              (!this.eventSource && this.sseClosedErrors <= 3);
+            if (needsNewStream) {
+              if (refreshedQueue) {
+                this.sseNeedsQueueCatchup = false;
+              }
               this.connectEventSource(true);
             }
           }
+        } else if (target.id === 'desk-queue') {
+          this.queueCatchupInFlight = false;
+          this.queueCatchupRetryPending = false;
         } else if (target.id && target.id.startsWith('past-history-box-')) {
           const pastUuid = target.id.slice('past-history-box-'.length);
           target.dataset.loaded = '1';
@@ -181,13 +194,38 @@ function supportDeskController(initial) {
         }
       };
       this.htmxErrorHandler = (evt) => {
-        if (evt.detail && evt.detail.target && evt.detail.target.id === 'desk-workspace') {
+        const target = evt.detail && evt.detail.target;
+        if (!target) return;
+        if (target.id === 'desk-workspace') {
+          const hadPendingQueue = this.pendingQueueRefresh;
           this.threadLoading = false;
           this.pendingQueueRefresh = false;
           this.pendingSseMessages = [];
           this.pendingThreadState = null;
+          const root = document.getElementById('desk-thread-root');
+          this.activeSessionUuid = root ? (root.dataset.sessionUuid || '') : '';
+          this.syncThreadMetadata();
+          if (window.history && window.history.replaceState) {
+            const restoredPath = this.activeSessionUuid
+              ? `/support/desk/${encodeURIComponent(this.activeSessionUuid)}/`
+              : '/support/desk/';
+            window.history.replaceState(null, '', restoredPath);
+          }
+          if (hadPendingQueue && !document.hidden) {
+            this.scheduleQueueRefresh(250);
+          }
           if (!document.hidden && !this.eventSource && !this.pollTimer) {
-            this.startRealtime(false);
+            if (this.sseClosedErrors > 3) {
+              this.startPolling(false);
+            } else {
+              this.startRealtime(false);
+            }
+          }
+        } else if (target.id === 'desk-queue' && this.queueCatchupInFlight) {
+          this.queueCatchupInFlight = false;
+          if (!document.hidden && this.sseConnected && !this.queueCatchupRetryPending) {
+            this.queueCatchupRetryPending = true;
+            this.scheduleQueueRefresh(1000);
           }
         }
       };
@@ -704,6 +742,8 @@ function supportDeskController(initial) {
 
     stopRealtime() {
       this.sseNeedsQueueCatchup = false;
+      this.queueCatchupInFlight = false;
+      this.queueCatchupRetryPending = false;
       this.closeEventSource(true);
       this.clearMarkReadTimer();
       if (this.queueRefreshTimer) {
@@ -757,6 +797,10 @@ function supportDeskController(initial) {
         this.sseNeedsQueueCatchup = false;
         this.stopPolling();
         if (needsQueueCatchup) {
+          this.queueCatchupRetryPending = false;
+          if (!document.hidden && !this.threadLoading && window.htmx) {
+            this.queueCatchupInFlight = true;
+          }
           this.scheduleQueueRefresh(0);
         }
       };
@@ -871,6 +915,8 @@ function supportDeskController(initial) {
           return;
         }
         this.sseNeedsQueueCatchup = true;
+        this.queueCatchupInFlight = false;
+        this.queueCatchupRetryPending = false;
         if (!this.pollTimer && !this.pollingInFlight) {
           this.startPolling(false);
         }
