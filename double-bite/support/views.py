@@ -420,6 +420,7 @@ async def chat_stream_view(request: HttpRequest) -> HttpResponse:
     )
     response['Cache-Control'] = 'no-cache'
     response['X-Accel-Buffering'] = 'no'
+    response['X-Chat-Session-UUID'] = str(session_uuid)
     return response
 
 

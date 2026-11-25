@@ -14,7 +14,8 @@
     activeSessionUuid: '{{ active_session_uuid|escapejs }}',
     lastMessageId: {{ thread.last_message_id|default:0 }},
     sessionStatus: '{% if thread %}{{ thread.session.status|escapejs }}{% endif %}',
-    assignedOperatorId: '{% if thread and thread.session.assigned_operator_id %}{{ thread.session.assigned_operator_id }}{% endif %}'
+    assignedOperatorId: '{% if thread and thread.session.assigned_operator_id %}{{ thread.session.assigned_operator_id }}{% endif %}',
+    isOwnedByMe: {% if thread and thread.is_owned_by_me %}true{% else %}false{% endif %}
   })"
   class="w-full h-[calc(100vh-65px)] md:h-[calc(100vh-73px)] flex overflow-hidden bg-db-paper border-t border-db-linen/50"
 >
@@ -85,6 +86,7 @@ function supportDeskController(initial) {
     lastMessageId: Number(initial.lastMessageId || 0),
     sessionStatus: initial.sessionStatus || '',
     assignedOperatorId: initial.assignedOperatorId || '',
+    isOwnedByMe: Boolean(initial.isOwnedByMe),
     replyText: '',
     sending: false,
     actionLoading: false,
@@ -94,6 +96,9 @@ function supportDeskController(initial) {
     expandedPast: {},
     threadLoading: false,
     pendingQueueRefresh: false,
+    pendingSseMessages: [],
+    pendingThreadState: null,
+    markReadTimer: null,
     pollTimer: null,
     pollingInFlight: false,
     pendingCatchupPoll: false,
@@ -128,6 +133,35 @@ function supportDeskController(initial) {
           this.threadLoading = false;
           this.expandedPast = {};
           this.syncThreadMetadata();
+          if (this.pendingSseMessages.length > 0) {
+            const matching = this.pendingSseMessages
+              .filter((entry) => entry && entry.sessionUuid === this.activeSessionUuid)
+              .map((entry) => entry.msg);
+            this.pendingSseMessages = [];
+            if (matching.length > 0) {
+              this.appendMessages(matching, { advanceCursor: true });
+              if (matching.some((m) => m && m.sender === 'user')) {
+                this.scheduleMarkRead();
+              }
+            }
+          }
+          const deferredState = this.pendingThreadState;
+          this.pendingThreadState = null;
+          if (
+            deferredState &&
+            deferredState.sessionUuid === this.activeSessionUuid &&
+            (
+              (deferredState.status && deferredState.status !== this.sessionStatus) ||
+              (
+                deferredState.status !== 'RESOLVED' &&
+                deferredState.assignedOperatorId !== this.assignedOperatorId
+              )
+            )
+          ) {
+            this.pendingQueueRefresh = true;
+            this.refreshThread(this.activeSessionUuid);
+            return;
+          }
           this.scrollMessagesToBottom();
           if (this.pendingQueueRefresh) {
             this.pendingQueueRefresh = false;
@@ -149,6 +183,8 @@ function supportDeskController(initial) {
         if (evt.detail && evt.detail.target && evt.detail.target.id === 'desk-workspace') {
           this.threadLoading = false;
           this.pendingQueueRefresh = false;
+          this.pendingSseMessages = [];
+          this.pendingThreadState = null;
           if (!document.hidden && !this.eventSource && !this.pollTimer) {
             this.startRealtime(false);
           }
@@ -203,11 +239,15 @@ function supportDeskController(initial) {
         this.lastMessageId = 0;
         this.sessionStatus = '';
         this.assignedOperatorId = '';
+        this.isOwnedByMe = false;
         return;
       }
       this.activeSessionUuid = root.dataset.sessionUuid || this.activeSessionUuid;
       this.sessionStatus = root.dataset.sessionStatus || '';
       this.assignedOperatorId = root.dataset.assignedOperatorId || '';
+      if ('isOwnedByMe' in root.dataset) {
+        this.isOwnedByMe = root.dataset.isOwnedByMe === '1';
+      }
       this.lastMessageId = Number(root.dataset.lastMessageId || 0);
     },
 
@@ -258,6 +298,9 @@ function supportDeskController(initial) {
       this.expandedPast = {};
       this.mobileView = 'chat';
       this.pendingQueueRefresh = true;
+      this.pendingSseMessages = [];
+      this.pendingThreadState = null;
+      this.clearMarkReadTimer();
       this.sseClosedErrors = 0;
       this.closeEventSource(true);
       if (window.history && window.history.replaceState) {
@@ -615,8 +658,47 @@ function supportDeskController(initial) {
       this.sseConnected = false;
     },
 
+    clearMarkReadTimer() {
+      if (this.markReadTimer) {
+        clearTimeout(this.markReadTimer);
+        this.markReadTimer = null;
+      }
+    },
+
+    scheduleMarkRead() {
+      const isThreadVisible = window.innerWidth >= 1024 || this.mobileView === 'chat';
+      if (
+        document.hidden ||
+        !this.activeSessionUuid ||
+        !this.isOwnedByMe ||
+        this.threadLoading ||
+        !isThreadVisible ||
+        typeof fetch !== 'function'
+      ) {
+        return;
+      }
+      this.clearMarkReadTimer();
+      const targetUuid = this.activeSessionUuid;
+      this.markReadTimer = setTimeout(() => {
+        this.markReadTimer = null;
+        const stillVisible = window.innerWidth >= 1024 || this.mobileView === 'chat';
+        if (
+          document.hidden ||
+          !this.isOwnedByMe ||
+          this.threadLoading ||
+          !stillVisible ||
+          this.activeSessionUuid !== targetUuid
+        ) {
+          return;
+        }
+        const url = `/support/desk/api/sessions/${encodeURIComponent(targetUuid)}/messages/?after_id=${encodeURIComponent(String(this.lastMessageId || 0))}`;
+        fetch(url, { cache: 'no-store' }).catch(() => {});
+      }, 250);
+    },
+
     stopRealtime() {
       this.closeEventSource(true);
+      this.clearMarkReadTimer();
       if (this.queueRefreshTimer) {
         clearTimeout(this.queueRefreshTimer);
         this.queueRefreshTimer = null;
@@ -673,11 +755,22 @@ function supportDeskController(initial) {
         if (!payload) return;
         if (
           this.activeSessionUuid &&
-          payload.session_uuid === this.activeSessionUuid &&
-          !this.threadLoading
+          payload.session_uuid === this.activeSessionUuid
         ) {
           const msg = payload.data && typeof payload.data === 'object' ? payload.data : payload;
+          if (this.threadLoading) {
+            if (this.pendingSseMessages.length < 100) {
+              this.pendingSseMessages.push({
+                sessionUuid: payload.session_uuid,
+                msg,
+              });
+            }
+            return;
+          }
           this.appendMessages([msg], { advanceCursor: true });
+          if (msg && msg.sender === 'user') {
+            this.scheduleMarkRead();
+          }
         }
       });
 
@@ -686,18 +779,32 @@ function supportDeskController(initial) {
         const payload = this.parseSsePayload(evt);
         if (!payload) return;
         const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+        const isCatchup = data.reason === 'catchup';
         if (
           this.activeSessionUuid &&
-          payload.session_uuid === this.activeSessionUuid &&
-          !this.threadLoading
+          payload.session_uuid === this.activeSessionUuid
         ) {
           const newOpId = data.assigned_operator_id ? String(data.assigned_operator_id) : '';
+          if (this.threadLoading) {
+            this.pendingThreadState = {
+              sessionUuid: payload.session_uuid,
+              status: data.status || '',
+              assignedOperatorId: newOpId,
+            };
+            if (!isCatchup) {
+              this.pendingQueueRefresh = true;
+            }
+            return;
+          }
           if (
             (data.status && data.status !== this.sessionStatus) ||
             newOpId !== this.assignedOperatorId
           ) {
             this.pendingQueueRefresh = true;
             this.refreshThread(this.activeSessionUuid);
+            return;
+          }
+          if (isCatchup) {
             return;
           }
         }
@@ -710,15 +817,31 @@ function supportDeskController(initial) {
         if (this.eventSource !== es) return;
         const payload = this.parseSsePayload(evt);
         if (!payload) return;
+        const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+        const isCatchup = data.reason === 'catchup';
         if (
           this.activeSessionUuid &&
-          payload.session_uuid === this.activeSessionUuid &&
-          !this.threadLoading &&
-          this.sessionStatus !== 'RESOLVED'
+          payload.session_uuid === this.activeSessionUuid
         ) {
-          this.pendingQueueRefresh = true;
-          this.refreshThread(this.activeSessionUuid);
-          return;
+          if (this.threadLoading) {
+            this.pendingThreadState = {
+              sessionUuid: payload.session_uuid,
+              status: 'RESOLVED',
+              assignedOperatorId: '',
+            };
+            if (!isCatchup) {
+              this.pendingQueueRefresh = true;
+            }
+            return;
+          }
+          if (this.sessionStatus !== 'RESOLVED') {
+            this.pendingQueueRefresh = true;
+            this.refreshThread(this.activeSessionUuid);
+            return;
+          }
+          if (isCatchup) {
+            return;
+          }
         }
         this.scheduleQueueRefresh(250);
       });

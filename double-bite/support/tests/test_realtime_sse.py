@@ -1426,6 +1426,391 @@ class RealtimeSsePubSubAndFallbackTest(TransactionTestCase):
             finally:
                 await stream.aclose()
 
+    async def test_connect_and_midstream_errors_skip_unsubscribe_and_cancel_during_subscribe_closes_client(self):
+        broker = FakeRedisBroker()
+        session = await sync_to_async(
+            lambda: ChatSession.objects.create(
+                user=self.customer_a,
+                status=ChatSessionStatus.ESCALATED,
+                is_escalated=True,
+                assigned_operator=self.operator,
+            ),
+            thread_sensitive=True,
+        )()
+
+        # 1. Connect failure must NOT call unsubscribe() (avoids 2s reconnect stall)
+        with (
+            override_settings(SUPPORT_REALTIME_REDIS_URL='redis://fake-broker:6379/0'),
+            patch(
+                'support.realtime._create_async_redis_client',
+                side_effect=lambda url: broker.async_client(
+                    url,
+                    fail_subscribe=redis.exceptions.ConnectionError('Down on connect'),
+                ),
+            ),
+        ):
+            client_res, pubsub_res = await realtime._open_redis_pubsub(
+                [realtime.session_channel(session.session_uuid)]
+            )
+            self.assertIsNone(client_res)
+            self.assertIsNone(pubsub_res)
+            c0 = broker.created_async_clients[-1]
+            self.assertTrue(c0.closed)
+            self.assertTrue(c0.created_pubsubs[0].closed)
+            self.assertFalse(c0.created_pubsubs[0].unsubscribed)
+
+        # 2. Mid-stream Redis disconnect must NOT call unsubscribe()
+        with (
+            override_settings(SUPPORT_REALTIME_REDIS_URL='redis://fake-broker:6379/0'),
+            patch('support.realtime._get_sync_redis_client', side_effect=broker.sync_client),
+            patch(
+                'support.realtime._create_async_redis_client',
+                side_effect=lambda url: broker.async_client(
+                    url,
+                    fail_after_messages=0,
+                    fail_exception=redis.exceptions.ConnectionError('Mid-stream drop'),
+                ),
+            ),
+        ):
+            gen = realtime.subscribe_client_session_events(
+                session.session_uuid,
+                heartbeat_interval=5.0,
+                poll_interval=0.03,
+            )
+            try:
+                await next_sse_frame(gen)  # retry
+                await sync_to_async(
+                    SupportDeskService.send_operator_message, thread_sensitive=True
+                )(session.session_uuid, self.operator, 'Через DB після обриву')
+                frames = await collect_event_frames(gen, 1)
+                self.assertEqual(
+                    frames[0]['payload']['data']['content'],
+                    'Через DB після обриву',
+                )
+                c1 = broker.created_async_clients[-1]
+                self.assertTrue(c1.closed)
+                self.assertTrue(c1.created_pubsubs[0].closed)
+                self.assertFalse(c1.created_pubsubs[0].unsubscribed)
+            finally:
+                await gen.aclose()
+
+        # 3. CancelledError raised while awaiting subscribe() must close client/pubsub (no leak)
+        started_subscribe = asyncio.Event()
+
+        class HangingPubSub(FakeAsyncPubSub):
+            async def subscribe(self, *channels: str) -> None:
+                started_subscribe.set()
+                await asyncio.sleep(10.0)
+
+        class HangingRedisClient(FakeAsyncRedisClient):
+            def pubsub(self) -> HangingPubSub:
+                ps = HangingPubSub(self.broker)
+                self.created_pubsubs.append(ps)
+                return ps
+
+        hanging_client = HangingRedisClient(broker)
+        with (
+            override_settings(SUPPORT_REALTIME_REDIS_URL='redis://fake-broker:6379/0'),
+            patch(
+                'support.realtime._create_async_redis_client',
+                return_value=hanging_client,
+            ),
+        ):
+            task = asyncio.create_task(
+                realtime._open_redis_pubsub([realtime.session_channel(session.session_uuid)])
+            )
+            await asyncio.wait_for(started_subscribe.wait(), timeout=2.0)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            self.assertTrue(hanging_client.closed)
+            self.assertEqual(len(hanging_client.created_pubsubs), 1)
+            self.assertTrue(hanging_client.created_pubsubs[0].closed)
+            self.assertFalse(hanging_client.created_pubsubs[0].unsubscribed)
+
+    async def test_out_of_order_concurrent_commit_across_catchup_is_delivered(self):
+        broker = FakeRedisBroker()
+
+        def setup_messages():
+            session = ChatSession.objects.create(
+                user=self.customer_a,
+                status=ChatSessionStatus.ESCALATED,
+                is_escalated=True,
+                assigned_operator=self.operator,
+            )
+            m1 = ChatMessage.objects.create(
+                session=session,
+                role=MessageRole.USER,
+                content='До перепідключення',
+            )
+            m2 = ChatMessage.objects.create(
+                session=session,
+                role=MessageRole.OPERATOR,
+                sender_user=self.operator,
+                content='Конкурентний коміт (id менший)',
+            )
+            m3 = ChatMessage.objects.create(
+                session=session,
+                role=MessageRole.USER,
+                content='Видимий у catch-up (id більший)',
+            )
+            return session, m1, m2, m3
+
+        session, m1, m2, m3 = await sync_to_async(setup_messages, thread_sensitive=True)()
+        m2_payload = await sync_to_async(
+            lambda: realtime.build_message_event_data(m2, session=session),
+            thread_sensitive=True,
+        )()
+        m3_payload = await sync_to_async(
+            lambda: realtime.build_message_event_data(m3, session=session),
+            thread_sensitive=True,
+        )()
+
+        # Simulate DB catchup seeing ONLY m3 (while m2's transaction commits slightly later)
+        original_snapshot = realtime._fetch_session_snapshot_sync
+
+        def snapshot_missing_m2(sid, *, after_id, include_messages):
+            snap = original_snapshot(sid, after_id=after_id, include_messages=include_messages)
+            if snap is not None:
+                snap['messages'] = [m for m in snap['messages'] if m['id'] != m2.id]
+            return snap
+
+        with (
+            override_settings(SUPPORT_REALTIME_REDIS_URL='redis://fake-broker:6379/0'),
+            patch('support.realtime._get_sync_redis_client', side_effect=broker.sync_client),
+            patch(
+                'support.realtime._create_async_redis_client',
+                side_effect=broker.async_client,
+            ),
+            patch(
+                'support.realtime._fetch_session_snapshot_sync',
+                side_effect=snapshot_missing_m2,
+            ),
+        ):
+            gen = realtime.subscribe_client_session_events(
+                session.session_uuid,
+                after_id=m1.id,
+                heartbeat_interval=5.0,
+                poll_interval=0.05,
+            )
+            try:
+                await next_sse_frame(gen)  # retry
+                catchup = await collect_event_frames(gen, 2)
+                self.assertEqual(catchup[0]['event'], 'message')
+                self.assertEqual(catchup[0]['id'], str(m3.id))
+                self.assertEqual(catchup[1]['event'], 'status_changed')
+
+                # Duplicate m3 MUST be dropped, while delayed m2 (m1.id < m2.id < m3.id) MUST be delivered!
+                realtime.publish_session_event(
+                    session.session_uuid, 'message', m3_payload, event_id=m3.id
+                )
+                realtime.publish_session_event(
+                    session.session_uuid, 'message', m2_payload, event_id=m2.id
+                )
+                live = await collect_event_frames(gen, 1)
+                self.assertEqual(live[0]['event'], 'message')
+                self.assertEqual(live[0]['id'], str(m2.id))
+                self.assertEqual(
+                    live[0]['payload']['data']['content'],
+                    'Конкурентний коміт (id менший)',
+                )
+            finally:
+                await gen.aclose()
+
+    async def test_db_polling_fallback_emits_reset_reason_on_multi_tab_reset(self):
+        client_a = AsyncClient()
+        await client_a.aforce_login(self.customer_a)
+        res_esc = await client_a.post(
+            '/support/chat/escalate/',
+            data=json.dumps({}),
+            content_type='application/json',
+        )
+        self.assertEqual(res_esc.status_code, 200)
+        old_uuid = uuid.UUID(res_esc.json()['session_uuid'])
+
+        with override_settings(SUPPORT_REALTIME_REDIS_URL=''):
+            gen = realtime.subscribe_client_session_events(
+                old_uuid,
+                heartbeat_interval=5.0,
+                poll_interval=0.03,
+            )
+            try:
+                await next_sse_frame(gen)  # retry
+                res_reset = await client_a.post('/support/chat/reset/')
+                self.assertEqual(res_reset.status_code, 200)
+
+                frames = await collect_event_frames(gen, 1)
+                self.assertEqual(frames[0]['event'], 'session_resolved')
+                self.assertEqual(frames[0]['payload']['data']['reason'], 'reset')
+            finally:
+                await gen.aclose()
+
+    async def test_real_redis_asyncio_tcp_resp3_wire_protocol_and_fast_drop_fallback(self):
+        """Exercise real redis.Redis + redis.asyncio 8.1.0 TCP RESP3 wire framing and abrupt disconnect."""
+        import time as _time
+
+        def encode_resp(val: Any, *, push: bool = False) -> bytes:
+            if isinstance(val, int):
+                return f':{val}\r\n'.encode()
+            if isinstance(val, str):
+                b = val.encode('utf-8')
+                return f'${len(b)}\r\n'.encode() + b + b'\r\n'
+            if isinstance(val, list):
+                prefix = '>' if push else '*'
+                return f'{prefix}{len(val)}\r\n'.encode() + b''.join(
+                    encode_resp(x) for x in val
+                )
+            if isinstance(val, dict):
+                return f'%{len(val)}\r\n'.encode() + b''.join(
+                    encode_resp(k) + encode_resp(v) for k, v in val.items()
+                )
+            raise TypeError(type(val))
+
+        async def read_cmd(reader: asyncio.StreamReader) -> list[str] | None:
+            line = await reader.readline()
+            if not line:
+                return None
+            count = int(line[1:].strip())
+            parts: list[str] = []
+            for _ in range(count):
+                hdr = await reader.readline()
+                length = int(hdr[1:].strip())
+                raw = await reader.readexactly(length)
+                await reader.readexactly(2)
+                parts.append(raw.decode('utf-8'))
+            return parts
+
+        subs: dict[str, set[asyncio.StreamWriter]] = defaultdict(set)
+        writers: set[asyncio.StreamWriter] = set()
+
+        async def handle_client(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            writers.add(writer)
+            my_channels: set[str] = set()
+            try:
+                while True:
+                    cmd = await read_cmd(reader)
+                    if cmd is None:
+                        break
+                    op = cmd[0].upper()
+                    if op == 'HELLO':
+                        proto = int(cmd[1]) if len(cmd) > 1 else 2
+                        writer.write(
+                            encode_resp({
+                                'server': 'redis',
+                                'version': '7.2.0',
+                                'proto': proto,
+                                'id': 1,
+                                'mode': 'standalone',
+                                'role': 'master',
+                                'modules': [],
+                            })
+                        )
+                    elif op == 'PING':
+                        if my_channels:
+                            arg = cmd[1] if len(cmd) > 1 else ''
+                            writer.write(encode_resp(['pong', arg]))
+                        else:
+                            writer.write(b'+PONG\r\n')
+                    elif op == 'SUBSCRIBE':
+                        for ch in cmd[1:]:
+                            my_channels.add(ch)
+                            subs[ch].add(writer)
+                            writer.write(
+                                encode_resp(['subscribe', ch, len(my_channels)], push=True)
+                            )
+                    elif op == 'UNSUBSCRIBE':
+                        targets = cmd[1:] or list(my_channels)
+                        for ch in targets:
+                            my_channels.discard(ch)
+                            subs[ch].discard(writer)
+                            writer.write(
+                                encode_resp(
+                                    ['unsubscribe', ch, len(my_channels)], push=True
+                                )
+                            )
+                    elif op == 'PUBLISH':
+                        ch, payload = cmd[1], cmd[2]
+                        receivers = list(subs.get(ch, ()))
+                        for w in receivers:
+                            w.write(encode_resp(['message', ch, payload], push=True))
+                            await w.drain()
+                        writer.write(encode_resp(len(receivers)))
+                    else:
+                        writer.write(b'+OK\r\n')
+                    await writer.drain()
+            except (OSError, asyncio.IncompleteReadError, ValueError):
+                return
+            finally:
+                for ch in my_channels:
+                    subs[ch].discard(writer)
+                writers.discard(writer)
+                writer.close()
+
+        server = await asyncio.start_server(handle_client, '127.0.0.1', 0)
+        port = server.sockets[0].getsockname()[1]
+        redis_url = f'redis://127.0.0.1:{port}/0'
+
+        session = await sync_to_async(
+            lambda: ChatSession.objects.create(
+                user=self.customer_a,
+                status=ChatSessionStatus.ESCALATED,
+                is_escalated=True,
+                assigned_operator=self.operator,
+            ),
+            thread_sensitive=True,
+        )()
+
+        try:
+            with override_settings(SUPPORT_REALTIME_REDIS_URL=redis_url):
+                gen = realtime.subscribe_client_session_events(
+                    session.session_uuid,
+                    heartbeat_interval=5.0,
+                    poll_interval=0.03,
+                )
+                try:
+                    retry_frame = await next_sse_frame(gen)
+                    self.assertEqual(retry_frame['kind'], 'retry')
+
+                    # 1. Real sync Redis PUBLISH -> real redis.asyncio PubSub -> SSE frame
+                    await sync_to_async(
+                        SupportDeskService.send_operator_message, thread_sensitive=True
+                    )(session.session_uuid, self.operator, 'Реальний TCP Redis RESP3')
+                    f1 = await collect_event_frames(gen, 1)
+                    self.assertEqual(
+                        f1[0]['payload']['data']['content'],
+                        'Реальний TCP Redis RESP3',
+                    )
+                    self.assertNotIn('operator_name', f1[0]['payload']['data'])
+
+                    # 2. Abruptly kill the TCP Redis server mid-stream -> verify seamless DB fallback
+                    # without an extra 2s reconnect stall in _close_redis_resources!
+                    server.close()
+                    for w in list(writers):
+                        w.close()
+                    await server.wait_closed()
+
+                    await sync_to_async(
+                        SupportDeskService.send_operator_message, thread_sensitive=True
+                    )(session.session_uuid, self.operator, 'Після падіння TCP Redis')
+                    t_drop = _time.monotonic()
+                    f2 = await collect_event_frames(gen, 1, timeout=4.5)
+                    elapsed = _time.monotonic() - t_drop
+                    self.assertEqual(
+                        f2[0]['payload']['data']['content'],
+                        'Після падіння TCP Redis',
+                    )
+                    # Without unsubscribe=False, _close_redis_resources stalls an extra +2.0s (~4.1s total)
+                    self.assertLess(elapsed, 3.2)
+                finally:
+                    await gen.aclose()
+        finally:
+            server.close()
+            for w in list(writers):
+                w.close()
+            realtime.reset_realtime_clients()
+
 
 class FrontendEventSourceJsBehaviorTest(TestCase):
     @classmethod
@@ -1957,3 +2342,515 @@ class FrontendEventSourceJsBehaviorTest(TestCase):
         self.assertTrue(result['es1ClosedOnSwitch'])
         self.assertTrue(result['fallbackPollArmed'])
         self.assertEqual(result['timersAfterDestroy'], 0)
+
+    def test_chat_widget_active_session_live_proactive_takeover_and_ai_stream_reconciliation(self):
+        script = f"""
+        const vm = require('vm');
+        const timers = new Map();
+        let nextTimerId = 1;
+        const doc = {{
+          hidden: false,
+          cookie: 'csrftoken=test-csrf',
+          querySelector: () => null,
+          getElementById: () => null,
+          addEventListener: () => {{}},
+          removeEventListener: () => {{}},
+        }};
+
+        const instances = [];
+        class FakeEventSource {{
+          static CONNECTING = 0;
+          static OPEN = 1;
+          static CLOSED = 2;
+          constructor(url) {{
+            this.url = url;
+            this.readyState = FakeEventSource.CONNECTING;
+            this.closed = false;
+            this.handlers = {{}};
+            this.onopen = null;
+            this.onerror = null;
+            instances.push(this);
+          }}
+          addEventListener(type, fn) {{ (this.handlers[type] ||= []).push(fn); }}
+          emitOpen() {{
+            this.readyState = FakeEventSource.OPEN;
+            if (this.onopen) this.onopen({{}});
+          }}
+          emit(type, payload) {{
+            for (const fn of (this.handlers[type] || [])) {{
+              fn({{ data: JSON.stringify(payload) }});
+            }}
+          }}
+          emitError(readyState = FakeEventSource.CONNECTING) {{
+            this.readyState = readyState;
+            if (this.onerror) this.onerror({{}});
+          }}
+          close() {{
+            this.closed = true;
+            this.readyState = FakeEventSource.CLOSED;
+          }}
+        }}
+
+        let releaseSecondChunk = null;
+        let rejectNetworkMsg = null;
+        let msgPostCount = 0;
+        const encoder = new TextEncoder();
+        const fetchImpl = (url) => {{
+          if (url === '/support/chat/stream/') {{
+            const chunks = [
+              encoder.encode('data: ' + JSON.stringify({{ token: 'Раджу ' }}) + '\\n\\n'),
+              encoder.encode(
+                'data: ' + JSON.stringify({{ token: 'тірамісу!' }}) + '\\n\\n' +
+                'data: ' + JSON.stringify({{ done: true }}) + '\\n\\n'
+              ),
+            ];
+            let step = 0;
+            return Promise.resolve({{
+              ok: true,
+              status: 200,
+              headers: {{ get: (k) => k === 'X-Chat-Session-UUID' ? '33333333-3333-3333-3333-333333333333' : null }},
+              body: {{
+                getReader() {{
+                  return {{
+                    read() {{
+                      if (step === 0) {{
+                        step = 1;
+                        return Promise.resolve({{ done: false, value: chunks[0] }});
+                      }}
+                      if (step === 1) {{
+                        step = 2;
+                        return new Promise((resolve) => {{
+                          releaseSecondChunk = () => resolve({{ done: false, value: chunks[1] }});
+                        }});
+                      }}
+                      return Promise.resolve({{ done: true, value: undefined }});
+                    }},
+                  }};
+                }},
+              }},
+            }});
+          }}
+          if (url === '/support/chat/message/') {{
+            msgPostCount += 1;
+            if (msgPostCount === 1) {{
+              return Promise.resolve({{
+                ok: true,
+                status: 201,
+                json: async () => ({{
+                  message: {{ id: 105, role: 'user', sender: 'user', content: 'Перше клієнта', created_at: '15:01' }},
+                  is_working_hours: true,
+                }}),
+              }});
+            }}
+            return new Promise((_resolve, reject) => {{
+              rejectNetworkMsg = () => reject(new Error('Network dropped after commit'));
+            }});
+          }}
+          throw new Error('Unexpected fetch: ' + url);
+        }};
+
+        const sandbox = {{
+          document: doc,
+          window: {{ htmx: null, EventSource: FakeEventSource }},
+          EventSource: FakeEventSource,
+          fetch: fetchImpl,
+          AbortController,
+          TextDecoder,
+          encodeURIComponent,
+          decodeURIComponent,
+          JSON,
+          Math,
+          Array,
+          Boolean,
+          String,
+          Number,
+          Date,
+          setTimeout: (fn, ms) => {{
+            const id = nextTimerId++;
+            timers.set(id, {{ fn, ms }});
+            return id;
+          }},
+          clearTimeout: (id) => {{ timers.delete(id); }},
+        }};
+
+        (async () => {{
+          const widget = vm.runInNewContext('(' + {json.dumps(self.widget_xdata)} + ')', sandbox);
+          widget.$nextTick = (cb) => cb();
+          widget.$refs = {{ msgContainer: {{ scrollTop: 0, scrollHeight: 100 }} }};
+
+          // 1. Open ACTIVE session with existing sessionUuid -> connects SSE, NEVER polls on error
+          widget.open = true;
+          widget.sessionUuid = '33333333-3333-3333-3333-333333333333';
+          widget.status = 'ACTIVE';
+          widget.isEscalated = false;
+          widget.lastMessageId = 100;
+          widget.startRealtime(false);
+
+          const es = instances[0];
+          es.emitError(FakeEventSource.CONNECTING);
+          const pollingOnActiveError = Array.from(timers.values()).some(t => t.ms === 3000);
+          es.emitOpen();
+
+          // 2. AI stream runs while SSE is open; SSE delivers both user + assistant messages MID-STREAM
+          widget.input = 'Який десерт?';
+          const aiPromise = widget.sendMessage();
+          await new Promise(r => setImmediate(r));
+          await new Promise(r => setImmediate(r));
+          es.emit('message', {{
+            type: 'message',
+            session_uuid: widget.sessionUuid,
+            event_id: 101,
+            data: {{ id: 101, role: 'user', sender: 'user', content: 'Який десерт?', created_at: '15:00' }},
+          }});
+          es.emit('message', {{
+            type: 'message',
+            session_uuid: widget.sessionUuid,
+            event_id: 102,
+            data: {{ id: 102, role: 'assistant', sender: 'ai', content: 'Раджу тірамісу!', created_at: '15:00' }},
+          }});
+          releaseSecondChunk();
+          await aiPromise;
+
+          const aiMsgs = widget.messages.filter(m => m.role === 'assistant');
+          const userMsgs101 = widget.messages.filter(m => m.role === 'user');
+
+          // 3. Manager proactively takes over ACTIVE chat -> customer sees live switch without reload!
+          es.emit('message', {{
+            type: 'message',
+            session_uuid: widget.sessionUuid,
+            event_id: 103,
+            data: {{
+              id: 103,
+              role: 'system',
+              sender: 'system',
+              content: 'До діалогу підключився адміністратор ресторану.',
+              created_at: '15:00',
+            }},
+          }});
+          es.emit('operator_joined', {{
+            type: 'operator_joined',
+            session_uuid: widget.sessionUuid,
+            data: {{ status: 'ESCALATED', is_escalated: true, operator_connected: true }},
+          }});
+
+          // 4. sendOperatorMessage must NOT jump lastMessageId past an unseen intervening operator msg (104)
+          widget.input = 'Перше клієнта';
+          await widget.sendMessage();
+          const lastIdAfter201 = widget.lastMessageId;
+
+          // Intervening operator msg 104 + SSE echo of 105 arrive cleanly without duplicate
+          es.emit('message', {{
+            type: 'message',
+            session_uuid: widget.sessionUuid,
+            event_id: 104,
+            data: {{ id: 104, role: 'operator', sender: 'operator', content: 'Чим допомогти?', created_at: '15:01' }},
+          }});
+          es.emit('message', {{
+            type: 'message',
+            session_uuid: widget.sessionUuid,
+            event_id: 105,
+            data: {{ id: 105, role: 'user', sender: 'user', content: 'Перше клієнта', created_at: '15:01' }},
+          }});
+          const lastIdAfterSseSync = widget.lastMessageId;
+
+          // 5. sendOperatorMessage preserves SSE-confirmed message even if HTTP response drops!
+          widget.input = 'Підтверджене через SSE';
+          const p2 = widget.sendMessage();
+          es.emit('message', {{
+            type: 'message',
+            session_uuid: widget.sessionUuid,
+            event_id: 106,
+            data: {{ id: 106, role: 'user', sender: 'user', content: 'Підтверджене через SSE', created_at: '15:02' }},
+          }});
+          rejectNetworkMsg();
+          await p2;
+
+          process.stdout.write(JSON.stringify({{
+            pollingOnActiveError,
+            aiMsgCount: aiMsgs.length,
+            aiMsgContent: aiMsgs[0]?.content || '',
+            aiMsgId: aiMsgs[0]?.id || null,
+            userMsg101Count: userMsgs101.length,
+            escalatedAfterTakeover: widget.isEscalated,
+            operatorConnectedAfterTakeover: widget.operatorConnected,
+            lastIdAfter201,
+            lastIdAfterSseSync,
+            hasInterveningOpMsg104: widget.messages.some(m => m.id === 104),
+            keptConfirmedMsg106: widget.messages.some(m => m.id === 106 && m.content === 'Підтверджене через SSE'),
+            inputAfterConfirmedDrop: widget.input,
+            errorBubblesCount: widget.messages.filter(m => m.error).length,
+          }}));
+        }})().catch(err => {{ console.error(err); process.exit(1); }});
+        """
+        result = self._run_node_script(script)
+        self.assertFalse(result['pollingOnActiveError'])
+        self.assertEqual(result['aiMsgCount'], 1)
+        self.assertEqual(result['aiMsgContent'], 'Раджу тірамісу!')
+        self.assertEqual(result['aiMsgId'], 102)
+        self.assertEqual(result['userMsg101Count'], 1)
+        self.assertTrue(result['escalatedAfterTakeover'])
+        self.assertTrue(result['operatorConnectedAfterTakeover'])
+        self.assertEqual(result['lastIdAfter201'], 103)
+        self.assertEqual(result['lastIdAfterSseSync'], 105)
+        self.assertTrue(result['hasInterveningOpMsg104'])
+        self.assertTrue(result['keptConfirmedMsg106'])
+        self.assertEqual(result['inputAfterConfirmedDrop'], '')
+        self.assertEqual(result['errorBubblesCount'], 0)
+
+    def test_desk_controller_buffers_sse_during_thread_swap_marks_read_and_skips_catchup_queue_refresh(self):
+        script = f"""
+        const vm = require('vm');
+        const timers = new Map();
+        let nextTimerId = 1;
+        const bodyListeners = {{}};
+        const htmxCalls = [];
+        const fetchCalls = [];
+        const appendedNodes = [];
+
+        function makeEl(tag) {{
+          return {{
+            tagName: tag,
+            className: '',
+            textContent: '',
+            attrs: {{}},
+            children: [],
+            setAttribute(k, v) {{ this.attrs[k] = v; }},
+            getAttribute(k) {{ return this.attrs[k] || null; }},
+            appendChild(child) {{ this.children.push(child); return child; }},
+            insertBefore(child) {{ this.children.push(child); return child; }},
+            remove() {{}},
+          }};
+        }}
+
+        const msgContainer = {{
+          scrollTop: 0,
+          scrollHeight: 500,
+          querySelector(sel) {{
+            const m = sel.match(/data-message-id="(\\d+)"/);
+            if (m) {{
+              return appendedNodes.find(n => n.getAttribute('data-message-id') === m[1]) || null;
+            }}
+            return null;
+          }},
+          querySelectorAll() {{ return appendedNodes; }},
+          appendChild(node) {{ appendedNodes.push(node); return node; }},
+          insertBefore(node) {{ appendedNodes.push(node); return node; }},
+        }};
+
+        let threadRoot = {{
+          dataset: {{
+            sessionUuid: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+            sessionStatus: 'ESCALATED',
+            assignedOperatorId: '7',
+            isOwnedByMe: '1',
+            lastMessageId: '20',
+          }},
+        }};
+
+        const doc = {{
+          hidden: false,
+          cookie: 'csrftoken=desk-csrf',
+          body: {{
+            addEventListener: (ev, fn) => {{ (bodyListeners[ev] ||= []).push(fn); }},
+            removeEventListener: (ev, fn) => {{
+              bodyListeners[ev] = (bodyListeners[ev] || []).filter(f => f !== fn);
+            }},
+          }},
+          getElementById: (id) => {{
+            if (id === 'desk-thread-root') return threadRoot;
+            if (id === 'desk-messages-list') return msgContainer;
+            return null;
+          }},
+          querySelector: () => null,
+          createElement: (tag) => makeEl(tag),
+          createElementNS: (_ns, tag) => makeEl(tag),
+          createTextNode: (txt) => ({{ textContent: txt }}),
+          addEventListener: () => {{}},
+          removeEventListener: () => {{}},
+        }};
+
+        const instances = [];
+        class FakeEventSource {{
+          static CONNECTING = 0;
+          static OPEN = 1;
+          static CLOSED = 2;
+          constructor(url) {{
+            this.url = url;
+            this.readyState = FakeEventSource.CONNECTING;
+            this.closed = false;
+            this.handlers = {{}};
+            this.onopen = null;
+            this.onerror = null;
+            instances.push(this);
+          }}
+          addEventListener(type, fn) {{ (this.handlers[type] ||= []).push(fn); }}
+          emitOpen() {{
+            this.readyState = FakeEventSource.OPEN;
+            if (this.onopen) this.onopen({{}});
+          }}
+          emit(type, payload) {{
+            for (const fn of (this.handlers[type] || [])) {{
+              fn({{ data: JSON.stringify(payload) }});
+            }}
+          }}
+          close() {{
+            this.closed = true;
+            this.readyState = FakeEventSource.CLOSED;
+          }}
+        }}
+
+        const win = {{
+          innerWidth: 1280,
+          history: {{ replaceState: () => {{}} }},
+          htmx: {{
+            ajax: (method, url, opts) => htmxCalls.push({{ method, url, target: opts.target }}),
+          }},
+          EventSource: FakeEventSource,
+        }};
+
+        const sandbox = {{
+          document: doc,
+          window: win,
+          EventSource: FakeEventSource,
+          fetch: (url) => {{
+            fetchCalls.push(url);
+            return Promise.resolve({{ ok: true, json: async () => ({{}}) }});
+          }},
+          URLSearchParams,
+          encodeURIComponent,
+          decodeURIComponent,
+          JSON,
+          Math,
+          Array,
+          Boolean,
+          String,
+          Number,
+          setTimeout: (fn, ms) => {{
+            const id = nextTimerId++;
+            timers.set(id, {{ fn, ms }});
+            return id;
+          }},
+          clearTimeout: (id) => {{ timers.delete(id); }},
+        }};
+
+        (async () => {{
+          vm.runInNewContext({json.dumps(self.desk_controller_src)}, sandbox);
+          const desk = sandbox.supportDeskController({{
+            activeTab: 'in_progress',
+            searchQuery: '',
+            activeSessionUuid: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+            lastMessageId: 20,
+            sessionStatus: 'ESCALATED',
+            assignedOperatorId: '7',
+            isOwnedByMe: true,
+          }});
+          desk.$nextTick = (cb) => cb();
+          desk.init();
+          const es = instances[0];
+          es.emitOpen();
+
+          // 1. Initial catch-up status_changed matching current DOM must NOT schedule queue refresh!
+          es.emit('status_changed', {{
+            type: 'status_changed',
+            session_uuid: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+            data: {{ status: 'ESCALATED', assigned_operator_id: 7, reason: 'catchup' }},
+          }});
+          const timersAfterMatchingCatchup = timers.size;
+
+          // 2. Customer message via SSE on visible owned thread triggers debounced mark-read fetch
+          es.emit('message', {{
+            type: 'message',
+            session_uuid: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+            event_id: 21,
+            data: {{
+              id: 21,
+              role: 'user',
+              sender: 'user',
+              sender_label: 'Анна',
+              content: 'Читаєте?',
+              created_at: '16:00',
+            }},
+          }});
+          for (const [id, entry] of Array.from(timers.entries())) {{
+            timers.delete(id);
+            entry.fn();
+          }}
+          const markReadCountVisible = fetchCalls.length;
+          const markReadUrl = fetchCalls[0] || '';
+
+          // 3. On mobile queue view, customer message must NOT mark read!
+          win.innerWidth = 375;
+          desk.mobileView = 'queue';
+          es.emit('message', {{
+            type: 'message',
+            session_uuid: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+            event_id: 22,
+            data: {{
+              id: 22,
+              role: 'user',
+              sender: 'user',
+              sender_label: 'Анна',
+              content: 'На мобільному списку',
+              created_at: '16:01',
+            }},
+          }});
+          for (const [id, entry] of Array.from(timers.entries())) {{
+            timers.delete(id);
+            entry.fn();
+          }}
+          const markReadCountOnMobileQueue = fetchCalls.length;
+          win.innerWidth = 1280;
+          desk.mobileView = 'chat';
+
+          // 4. Race condition: SSE message + colleague takeover arrive WHILE threadLoading === true!
+          desk.refreshThread('cccccccc-cccc-cccc-cccc-cccccccccccc');
+          const threadReloadsBeforeSwap = htmxCalls.filter(c => c.target === '#desk-workspace').length;
+          es.emit('message', {{
+            type: 'message',
+            session_uuid: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+            event_id: 23,
+            data: {{
+              id: 23,
+              role: 'user',
+              sender: 'user',
+              sender_label: 'Анна',
+              content: 'Під час свопу!',
+              created_at: '16:02',
+            }},
+          }});
+          es.emit('operator_joined', {{
+            type: 'operator_joined',
+            session_uuid: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+            data: {{ status: 'ESCALATED', assigned_operator_id: 99 }},
+          }});
+
+          // HTMX swap finishes with STALE HTML (still operator 7, lastMessageId 22)
+          threadRoot.dataset.assignedOperatorId = '7';
+          threadRoot.dataset.lastMessageId = '22';
+          for (const fn of (bodyListeners['htmx:afterSwap'] || [])) {{
+            fn({{ detail: {{ target: {{ id: 'desk-workspace' }} }} }});
+          }}
+          const bufferedMsg23Rendered = appendedNodes.some(n => n.getAttribute('data-message-id') === '23');
+          const threadReloadsAfterStaleSwap = htmxCalls.filter(c => c.target === '#desk-workspace').length;
+
+          desk.destroy();
+          process.stdout.write(JSON.stringify({{
+            timersAfterMatchingCatchup,
+            markReadCountVisible,
+            markReadUrl,
+            markReadCountOnMobileQueue,
+            bufferedMsg23Rendered,
+            triggeredCorrectiveReload: threadReloadsAfterStaleSwap > threadReloadsBeforeSwap,
+          }}));
+        }})().catch(err => {{ console.error(err); process.exit(1); }});
+        """
+        result = self._run_node_script(script)
+        self.assertEqual(result['timersAfterMatchingCatchup'], 0)
+        self.assertEqual(result['markReadCountVisible'], 1)
+        self.assertIn(
+            '/support/desk/api/sessions/cccccccc-cccc-cccc-cccc-cccccccccccc/messages/?after_id=21',
+            result['markReadUrl'],
+        )
+        self.assertEqual(result['markReadCountOnMobileQueue'], 1)
+        self.assertTrue(result['bufferedMsg23Rendered'])
+        self.assertTrue(result['triggeredCorrectiveReload'])

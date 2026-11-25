@@ -204,6 +204,7 @@ DEBUG_TOOLBAR_CONFIG = {
         lambda request: DEBUG
         and not is_testing
         and not request.headers.get('HX-Request')
+        and 'text/event-stream' not in request.headers.get('Accept', '')
         and not request.GET.get('no_toolbar')
     ),
 }

@@ -3,6 +3,7 @@
   data-session-uuid="{{ thread.session_uuid }}"
   data-session-status="{{ thread.session.status }}"
   data-assigned-operator-id="{{ thread.session.assigned_operator_id|default:'' }}"
+  data-is-owned-by-me="{{ thread.is_owned_by_me|yesno:'1,0' }}"
   data-last-message-id="{{ thread.last_message_id }}"
   class="flex flex-1 min-w-0 h-full overflow-hidden relative"
 >

@@ -537,6 +537,25 @@ def _fetch_session_snapshot_sync(
             ticket=ticket,
             operator_connected=operator_connected,
         )
+        resolved_reason = 'resolved'
+        if session.status == ChatSessionStatus.RESOLVED:
+            newer_filter: Q | None = None
+            if session.user_id is not None:
+                newer_filter = Q(user_id=session.user_id)
+            elif session.guest_token:
+                newer_filter = Q(guest_token=session.guest_token, user__isnull=True)
+            if newer_filter is not None and (
+                ChatSession.objects.filter(
+                    newer_filter,
+                    status__in=(
+                        ChatSessionStatus.ACTIVE,
+                        ChatSessionStatus.ESCALATED,
+                    ),
+                )
+                .exclude(pk=session.pk)
+                .exists()
+            ):
+                resolved_reason = 'reset'
         return {
             'session_uuid': str(session.session_uuid),
             'status': session.status,
@@ -544,6 +563,7 @@ def _fetch_session_snapshot_sync(
             'operator_connected': operator_connected,
             'assigned_operator_id': session.assigned_operator_id,
             'status_data': status_data,
+            'resolved_reason': resolved_reason,
             'messages': messages_data,
             'latest_msg_id': int(latest_msg_id or 0),
         }
@@ -601,36 +621,48 @@ def _fetch_desk_queue_fingerprint_sync() -> tuple[tuple[Any, ...], dict[str, int
         _close_non_atomic_connections()
 
 
+_MISSING = object()
+_REDIS_CLOSE_TIMEOUT = 1.0
+
+
 async def _close_redis_resources(
     pubsub: Any,
     redis_client: Any,
+    *,
+    unsubscribe: bool = True,
 ) -> None:
     if pubsub is not None:
-        with contextlib.suppress(Exception):
-            unsub = getattr(pubsub, 'unsubscribe', None)
-            if callable(unsub):
-                await unsub()
+        conn = getattr(pubsub, 'connection', _MISSING)
+        can_unsubscribe = unsubscribe and (
+            conn is _MISSING
+            or (conn is not None and getattr(conn, 'is_connected', True))
+        )
+        if can_unsubscribe:
+            with contextlib.suppress(Exception):
+                unsub = getattr(pubsub, 'unsubscribe', None)
+                if callable(unsub):
+                    await asyncio.wait_for(unsub(), timeout=_REDIS_CLOSE_TIMEOUT)
         with contextlib.suppress(Exception):
             aclose = getattr(pubsub, 'aclose', None)
             if callable(aclose):
-                await aclose()
+                await asyncio.wait_for(aclose(), timeout=_REDIS_CLOSE_TIMEOUT)
             else:
                 close = getattr(pubsub, 'close', None)
                 if callable(close):
                     res = close()
                     if asyncio.iscoroutine(res):
-                        await res
+                        await asyncio.wait_for(res, timeout=_REDIS_CLOSE_TIMEOUT)
     if redis_client is not None:
         with contextlib.suppress(Exception):
             aclose = getattr(redis_client, 'aclose', None)
             if callable(aclose):
-                await aclose()
+                await asyncio.wait_for(aclose(), timeout=_REDIS_CLOSE_TIMEOUT)
             else:
                 close = getattr(redis_client, 'close', None)
                 if callable(close):
                     res = close()
                     if asyncio.iscoroutine(res):
-                        await res
+                        await asyncio.wait_for(res, timeout=_REDIS_CLOSE_TIMEOUT)
 
 
 async def _open_redis_pubsub(
@@ -652,8 +684,11 @@ async def _open_redis_pubsub(
             channels,
             exc,
         )
-        await _close_redis_resources(pubsub, redis_client)
+        await _close_redis_resources(pubsub, redis_client, unsubscribe=False)
         return None, None
+    except BaseException:
+        await _close_redis_resources(pubsub, redis_client, unsubscribe=False)
+        raise
 
 
 def _decode_pubsub_payload(raw_message: Any) -> dict[str, Any] | None:
@@ -743,16 +778,17 @@ async def subscribe_client_session_events(
             yield format_sse_event(resolved_payload)
             return
 
-        last_msg_id = int(snapshot['latest_msg_id'])
-        if after_id is not None:
-            last_msg_id = max(last_msg_id, after_id)
         last_status = snapshot['status']
         last_is_escalated = snapshot['is_escalated']
         last_operator_connected = snapshot['operator_connected']
+        dedup = _MessageDeduplicator(
+            after_id if after_id is not None else int(snapshot['latest_msg_id'])
+        )
 
         for msg_data in snapshot['messages']:
             msg_id = int(msg_data.get('id') or 0)
-            last_msg_id = max(last_msg_id, msg_id)
+            if not dedup.should_deliver(msg_id):
+                continue
             ev = sanitize_event_for_client({
                 'type': 'message',
                 'session_uuid': session_uuid_str,
@@ -761,8 +797,6 @@ async def subscribe_client_session_events(
             })
             yield format_sse_event(ev)
             last_activity = time.monotonic()
-
-        dedup = _MessageDeduplicator(last_msg_id)
 
         if last_status == ChatSessionStatus.RESOLVED:
             resolved_ev = sanitize_event_for_client({
@@ -773,7 +807,7 @@ async def subscribe_client_session_events(
                     'status': ChatSessionStatus.RESOLVED,
                     'is_escalated': False,
                     'operator_connected': False,
-                    'reason': 'resolved',
+                    'reason': snapshot.get('resolved_reason', 'resolved'),
                 },
             })
             yield format_sse_event(resolved_ev)
@@ -806,7 +840,7 @@ async def subscribe_client_session_events(
                     session_uuid_str,
                     exc,
                 )
-                await _close_redis_resources(pubsub, redis_client)
+                await _close_redis_resources(pubsub, redis_client, unsubscribe=False)
                 pubsub = None
                 redis_client = None
                 break
@@ -919,7 +953,7 @@ async def subscribe_client_session_events(
                         'status': ChatSessionStatus.RESOLVED,
                         'is_escalated': False,
                         'operator_connected': False,
-                        'reason': 'resolved',
+                        'reason': polled.get('resolved_reason', 'resolved'),
                     },
                 })
                 yield format_sse_event(resolved_ev)
@@ -999,7 +1033,7 @@ async def subscribe_desk_events(
             _fetch_desk_queue_fingerprint_sync, thread_sensitive=True
         )()
 
-        last_msg_id = after_id if after_id is not None else 0
+        initial_cursor = after_id if after_id is not None else 0
         last_status: str | None = None
         last_is_escalated = False
         last_assigned_op_id: int | None = None
@@ -1015,7 +1049,8 @@ async def subscribe_desk_events(
                 include_messages=(after_id is not None),
             )
             if initial_snapshot is not None:
-                last_msg_id = max(last_msg_id, int(initial_snapshot['latest_msg_id']))
+                if after_id is None:
+                    initial_cursor = int(initial_snapshot['latest_msg_id'])
                 last_status = initial_snapshot['status']
                 last_is_escalated = initial_snapshot['is_escalated']
                 last_assigned_op_id = initial_snapshot['assigned_operator_id']
@@ -1024,10 +1059,13 @@ async def subscribe_desk_events(
         yield f'retry: {DEFAULT_SSE_RETRY_MS}\n\n'
         last_activity = time.monotonic()
 
+        dedup = _MessageDeduplicator(initial_cursor)
+
         if initial_snapshot is not None:
             for msg_data in initial_snapshot['messages']:
                 msg_id = int(msg_data.get('id') or 0)
-                last_msg_id = max(last_msg_id, msg_id)
+                if not dedup.should_deliver(msg_id):
+                    continue
                 ev = format_event_for_desk({
                     'type': 'message',
                     'session_uuid': session_uuid_str,
@@ -1038,24 +1076,26 @@ async def subscribe_desk_events(
                 last_activity = time.monotonic()
 
             if after_id is not None:
+                catchup_status_data = {
+                    **initial_snapshot['status_data'],
+                    'reason': 'catchup',
+                }
                 if last_status == ChatSessionStatus.RESOLVED:
                     ev = format_event_for_desk({
                         'type': 'session_resolved',
                         'session_uuid': session_uuid_str,
                         'event_id': None,
-                        'data': initial_snapshot['status_data'],
+                        'data': catchup_status_data,
                     })
                 else:
                     ev = format_event_for_desk({
                         'type': 'status_changed',
                         'session_uuid': session_uuid_str,
                         'event_id': None,
-                        'data': initial_snapshot['status_data'],
+                        'data': catchup_status_data,
                     })
                 yield format_sse_event(ev)
                 last_activity = time.monotonic()
-
-        dedup = _MessageDeduplicator(last_msg_id)
 
         # Primary mode: Redis Pub/Sub
         redis_used = pubsub is not None
@@ -1074,7 +1114,7 @@ async def subscribe_desk_events(
                     session_uuid_str,
                     exc,
                 )
-                await _close_redis_resources(pubsub, redis_client)
+                await _close_redis_resources(pubsub, redis_client, unsubscribe=False)
                 pubsub = None
                 redis_client = None
                 break

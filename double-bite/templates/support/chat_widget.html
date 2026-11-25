@@ -73,6 +73,7 @@ window.__formatMarkdown = function(text) {
     visibilityHandler: null,
     lastHistorySyncAt: 0,
     msgKeySeq: 0,
+    streamingAssistantKey: null,
     cartItemsCount: {{ cart_items_count|default:0 }},
     abortController: null,
     messages: [],
@@ -124,6 +125,7 @@ window.__formatMarkdown = function(text) {
         this.abortController.abort();
         this.abortController = null;
       }
+      this.streamingAssistantKey = null;
       this.loading = false;
     },
     abortActivePoll() {
@@ -140,8 +142,14 @@ window.__formatMarkdown = function(text) {
       }
       return null;
     },
-    shouldStaySynced() {
+    shouldStreamSse() {
+      return Boolean(this.open && !this.isResolved && !document.hidden && (this.isEscalated || this.sessionUuid));
+    },
+    shouldPoll() {
       return Boolean(this.open && this.isEscalated && !this.isResolved && !document.hidden);
+    },
+    shouldStaySynced() {
+      return this.shouldPoll();
     },
     parseSsePayload(evt) {
       if (!evt || typeof evt.data !== 'string') return null;
@@ -159,14 +167,37 @@ window.__formatMarkdown = function(text) {
           this.lastMessageId = Math.max(this.lastMessageId, incomingId);
           return false;
         }
-        if (incoming.role === 'user' && this.loading) {
+        if (incoming.role === 'user') {
           const pendingIdx = this.messages.findIndex(
-            m => m.id === null && m.role === 'user' && m.content === (incoming.content || '')
+            m => m.id === null && m._key && String(m._key).startsWith('tmp-') && m.role === 'user' && m.content === (incoming.content || '')
           );
           if (pendingIdx !== -1) {
             const target = this.messages[pendingIdx];
             target.id = incomingId;
             target.content = incoming.content || target.content;
+            target.created_at = incoming.created_at || target.created_at;
+            this.lastMessageId = Math.max(this.lastMessageId, incomingId);
+            return true;
+          }
+        }
+        if (incoming.role === 'assistant') {
+          if (this.streamingAssistantKey) {
+            const streamIdx = this.messages.findIndex(m => m._key === this.streamingAssistantKey);
+            if (streamIdx !== -1) {
+              const target = this.messages[streamIdx];
+              target.id = incomingId;
+              target.created_at = incoming.created_at || target.created_at;
+              this.lastMessageId = Math.max(this.lastMessageId, incomingId);
+              return true;
+            }
+          }
+          const incomingTrimmed = String(incoming.content || '').trim();
+          const pendingAiIdx = this.messages.findIndex(
+            m => m.id === null && m._key && String(m._key).startsWith('tmp-') && m.role === 'assistant' && String(m.content || '').trim() === incomingTrimmed
+          );
+          if (pendingAiIdx !== -1) {
+            const target = this.messages[pendingAiIdx];
+            target.id = incomingId;
             target.created_at = incoming.created_at || target.created_at;
             this.lastMessageId = Math.max(this.lastMessageId, incomingId);
             return true;
@@ -205,13 +236,15 @@ window.__formatMarkdown = function(text) {
       this.stopPolling();
     },
     connectEventSource() {
-      if (!this.shouldStaySynced()) {
+      if (!this.shouldStreamSse()) {
         this.stopRealtime();
         return;
       }
       const EventSourceCtor = this.getEventSourceCtor();
       if (!EventSourceCtor) {
-        this.startPolling(false);
+        if (this.shouldPoll()) {
+          this.startPolling(false);
+        }
         return;
       }
       if (this.eventSource) {
@@ -226,7 +259,9 @@ window.__formatMarkdown = function(text) {
       try {
         es = new EventSourceCtor(url);
       } catch (e) {
-        this.startPolling(false);
+        if (this.shouldPoll()) {
+          this.startPolling(false);
+        }
         return;
       }
       this.eventSource = es;
@@ -318,11 +353,11 @@ window.__formatMarkdown = function(text) {
       es.onerror = () => {
         if (this.eventSource !== es) return;
         this.sseConnected = false;
-        if (!this.shouldStaySynced()) {
+        if (!this.shouldStreamSse()) {
           this.stopRealtime();
           return;
         }
-        if (!this.pollTimer && !this.pollingInFlight) {
+        if (this.shouldPoll() && !this.pollTimer && !this.pollingInFlight) {
           this.startPolling(false);
         }
         const closedState = typeof EventSourceCtor.CLOSED === 'number' ? EventSourceCtor.CLOSED : 2;
@@ -333,7 +368,7 @@ window.__formatMarkdown = function(text) {
             const retryDelay = Math.min(60000, 10000 * this.sseClosedErrors);
             this.sseReconnectTimer = setTimeout(() => {
               this.sseReconnectTimer = null;
-              if (this.shouldStaySynced() && !this.eventSource) {
+              if (this.shouldStreamSse() && !this.eventSource) {
                 this.connectEventSource();
               }
             }, retryDelay);
@@ -342,17 +377,19 @@ window.__formatMarkdown = function(text) {
       };
     },
     startRealtime(immediate = false) {
-      if (!this.shouldStaySynced()) {
+      if (!this.shouldStreamSse() && !this.shouldPoll()) {
         this.stopRealtime();
         return;
       }
-      if (this.getEventSourceCtor()) {
+      if (this.getEventSourceCtor() && this.shouldStreamSse()) {
         if (!this.eventSource) {
           this.connectEventSource();
         }
         return;
       }
-      this.startPolling(immediate);
+      if (this.shouldPoll()) {
+        this.startPolling(immediate);
+      }
     },
     stopPolling() {
       if (this.pollTimer) {
@@ -366,7 +403,7 @@ window.__formatMarkdown = function(text) {
         clearTimeout(this.pollTimer);
         this.pollTimer = null;
       }
-      if (!this.shouldStaySynced() || this.sseConnected) {
+      if (!this.shouldPoll() || this.sseConnected) {
         return;
       }
       this.pollTimer = setTimeout(() => {
@@ -375,7 +412,7 @@ window.__formatMarkdown = function(text) {
       }, 3000);
     },
     startPolling(immediate = false) {
-      if (!this.shouldStaySynced() || this.sseConnected) {
+      if (!this.shouldPoll() || this.sseConnected) {
         this.stopPolling();
         return;
       }
@@ -444,9 +481,15 @@ window.__formatMarkdown = function(text) {
           ? data.last_message_id
           : Math.max(this.lastMessageId, data.last_message_id);
       }
-      if (this.isResolved || !this.isEscalated) {
+      if (this.isResolved) {
         this.confirmResetOpen = false;
         this.stopRealtime();
+      } else if (!this.isEscalated) {
+        this.confirmResetOpen = false;
+        this.stopPolling();
+        if (!this.shouldStreamSse()) {
+          this.closeEventSource(true);
+        }
       }
     },
     async loadHistory() {
@@ -462,7 +505,7 @@ window.__formatMarkdown = function(text) {
           } else {
             this.messages = [this.makeWelcomeMsg(defaultWelcome)];
           }
-          if (this.open && this.isEscalated && !this.isResolved) {
+          if (this.shouldStreamSse() || this.shouldPoll()) {
             this.startRealtime(false);
           } else {
             this.stopRealtime();
@@ -483,7 +526,7 @@ window.__formatMarkdown = function(text) {
       this.visibilityHandler = () => {
         if (document.hidden) {
           this.stopRealtime();
-        } else if (this.open && this.isEscalated && !this.isResolved) {
+        } else if (this.shouldStreamSse() || this.shouldPoll()) {
           this.sseClosedErrors = 0;
           this.startRealtime(true);
         }
@@ -546,10 +589,18 @@ window.__formatMarkdown = function(text) {
         });
 
         if (res.ok && res.body) {
+          const hdrUuid = res.headers && typeof res.headers.get === 'function'
+            ? res.headers.get('X-Chat-Session-UUID')
+            : '';
+          if (hdrUuid && !this.sessionUuid) {
+            this.sessionUuid = hdrUuid;
+          }
           const reader = res.body.getReader();
           const decoder = new TextDecoder();
+          const assistantKey = 'tmp-' + (++this.msgKeySeq);
+          this.streamingAssistantKey = assistantKey;
           this.messages.push({
-            _key: 'tmp-' + (++this.msgKeySeq),
+            _key: assistantKey,
             id: null,
             role: 'assistant',
             sender: 'ai',
@@ -643,7 +694,7 @@ window.__formatMarkdown = function(text) {
                 });
               }
             }
-            if (this.shouldStaySynced() && !this.eventSource && !this.pollTimer) {
+            if ((this.shouldStreamSse() || this.shouldPoll()) && !this.eventSource && !this.pollTimer) {
               this.startRealtime(false);
             }
           }
@@ -694,7 +745,11 @@ window.__formatMarkdown = function(text) {
         }
         if (this.abortController === controller) {
           this.abortController = null;
+          this.streamingAssistantKey = null;
           this.loading = false;
+        }
+        if (!escalatedInStream && this.shouldStreamSse() && !this.eventSource && !this.pollTimer) {
+          this.startRealtime(false);
         }
         this.scrollToBottom();
       }
@@ -766,7 +821,7 @@ window.__formatMarkdown = function(text) {
           if (existingUserMsg) {
             await this.loadHistory();
           }
-          if (this.shouldStaySynced() && !this.eventSource && !this.pollTimer) {
+          if ((this.shouldStreamSse() || this.shouldPoll()) && !this.eventSource && !this.pollTimer) {
             this.startRealtime(false);
           }
         } else {
@@ -776,7 +831,7 @@ window.__formatMarkdown = function(text) {
             this.isEscalated = Boolean(data.is_escalated);
             if (!this.isEscalated) {
               this.operatorConnected = false;
-              this.stopRealtime();
+              this.stopPolling();
             }
             if (data.status === 'ACTIVE') {
               this.input = query;
@@ -796,26 +851,29 @@ window.__formatMarkdown = function(text) {
               showOperatorFallback: false,
               cartUpdated: false
             });
-            if (this.shouldStaySynced() && !this.eventSource && !this.pollTimer) {
+            if ((this.shouldStreamSse() || this.shouldPoll()) && !this.eventSource && !this.pollTimer) {
               this.startRealtime(false);
             }
           }
         }
       } catch (e) {
-        removeOptimistic();
-        this.input = query;
-        this.messages.push({
-          _key: 'err-' + (++this.msgKeySeq),
-          id: null,
-          role: 'system',
-          sender: 'system',
-          content: '',
-          created_at: '',
-          error: 'Помилка мережі. Перевірте зʼєднання та спробуйте ще раз.',
-          showOperatorFallback: false,
-          cartUpdated: false
-        });
-        if (this.shouldStaySynced() && !this.eventSource && !this.pollTimer) {
+        const confirmedIdx = this.messages.findIndex(m => m._key === msgKey && m.id);
+        if (confirmedIdx === -1) {
+          removeOptimistic();
+          this.input = query;
+          this.messages.push({
+            _key: 'err-' + (++this.msgKeySeq),
+            id: null,
+            role: 'system',
+            sender: 'system',
+            content: '',
+            created_at: '',
+            error: 'Помилка мережі. Перевірте зʼєднання та спробуйте ще раз.',
+            showOperatorFallback: false,
+            cartUpdated: false
+          });
+        }
+        if ((this.shouldStreamSse() || this.shouldPoll()) && !this.eventSource && !this.pollTimer) {
           this.startRealtime(false);
         }
       } finally {
@@ -849,7 +907,7 @@ window.__formatMarkdown = function(text) {
           if (Array.isArray(data.messages) && data.messages.length > 0) {
             this.messages = data.messages.map(m => this.normalizeMessage(m));
           }
-          if (this.shouldStaySynced()) {
+          if (this.shouldStreamSse() || this.shouldPoll()) {
             this.startRealtime(false);
           }
           this.scrollToBottom();
@@ -870,6 +928,9 @@ window.__formatMarkdown = function(text) {
             showOperatorFallback: false,
             cartUpdated: false
           });
+          if (this.shouldStreamSse()) {
+            this.startRealtime(false);
+          }
           this.scrollToBottom();
         }
       } catch (e) {
@@ -884,6 +945,9 @@ window.__formatMarkdown = function(text) {
           showOperatorFallback: false,
           cartUpdated: false
         });
+        if (this.shouldStreamSse()) {
+          this.startRealtime(false);
+        }
         this.scrollToBottom();
       } finally {
         this.escalating = false;
@@ -927,6 +991,9 @@ window.__formatMarkdown = function(text) {
           this.messages = [
             this.makeWelcomeMsg('Контекст діалогу очищено. Чим я можу вам допомогти сьогодні?')
           ];
+          if (this.shouldStreamSse()) {
+            this.startRealtime(false);
+          }
           this.scrollToBottom();
         } else {
           const errMsg = (data && data.error) || 'Не вдалося почати новий діалог. Спробуйте ще раз.';
@@ -941,7 +1008,7 @@ window.__formatMarkdown = function(text) {
             showOperatorFallback: false,
             cartUpdated: false
           });
-          if (this.shouldStaySynced()) {
+          if (this.shouldStreamSse() || this.shouldPoll()) {
             this.startRealtime(false);
           }
           this.scrollToBottom();
@@ -958,7 +1025,7 @@ window.__formatMarkdown = function(text) {
           showOperatorFallback: false,
           cartUpdated: false
         });
-        if (this.shouldStaySynced()) {
+        if (this.shouldStreamSse() || this.shouldPoll()) {
           this.startRealtime(false);
         }
         this.scrollToBottom();
@@ -967,7 +1034,7 @@ window.__formatMarkdown = function(text) {
       }
     },
     async pollHistory() {
-      if (!this.shouldStaySynced() || this.sseConnected) {
+      if (!this.shouldPoll() || this.sseConnected) {
         this.stopPolling();
         return;
       }
