@@ -10,7 +10,9 @@ urlpatterns = [
     path('chat/message/', views.chat_message_view, name='chat_message'),
     path('chat/reset/', views.chat_reset_view, name='chat_reset'),
     path('chat/history/', views.chat_history_view, name='chat_history'),
+    path('chat/events/', views.chat_events_view, name='chat_events'),
     path('desk/', desk_views.desk_index_view, name='desk_index'),
+    path('desk/events/', desk_views.desk_events_view, name='desk_events'),
     path(
         'desk/partials/queue/',
         desk_views.desk_queue_partial_view,

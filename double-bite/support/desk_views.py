@@ -3,10 +3,17 @@ import uuid
 from dataclasses import replace
 from typing import Any
 
+from asgiref.sync import sync_to_async
 from config.security import consume_rate_limit, rate_limit_429_response
-from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.http import (
+    Http404,
+    HttpRequest,
+    HttpResponse,
+    JsonResponse,
+    StreamingHttpResponse,
+)
 from django.shortcuts import get_object_or_404, render
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from support.models import (
     ChatMessage,
@@ -16,6 +23,7 @@ from support.models import (
     TicketStatus,
 )
 from support.permissions import support_operator_required
+from support.realtime import subscribe_desk_events
 from support.selectors import (
     DeskMessageView,
     format_session_customer_name,
@@ -34,7 +42,12 @@ from support.services import (
     SupportDeskService,
     get_operator_display_name,
 )
-from support.views import _parse_after_id, _parse_json_body
+from support.views import (
+    _close_non_atomic_connections,
+    _parse_after_id,
+    _parse_json_body,
+    _resolve_sse_after_id,
+)
 
 
 def _serialize_message_dict(msg_view: DeskMessageView) -> dict[str, Any]:
@@ -539,3 +552,54 @@ def desk_resolve_view(
             system_message=result.system_message,
         )
     )
+
+
+def _session_exists_sync(session_uuid: uuid.UUID) -> bool:
+    _close_non_atomic_connections()
+    try:
+        return ChatSession.objects.filter(session_uuid=session_uuid).exists()
+    finally:
+        _close_non_atomic_connections()
+
+
+@support_operator_required
+@require_http_methods(['GET'])
+async def desk_events_view(request: HttpRequest) -> HttpResponse:
+    after_id, after_id_error = _resolve_sse_after_id(request)
+    if after_id_error is not None:
+        return _no_store_json({'error': after_id_error}, status=400)
+
+    raw_session_uuid = (request.GET.get('session_uuid') or '').strip()
+    target_session_uuid: uuid.UUID | None = None
+    if raw_session_uuid:
+        target_session_uuid = _parse_optional_uuid(raw_session_uuid)
+        if target_session_uuid is None:
+            return _no_store_json(
+                {'error': 'Невірний формат session_uuid.'}, status=400
+            )
+        exists = await sync_to_async(_session_exists_sync, thread_sensitive=True)(
+            target_session_uuid
+        )
+        if not exists:
+            return _no_store_json({'error': 'Сесію чату не знайдено.'}, status=404)
+
+    if not hasattr(request, 'scope'):
+        fallback = HttpResponse(
+            'Потік подій доступний лише через ASGI.',
+            status=503,
+            content_type='text/plain; charset=utf-8',
+        )
+        fallback['Cache-Control'] = 'no-store'
+        fallback['X-SSE-Fallback'] = 'polling'
+        return fallback
+
+    response = StreamingHttpResponse(
+        subscribe_desk_events(
+            session_uuid=target_session_uuid,
+            after_id=after_id,
+        ),
+        content_type='text/event-stream',
+    )
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    return response

@@ -1,3 +1,4 @@
+from config.transactions import schedule_on_commit
 from django.contrib import admin
 from django.db import transaction
 from django.urls import reverse
@@ -12,6 +13,7 @@ from support.models import (
     SupportTicket,
     TicketStatus,
 )
+from support.realtime import publish_desk_event, publish_session_event
 from support.services import _sqlite_support_guard
 
 
@@ -141,16 +143,42 @@ class SupportTicketAdmin(admin.ModelAdmin):
                     sid for sid in session_ids if sid not in open_session_ids
                 ]
                 if sessions_to_resolve:
-                    ChatSession.objects.filter(
-                        pk__in=sessions_to_resolve,
-                        status=ChatSessionStatus.ESCALATED,
-                    ).update(
-                        is_escalated=False,
-                        status=ChatSessionStatus.RESOLVED,
-                        assigned_operator=None,
-                        assigned_at=None,
-                        updated_at=now,
+                    escalated_ids = list(
+                        ChatSession.objects.filter(
+                            pk__in=sessions_to_resolve,
+                            status=ChatSessionStatus.ESCALATED,
+                        ).values_list('pk', flat=True)
                     )
+                    if escalated_ids:
+                        ChatSession.objects.filter(pk__in=escalated_ids).update(
+                            is_escalated=False,
+                            status=ChatSessionStatus.RESOLVED,
+                            assigned_operator=None,
+                            assigned_at=None,
+                            updated_at=now,
+                        )
+                        for sid in escalated_ids:
+                            schedule_on_commit(
+                                publish_session_event,
+                                sid,
+                                'session_resolved',
+                                {
+                                    'status': ChatSessionStatus.RESOLVED,
+                                    'is_escalated': False,
+                                    'operator_connected': False,
+                                    'assigned_operator_id': None,
+                                    'assigned_operator_name': None,
+                                    'reason': 'admin_resolved',
+                                },
+                            )
+                        schedule_on_commit(
+                            publish_desk_event,
+                            'queue_update',
+                            {
+                                'reason': 'admin_resolved',
+                                'status': ChatSessionStatus.RESOLVED,
+                            },
+                        )
 
 
 @admin.register(FAQKnowledge)

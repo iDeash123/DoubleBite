@@ -97,6 +97,12 @@ function supportDeskController(initial) {
     pollTimer: null,
     pollingInFlight: false,
     pendingCatchupPoll: false,
+    eventSource: null,
+    sseSessionUuid: '',
+    sseConnected: false,
+    sseReconnectTimer: null,
+    sseClosedErrors: 0,
+    queueRefreshTimer: null,
     visibilityHandler: null,
     beforeRequestHandler: null,
     afterSwapHandler: null,
@@ -127,6 +133,12 @@ function supportDeskController(initial) {
             this.pendingQueueRefresh = false;
             this.refreshQueue();
           }
+          if (!document.hidden && this.getEventSourceCtor()) {
+            const desiredUuid = this.activeSessionUuid || '';
+            if (!this.eventSource || this.sseSessionUuid !== desiredUuid) {
+              this.connectEventSource(true);
+            }
+          }
         } else if (target.id && target.id.startsWith('past-history-box-')) {
           const pastUuid = target.id.slice('past-history-box-'.length);
           target.dataset.loaded = '1';
@@ -137,6 +149,9 @@ function supportDeskController(initial) {
         if (evt.detail && evt.detail.target && evt.detail.target.id === 'desk-workspace') {
           this.threadLoading = false;
           this.pendingQueueRefresh = false;
+          if (!document.hidden && !this.eventSource && !this.pollTimer) {
+            this.startRealtime(false);
+          }
         }
       };
       document.body.addEventListener('htmx:beforeRequest', this.beforeRequestHandler);
@@ -146,17 +161,18 @@ function supportDeskController(initial) {
 
       this.visibilityHandler = () => {
         if (document.hidden) {
-          this.stopPolling();
+          this.stopRealtime();
         } else {
-          this.startPolling(true);
+          this.sseClosedErrors = 0;
+          this.startRealtime(true);
         }
       };
       document.addEventListener('visibilitychange', this.visibilityHandler);
-      this.startPolling(false);
+      this.startRealtime(false);
     },
 
     destroy() {
-      this.stopPolling();
+      this.stopRealtime();
       if (this.visibilityHandler) {
         document.removeEventListener('visibilitychange', this.visibilityHandler);
       }
@@ -242,6 +258,8 @@ function supportDeskController(initial) {
       this.expandedPast = {};
       this.mobileView = 'chat';
       this.pendingQueueRefresh = true;
+      this.sseClosedErrors = 0;
+      this.closeEventSource(true);
       if (window.history && window.history.replaceState) {
         window.history.replaceState(null, '', `/support/desk/${encodeURIComponent(uuid)}/`);
       }
@@ -356,10 +374,12 @@ function supportDeskController(initial) {
         if (res.ok && data && data.message) {
           this.replyText = '';
           this.appendMessages([data.message], { advanceCursor: false });
-          if (this.pollingInFlight) {
-            this.refreshQueue();
+          if (!this.sseConnected) {
+            if (this.pollingInFlight) {
+              this.refreshQueue();
+            }
+            this.triggerCatchupPoll();
           }
-          this.triggerCatchupPoll();
         } else {
           this.errorBanner = (data && data.error) || 'Не вдалося надіслати повідомлення.';
           if (res.status === 409) {
@@ -473,13 +493,14 @@ function supportDeskController(initial) {
             const labelWrap = document.createElement('span');
             labelWrap.className = 'inline-flex items-center gap-1.5 font-sans font-semibold text-white';
             const labelText = document.createElement('span');
-            labelText.textContent = msg.sender_label || '';
+            labelText.textContent = msg.operator_name || msg.sender_label || 'Адміністратор ресторану';
             labelWrap.appendChild(labelText);
-            if (msg.source_badge) {
+            const sourceBadge = msg.source_badge || (msg.source === 'TELEGRAM' ? 'TG' : (msg.source ? 'Web' : ''));
+            if (sourceBadge) {
               const sourcePill = document.createElement('span');
               sourcePill.className = 'inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/15 text-[10px] font-mono';
               sourcePill.appendChild(this.createSourceIcon(msg.source));
-              sourcePill.appendChild(document.createTextNode(String(msg.source_badge)));
+              sourcePill.appendChild(document.createTextNode(String(sourceBadge)));
               labelWrap.appendChild(sourcePill);
             }
             meta.appendChild(labelWrap);
@@ -540,6 +561,215 @@ function supportDeskController(initial) {
       }
     },
 
+    getEventSourceCtor() {
+      if (typeof EventSource === 'function') return EventSource;
+      if (typeof window !== 'undefined' && window && typeof window.EventSource === 'function') {
+        return window.EventSource;
+      }
+      return null;
+    },
+
+    parseSsePayload(evt) {
+      if (!evt || typeof evt.data !== 'string') return null;
+      try {
+        return JSON.parse(evt.data);
+      } catch (e) {
+        return null;
+      }
+    },
+
+    scheduleQueueRefresh(delayMs = 250) {
+      if (document.hidden) return;
+      if (this.threadLoading) {
+        this.pendingQueueRefresh = true;
+        return;
+      }
+      if (this.queueRefreshTimer) {
+        clearTimeout(this.queueRefreshTimer);
+        this.queueRefreshTimer = null;
+      }
+      if (delayMs <= 0) {
+        this.refreshQueue();
+        return;
+      }
+      this.queueRefreshTimer = setTimeout(() => {
+        this.queueRefreshTimer = null;
+        if (!document.hidden && !this.threadLoading) {
+          this.refreshQueue();
+        }
+      }, delayMs);
+    },
+
+    closeEventSource(clearReconnect = true) {
+      if (clearReconnect && this.sseReconnectTimer) {
+        clearTimeout(this.sseReconnectTimer);
+        this.sseReconnectTimer = null;
+      }
+      if (this.eventSource) {
+        try {
+          this.eventSource.close();
+        } catch (e) {}
+        this.eventSource = null;
+      }
+      this.sseSessionUuid = '';
+      this.sseConnected = false;
+    },
+
+    stopRealtime() {
+      this.closeEventSource(true);
+      if (this.queueRefreshTimer) {
+        clearTimeout(this.queueRefreshTimer);
+        this.queueRefreshTimer = null;
+      }
+      this.stopPolling();
+    },
+
+    buildDeskEventsUrl() {
+      const params = new URLSearchParams();
+      if (this.activeSessionUuid) {
+        params.set('session_uuid', this.activeSessionUuid);
+        params.set('after_id', String(this.lastMessageId || 0));
+      }
+      const qs = params.toString();
+      return qs ? (`/support/desk/events/?${qs}`) : '/support/desk/events/';
+    },
+
+    connectEventSource(forceReconnect = false) {
+      if (document.hidden) {
+        this.stopRealtime();
+        return;
+      }
+      const EventSourceCtor = this.getEventSourceCtor();
+      if (!EventSourceCtor) {
+        this.startPolling(false);
+        return;
+      }
+      const desiredUuid = this.activeSessionUuid || '';
+      if (!forceReconnect && this.eventSource && this.sseSessionUuid === desiredUuid) {
+        return;
+      }
+      this.closeEventSource(true);
+      const url = this.buildDeskEventsUrl();
+      let es = null;
+      try {
+        es = new EventSourceCtor(url);
+      } catch (e) {
+        this.startPolling(false);
+        return;
+      }
+      this.eventSource = es;
+      this.sseSessionUuid = desiredUuid;
+
+      es.onopen = () => {
+        if (this.eventSource !== es) return;
+        this.sseConnected = true;
+        this.sseClosedErrors = 0;
+        this.stopPolling();
+      };
+
+      es.addEventListener('message', (evt) => {
+        if (this.eventSource !== es) return;
+        const payload = this.parseSsePayload(evt);
+        if (!payload) return;
+        if (
+          this.activeSessionUuid &&
+          payload.session_uuid === this.activeSessionUuid &&
+          !this.threadLoading
+        ) {
+          const msg = payload.data && typeof payload.data === 'object' ? payload.data : payload;
+          this.appendMessages([msg], { advanceCursor: true });
+        }
+      });
+
+      const handleThreadStateChange = (evt) => {
+        if (this.eventSource !== es) return;
+        const payload = this.parseSsePayload(evt);
+        if (!payload) return;
+        const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+        if (
+          this.activeSessionUuid &&
+          payload.session_uuid === this.activeSessionUuid &&
+          !this.threadLoading
+        ) {
+          const newOpId = data.assigned_operator_id ? String(data.assigned_operator_id) : '';
+          if (
+            (data.status && data.status !== this.sessionStatus) ||
+            newOpId !== this.assignedOperatorId
+          ) {
+            this.pendingQueueRefresh = true;
+            this.refreshThread(this.activeSessionUuid);
+            return;
+          }
+        }
+        this.scheduleQueueRefresh(250);
+      };
+
+      es.addEventListener('operator_joined', handleThreadStateChange);
+      es.addEventListener('status_changed', handleThreadStateChange);
+      es.addEventListener('session_resolved', (evt) => {
+        if (this.eventSource !== es) return;
+        const payload = this.parseSsePayload(evt);
+        if (!payload) return;
+        if (
+          this.activeSessionUuid &&
+          payload.session_uuid === this.activeSessionUuid &&
+          !this.threadLoading &&
+          this.sessionStatus !== 'RESOLVED'
+        ) {
+          this.pendingQueueRefresh = true;
+          this.refreshThread(this.activeSessionUuid);
+          return;
+        }
+        this.scheduleQueueRefresh(250);
+      });
+
+      es.addEventListener('queue_update', () => {
+        if (this.eventSource !== es) return;
+        this.scheduleQueueRefresh(250);
+      });
+
+      es.onerror = () => {
+        if (this.eventSource !== es) return;
+        this.sseConnected = false;
+        if (document.hidden) {
+          this.stopRealtime();
+          return;
+        }
+        if (!this.pollTimer && !this.pollingInFlight) {
+          this.startPolling(false);
+        }
+        const closedState = typeof EventSourceCtor.CLOSED === 'number' ? EventSourceCtor.CLOSED : 2;
+        if (es.readyState === closedState) {
+          this.closeEventSource(true);
+          this.sseClosedErrors += 1;
+          if (this.sseClosedErrors <= 3) {
+            const retryDelay = Math.min(60000, 10000 * this.sseClosedErrors);
+            this.sseReconnectTimer = setTimeout(() => {
+              this.sseReconnectTimer = null;
+              if (!document.hidden && !this.eventSource) {
+                this.connectEventSource(true);
+              }
+            }, retryDelay);
+          }
+        }
+      };
+    },
+
+    startRealtime(immediate = false) {
+      if (document.hidden) {
+        this.stopRealtime();
+        return;
+      }
+      if (this.getEventSourceCtor()) {
+        this.connectEventSource(immediate);
+        if (immediate) {
+          this.scheduleQueueRefresh(0);
+        }
+        return;
+      }
+      this.startPolling(immediate);
+    },
+
     stopPolling() {
       if (this.pollTimer) {
         clearTimeout(this.pollTimer);
@@ -549,7 +779,7 @@ function supportDeskController(initial) {
 
     scheduleNextPoll() {
       this.stopPolling();
-      if (document.hidden) return;
+      if (document.hidden || this.sseConnected) return;
       this.pollTimer = setTimeout(() => {
         this.pollTimer = null;
         this.pollActiveSession();
@@ -557,7 +787,7 @@ function supportDeskController(initial) {
     },
 
     startPolling(immediate = false) {
-      if (document.hidden) {
+      if (document.hidden || this.sseConnected) {
         this.stopPolling();
         return;
       }
@@ -569,7 +799,7 @@ function supportDeskController(initial) {
     },
 
     async pollActiveSession() {
-      if (document.hidden || this.pollingInFlight) {
+      if (document.hidden || this.sseConnected || this.pollingInFlight) {
         this.scheduleNextPoll();
         return;
       }
@@ -602,7 +832,7 @@ function supportDeskController(initial) {
       } catch (e) {
       } finally {
         this.pollingInFlight = false;
-        if (this.pendingCatchupPoll && !document.hidden) {
+        if (this.pendingCatchupPoll && !document.hidden && !this.sseConnected) {
           this.pendingCatchupPoll = false;
           this.pollActiveSession();
         } else {

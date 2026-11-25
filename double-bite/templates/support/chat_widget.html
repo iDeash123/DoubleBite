@@ -66,6 +66,10 @@ window.__formatMarkdown = function(text) {
     pollTimer: null,
     pollAbortController: null,
     pollingInFlight: false,
+    eventSource: null,
+    sseConnected: false,
+    sseReconnectTimer: null,
+    sseClosedErrors: 0,
     visibilityHandler: null,
     lastHistorySyncAt: 0,
     msgKeySeq: 0,
@@ -129,6 +133,227 @@ window.__formatMarkdown = function(text) {
       }
       this.pollingInFlight = false;
     },
+    getEventSourceCtor() {
+      if (typeof EventSource === 'function') return EventSource;
+      if (typeof window !== 'undefined' && window && typeof window.EventSource === 'function') {
+        return window.EventSource;
+      }
+      return null;
+    },
+    shouldStaySynced() {
+      return Boolean(this.open && this.isEscalated && !this.isResolved && !document.hidden);
+    },
+    parseSsePayload(evt) {
+      if (!evt || typeof evt.data !== 'string') return null;
+      try {
+        return JSON.parse(evt.data);
+      } catch (e) {
+        return null;
+      }
+    },
+    mergeIncomingMessage(incoming) {
+      if (!incoming || typeof incoming !== 'object') return false;
+      const incomingId = typeof incoming.id === 'number' ? incoming.id : Number(incoming.id || 0);
+      if (incomingId > 0) {
+        if (this.messages.some(m => m.id === incomingId)) {
+          this.lastMessageId = Math.max(this.lastMessageId, incomingId);
+          return false;
+        }
+        if (incoming.role === 'user' && this.loading) {
+          const pendingIdx = this.messages.findIndex(
+            m => m.id === null && m.role === 'user' && m.content === (incoming.content || '')
+          );
+          if (pendingIdx !== -1) {
+            const target = this.messages[pendingIdx];
+            target.id = incomingId;
+            target.content = incoming.content || target.content;
+            target.created_at = incoming.created_at || target.created_at;
+            this.lastMessageId = Math.max(this.lastMessageId, incomingId);
+            return true;
+          }
+        }
+      }
+      const normalized = this.normalizeMessage(incoming);
+      const insertAt = normalized.id
+        ? this.messages.findIndex(m => m.id && m.id > normalized.id)
+        : -1;
+      if (insertAt !== -1) {
+        this.messages.splice(insertAt, 0, normalized);
+      } else {
+        this.messages.push(normalized);
+      }
+      if (normalized.id) {
+        this.lastMessageId = Math.max(this.lastMessageId, normalized.id);
+      }
+      return true;
+    },
+    closeEventSource(clearReconnect = true) {
+      if (clearReconnect && this.sseReconnectTimer) {
+        clearTimeout(this.sseReconnectTimer);
+        this.sseReconnectTimer = null;
+      }
+      if (this.eventSource) {
+        try {
+          this.eventSource.close();
+        } catch (e) {}
+        this.eventSource = null;
+      }
+      this.sseConnected = false;
+    },
+    stopRealtime() {
+      this.closeEventSource(true);
+      this.stopPolling();
+    },
+    connectEventSource() {
+      if (!this.shouldStaySynced()) {
+        this.stopRealtime();
+        return;
+      }
+      const EventSourceCtor = this.getEventSourceCtor();
+      if (!EventSourceCtor) {
+        this.startPolling(false);
+        return;
+      }
+      if (this.eventSource) {
+        return;
+      }
+      if (this.sseReconnectTimer) {
+        clearTimeout(this.sseReconnectTimer);
+        this.sseReconnectTimer = null;
+      }
+      const url = '/support/chat/events/?after_id=' + encodeURIComponent(String(this.lastMessageId || 0));
+      let es = null;
+      try {
+        es = new EventSourceCtor(url);
+      } catch (e) {
+        this.startPolling(false);
+        return;
+      }
+      this.eventSource = es;
+      es.onopen = () => {
+        if (this.eventSource !== es) return;
+        this.sseConnected = true;
+        this.sseClosedErrors = 0;
+        this.stopPolling();
+      };
+      es.addEventListener('message', (evt) => {
+        if (this.eventSource !== es) return;
+        const payload = this.parseSsePayload(evt);
+        if (!payload) return;
+        if (payload.session_uuid) {
+          if (this.sessionUuid && payload.session_uuid !== this.sessionUuid) {
+            this.stopRealtime();
+            this.loadHistory();
+            return;
+          }
+          if (!this.sessionUuid) {
+            this.sessionUuid = payload.session_uuid;
+          }
+        }
+        const msg = payload.data && typeof payload.data === 'object' ? payload.data : payload;
+        this.lastHistorySyncAt = Date.now();
+        if (this.mergeIncomingMessage(msg)) {
+          this.scrollToBottom();
+        }
+      });
+      es.addEventListener('operator_joined', (evt) => {
+        if (this.eventSource !== es) return;
+        const payload = this.parseSsePayload(evt);
+        if (!payload) return;
+        if (payload.session_uuid) {
+          if (this.sessionUuid && payload.session_uuid !== this.sessionUuid) {
+            this.stopRealtime();
+            this.loadHistory();
+            return;
+          }
+          if (!this.sessionUuid) {
+            this.sessionUuid = payload.session_uuid;
+          }
+        }
+        const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+        this.lastHistorySyncAt = Date.now();
+        this.applySessionState({
+          status: data.status || 'ESCALATED',
+          is_escalated: true,
+          operator_connected: true,
+          is_working_hours: data.is_working_hours,
+          working_hours_label: data.working_hours_label,
+          off_hours_notice: data.off_hours_notice
+        }, false);
+      });
+      es.addEventListener('status_changed', (evt) => {
+        if (this.eventSource !== es) return;
+        const payload = this.parseSsePayload(evt);
+        if (!payload) return;
+        if (payload.session_uuid) {
+          if (this.sessionUuid && payload.session_uuid !== this.sessionUuid) {
+            this.stopRealtime();
+            this.loadHistory();
+            return;
+          }
+          if (!this.sessionUuid) {
+            this.sessionUuid = payload.session_uuid;
+          }
+        }
+        const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+        this.lastHistorySyncAt = Date.now();
+        this.applySessionState(data, false);
+      });
+      es.addEventListener('session_resolved', (evt) => {
+        if (this.eventSource !== es) return;
+        const payload = this.parseSsePayload(evt);
+        const data = payload && payload.data && typeof payload.data === 'object' ? payload.data : {};
+        this.lastHistorySyncAt = Date.now();
+        if (data.reason === 'reset') {
+          this.stopRealtime();
+          this.loadHistory();
+          return;
+        }
+        this.applySessionState({
+          status: 'RESOLVED',
+          is_escalated: false,
+          operator_connected: false
+        }, false);
+      });
+      es.onerror = () => {
+        if (this.eventSource !== es) return;
+        this.sseConnected = false;
+        if (!this.shouldStaySynced()) {
+          this.stopRealtime();
+          return;
+        }
+        if (!this.pollTimer && !this.pollingInFlight) {
+          this.startPolling(false);
+        }
+        const closedState = typeof EventSourceCtor.CLOSED === 'number' ? EventSourceCtor.CLOSED : 2;
+        if (es.readyState === closedState) {
+          this.closeEventSource(true);
+          this.sseClosedErrors += 1;
+          if (this.sseClosedErrors <= 3) {
+            const retryDelay = Math.min(60000, 10000 * this.sseClosedErrors);
+            this.sseReconnectTimer = setTimeout(() => {
+              this.sseReconnectTimer = null;
+              if (this.shouldStaySynced() && !this.eventSource) {
+                this.connectEventSource();
+              }
+            }, retryDelay);
+          }
+        }
+      };
+    },
+    startRealtime(immediate = false) {
+      if (!this.shouldStaySynced()) {
+        this.stopRealtime();
+        return;
+      }
+      if (this.getEventSourceCtor()) {
+        if (!this.eventSource) {
+          this.connectEventSource();
+        }
+        return;
+      }
+      this.startPolling(immediate);
+    },
     stopPolling() {
       if (this.pollTimer) {
         clearTimeout(this.pollTimer);
@@ -141,7 +366,7 @@ window.__formatMarkdown = function(text) {
         clearTimeout(this.pollTimer);
         this.pollTimer = null;
       }
-      if (!this.open || !this.isEscalated || this.isResolved || document.hidden) {
+      if (!this.shouldStaySynced() || this.sseConnected) {
         return;
       }
       this.pollTimer = setTimeout(() => {
@@ -150,7 +375,7 @@ window.__formatMarkdown = function(text) {
       }, 3000);
     },
     startPolling(immediate = false) {
-      if (!this.open || !this.isEscalated || this.isResolved || document.hidden) {
+      if (!this.shouldStaySynced() || this.sseConnected) {
         this.stopPolling();
         return;
       }
@@ -164,7 +389,8 @@ window.__formatMarkdown = function(text) {
       this.hiddenByModal = false;
       this.open = true;
       if (this.isEscalated && !this.isResolved) {
-        this.startPolling(true);
+        this.sseClosedErrors = 0;
+        this.startRealtime(true);
       } else if (
         !this.loading &&
         !this.escalating &&
@@ -179,7 +405,7 @@ window.__formatMarkdown = function(text) {
     },
     closeChat() {
       this.confirmResetOpen = false;
-      this.stopPolling();
+      this.stopRealtime();
       this.abortActiveStream();
       this.open = false;
     },
@@ -220,7 +446,7 @@ window.__formatMarkdown = function(text) {
       }
       if (this.isResolved || !this.isEscalated) {
         this.confirmResetOpen = false;
-        this.stopPolling();
+        this.stopRealtime();
       }
     },
     async loadHistory() {
@@ -237,9 +463,9 @@ window.__formatMarkdown = function(text) {
             this.messages = [this.makeWelcomeMsg(defaultWelcome)];
           }
           if (this.open && this.isEscalated && !this.isResolved) {
-            this.startPolling(false);
+            this.startRealtime(false);
           } else {
-            this.stopPolling();
+            this.stopRealtime();
           }
           this.scrollToBottom();
           return true;
@@ -256,16 +482,17 @@ window.__formatMarkdown = function(text) {
     async init() {
       this.visibilityHandler = () => {
         if (document.hidden) {
-          this.stopPolling();
+          this.stopRealtime();
         } else if (this.open && this.isEscalated && !this.isResolved) {
-          this.startPolling(true);
+          this.sseClosedErrors = 0;
+          this.startRealtime(true);
         }
       };
       document.addEventListener('visibilitychange', this.visibilityHandler);
       await this.loadHistory();
     },
     destroy() {
-      this.stopPolling();
+      this.stopRealtime();
       this.abortActiveStream();
       if (this.visibilityHandler) {
         document.removeEventListener('visibilitychange', this.visibilityHandler);
@@ -416,8 +643,8 @@ window.__formatMarkdown = function(text) {
                 });
               }
             }
-            if (this.open && this.isEscalated && !this.isResolved && !this.pollTimer) {
-              this.startPolling(false);
+            if (this.shouldStaySynced() && !this.eventSource && !this.pollTimer) {
+              this.startRealtime(false);
             }
           }
         } else {
@@ -539,8 +766,8 @@ window.__formatMarkdown = function(text) {
           if (existingUserMsg) {
             await this.loadHistory();
           }
-          if (this.open && this.isEscalated && !this.isResolved && !this.pollTimer) {
-            this.startPolling(false);
+          if (this.shouldStaySynced() && !this.eventSource && !this.pollTimer) {
+            this.startRealtime(false);
           }
         } else {
           removeOptimistic();
@@ -549,7 +776,7 @@ window.__formatMarkdown = function(text) {
             this.isEscalated = Boolean(data.is_escalated);
             if (!this.isEscalated) {
               this.operatorConnected = false;
-              this.stopPolling();
+              this.stopRealtime();
             }
             if (data.status === 'ACTIVE') {
               this.input = query;
@@ -569,8 +796,8 @@ window.__formatMarkdown = function(text) {
               showOperatorFallback: false,
               cartUpdated: false
             });
-            if (this.open && this.isEscalated && !this.isResolved && !this.pollTimer) {
-              this.startPolling(false);
+            if (this.shouldStaySynced() && !this.eventSource && !this.pollTimer) {
+              this.startRealtime(false);
             }
           }
         }
@@ -588,8 +815,8 @@ window.__formatMarkdown = function(text) {
           showOperatorFallback: false,
           cartUpdated: false
         });
-        if (this.open && this.isEscalated && !this.isResolved && !this.pollTimer) {
-          this.startPolling(false);
+        if (this.shouldStaySynced() && !this.eventSource && !this.pollTimer) {
+          this.startRealtime(false);
         }
       } finally {
         this.loading = false;
@@ -599,7 +826,8 @@ window.__formatMarkdown = function(text) {
     async escalateToOperator(reason = 'HUMAN_REQUESTED', details = '') {
       if (this.loading || this.escalating || this.resetting || this.isEscalated || this.isResolved) return;
       this.abortActiveStream();
-      this.stopPolling();
+      this.stopRealtime();
+      this.sseClosedErrors = 0;
       this.escalating = true;
       try {
         const csrfToken = this.getCsrfToken();
@@ -621,8 +849,8 @@ window.__formatMarkdown = function(text) {
           if (Array.isArray(data.messages) && data.messages.length > 0) {
             this.messages = data.messages.map(m => this.normalizeMessage(m));
           }
-          if (this.open && this.isEscalated && !this.isResolved) {
-            this.startPolling(false);
+          if (this.shouldStaySynced()) {
+            this.startRealtime(false);
           }
           this.scrollToBottom();
         } else if (res.status === 409 && data && data.status) {
@@ -673,7 +901,7 @@ window.__formatMarkdown = function(text) {
       if (this.resetting) return;
       this.resetting = true;
       this.confirmResetOpen = false;
-      this.stopPolling();
+      this.stopRealtime();
       this.abortActiveStream();
       try {
         const csrfToken = this.getCsrfToken();
@@ -694,6 +922,7 @@ window.__formatMarkdown = function(text) {
           this.isEscalated = false;
           this.operatorConnected = false;
           this.lastMessageId = 0;
+          this.sseClosedErrors = 0;
           this.lastHistorySyncAt = Date.now();
           this.messages = [
             this.makeWelcomeMsg('Контекст діалогу очищено. Чим я можу вам допомогти сьогодні?')
@@ -712,8 +941,8 @@ window.__formatMarkdown = function(text) {
             showOperatorFallback: false,
             cartUpdated: false
           });
-          if (this.open && this.isEscalated && !this.isResolved) {
-            this.startPolling(false);
+          if (this.shouldStaySynced()) {
+            this.startRealtime(false);
           }
           this.scrollToBottom();
         }
@@ -729,8 +958,8 @@ window.__formatMarkdown = function(text) {
           showOperatorFallback: false,
           cartUpdated: false
         });
-        if (this.open && this.isEscalated && !this.isResolved) {
-          this.startPolling(false);
+        if (this.shouldStaySynced()) {
+          this.startRealtime(false);
         }
         this.scrollToBottom();
       } finally {
@@ -738,7 +967,7 @@ window.__formatMarkdown = function(text) {
       }
     },
     async pollHistory() {
-      if (!this.open || !this.isEscalated || this.isResolved || document.hidden) {
+      if (!this.shouldStaySynced() || this.sseConnected) {
         this.stopPolling();
         return;
       }
@@ -766,19 +995,9 @@ window.__formatMarkdown = function(text) {
           if (Array.isArray(data.messages) && data.messages.length > 0) {
             let added = false;
             for (const incoming of data.messages) {
-              if (incoming.id && this.messages.some(m => m.id === incoming.id)) {
-                continue;
+              if (this.mergeIncomingMessage(incoming)) {
+                added = true;
               }
-              const normalized = this.normalizeMessage(incoming);
-              const insertAt = normalized.id
-                ? this.messages.findIndex(m => m.id && m.id > normalized.id)
-                : -1;
-              if (insertAt !== -1) {
-                this.messages.splice(insertAt, 0, normalized);
-              } else {
-                this.messages.push(normalized);
-              }
-              added = true;
             }
             if (added) {
               this.scrollToBottom();
@@ -795,7 +1014,7 @@ window.__formatMarkdown = function(text) {
           this.pollAbortController = null;
           this.pollingInFlight = false;
         }
-        if (!aborted && !controller.signal.aborted) {
+        if (!aborted && !controller.signal.aborted && !this.sseConnected) {
           this.scheduleNextPoll();
         }
       }

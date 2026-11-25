@@ -34,6 +34,12 @@ from support.models import (
     TicketStatus,
 )
 from support.permissions import is_support_operator
+from support.realtime import (
+    build_message_event_data,
+    build_status_event_data,
+    publish_desk_event,
+    publish_session_event,
+)
 
 logger = logging.getLogger('support')
 
@@ -486,10 +492,21 @@ class ChatSessionService:
 
                 try:
                     with transaction.atomic():
-                        return ChatSession.objects.create(
+                        created_session = ChatSession.objects.create(
                             user=user,
                             status=ChatSessionStatus.ACTIVE,
                         )
+                    schedule_on_commit(
+                        publish_desk_event,
+                        'queue_update',
+                        {
+                            'reason': 'session_created',
+                            'session_uuid': str(created_session.session_uuid),
+                            'status': ChatSessionStatus.ACTIVE,
+                        },
+                        session_uuid=created_session.session_uuid,
+                    )
+                    return created_session
                 except IntegrityError:
                     existing = (
                         ChatSession.objects.select_for_update()
@@ -503,10 +520,21 @@ class ChatSessionService:
         guest_token = get_guest_token(request, create=True)
         with _sqlite_support_guard(), transaction.atomic():
             if not guest_token:
-                return ChatSession.objects.create(
+                created_session = ChatSession.objects.create(
                     guest_token='',
                     status=ChatSessionStatus.ACTIVE,
                 )
+                schedule_on_commit(
+                    publish_desk_event,
+                    'queue_update',
+                    {
+                        'reason': 'session_created',
+                        'session_uuid': str(created_session.session_uuid),
+                        'status': ChatSessionStatus.ACTIVE,
+                    },
+                    session_uuid=created_session.session_uuid,
+                )
+                return created_session
 
             active_session = (
                 ChatSession.objects.select_for_update()
@@ -522,10 +550,21 @@ class ChatSessionService:
 
             try:
                 with transaction.atomic():
-                    return ChatSession.objects.create(
+                    created_session = ChatSession.objects.create(
                         guest_token=guest_token,
                         status=ChatSessionStatus.ACTIVE,
                     )
+                schedule_on_commit(
+                    publish_desk_event,
+                    'queue_update',
+                    {
+                        'reason': 'session_created',
+                        'session_uuid': str(created_session.session_uuid),
+                        'status': ChatSessionStatus.ACTIVE,
+                    },
+                    session_uuid=created_session.session_uuid,
+                )
+                return created_session
             except IntegrityError:
                 existing = (
                     ChatSession.objects.select_for_update()
@@ -597,12 +636,37 @@ class ChatSessionService:
                     )
                     locked_sessions.extend(locked_guest_sessions)
                 _resolve_sessions_and_tickets(locked_sessions, timezone.now())
+                for old_session in locked_sessions:
+                    schedule_on_commit(
+                        publish_session_event,
+                        old_session.session_uuid,
+                        'session_resolved',
+                        {
+                            'status': ChatSessionStatus.RESOLVED,
+                            'is_escalated': False,
+                            'operator_connected': False,
+                            'assigned_operator_id': None,
+                            'assigned_operator_name': None,
+                            'reason': 'reset',
+                        },
+                    )
                 try:
                     with transaction.atomic():
-                        return ChatSession.objects.create(
+                        new_session = ChatSession.objects.create(
                             user=user,
                             status=ChatSessionStatus.ACTIVE,
                         )
+                    schedule_on_commit(
+                        publish_desk_event,
+                        'queue_update',
+                        {
+                            'reason': 'reset',
+                            'session_uuid': str(new_session.session_uuid),
+                            'status': ChatSessionStatus.ACTIVE,
+                        },
+                        session_uuid=new_session.session_uuid,
+                    )
+                    return new_session
                 except IntegrityError:
                     existing = (
                         ChatSession.objects.select_for_update()
@@ -616,10 +680,21 @@ class ChatSessionService:
         guest_token = get_guest_token(request, create=True)
         with _sqlite_support_guard(), transaction.atomic():
             if not guest_token:
-                return ChatSession.objects.create(
+                new_session = ChatSession.objects.create(
                     guest_token='',
                     status=ChatSessionStatus.ACTIVE,
                 )
+                schedule_on_commit(
+                    publish_desk_event,
+                    'queue_update',
+                    {
+                        'reason': 'reset',
+                        'session_uuid': str(new_session.session_uuid),
+                        'status': ChatSessionStatus.ACTIVE,
+                    },
+                    session_uuid=new_session.session_uuid,
+                )
+                return new_session
 
             locked_sessions = list(
                 ChatSession.objects.select_for_update()
@@ -631,12 +706,37 @@ class ChatSessionService:
                 .order_by('pk')
             )
             _resolve_sessions_and_tickets(locked_sessions, timezone.now())
+            for old_session in locked_sessions:
+                schedule_on_commit(
+                    publish_session_event,
+                    old_session.session_uuid,
+                    'session_resolved',
+                    {
+                        'status': ChatSessionStatus.RESOLVED,
+                        'is_escalated': False,
+                        'operator_connected': False,
+                        'assigned_operator_id': None,
+                        'assigned_operator_name': None,
+                        'reason': 'reset',
+                    },
+                )
             try:
                 with transaction.atomic():
-                    return ChatSession.objects.create(
+                    new_session = ChatSession.objects.create(
                         guest_token=guest_token,
                         status=ChatSessionStatus.ACTIVE,
                     )
+                schedule_on_commit(
+                    publish_desk_event,
+                    'queue_update',
+                    {
+                        'reason': 'reset',
+                        'session_uuid': str(new_session.session_uuid),
+                        'status': ChatSessionStatus.ACTIVE,
+                    },
+                    session_uuid=new_session.session_uuid,
+                )
+                return new_session
             except IntegrityError:
                 existing = (
                     ChatSession.objects.select_for_update()
@@ -737,8 +837,14 @@ class ChatSessionService:
                 f'Звернення #{ticket.id} передано адміністратору. '
                 'Ви можете дописати деталі прямо тут.'
             )
-            if not is_within_working_hours(now=now):
-                system_text = f'{system_text}\n{format_off_hours_notice()}'
+            working_hours_now = is_within_working_hours(now=now)
+            working_hours_info = {
+                'is_working_hours': working_hours_now,
+                'working_hours_label': get_working_hours_label(),
+                'off_hours_notice': format_off_hours_notice(),
+            }
+            if not working_hours_now:
+                system_text = f"{system_text}\n{working_hours_info['off_hours_notice']}"
 
             sys_msg = ChatMessage.objects.create(
                 session=locked_session,
@@ -769,6 +875,36 @@ class ChatSessionService:
             from support.emails import send_ticket_escalated_email
 
             schedule_on_commit(send_ticket_escalated_email, ticket)
+            schedule_on_commit(
+                publish_session_event,
+                locked_session.session_uuid,
+                'message',
+                build_message_event_data(sys_msg, session=locked_session),
+                event_id=sys_msg.id,
+            )
+            schedule_on_commit(
+                publish_session_event,
+                locked_session.session_uuid,
+                'status_changed',
+                build_status_event_data(
+                    locked_session,
+                    ticket=ticket,
+                    operator_connected=False,
+                    reason='escalated',
+                    working_hours=working_hours_info,
+                ),
+            )
+            schedule_on_commit(
+                publish_desk_event,
+                'queue_update',
+                {
+                    'reason': 'escalated',
+                    'session_uuid': str(locked_session.session_uuid),
+                    'ticket_id': ticket.id,
+                    'status': ChatSessionStatus.ESCALATED,
+                },
+                session_uuid=locked_session.session_uuid,
+            )
             return ticket
 
 
@@ -941,6 +1077,38 @@ def _proactive_takeover_locked(
             'updated_at',
         ]
     )
+    schedule_on_commit(
+        publish_session_event,
+        locked_session.session_uuid,
+        'message',
+        build_message_event_data(sys_msg, session=locked_session),
+        event_id=sys_msg.id,
+    )
+    schedule_on_commit(
+        publish_session_event,
+        locked_session.session_uuid,
+        'operator_joined',
+        build_status_event_data(
+            locked_session,
+            operator=operator,
+            ticket=ticket,
+            operator_connected=True,
+            reason='proactive_takeover',
+        ),
+    )
+    schedule_on_commit(
+        publish_desk_event,
+        'queue_update',
+        {
+            'reason': 'proactive_takeover',
+            'session_uuid': str(locked_session.session_uuid),
+            'ticket_id': ticket.id,
+            'status': ChatSessionStatus.ESCALATED,
+            'assigned_operator_id': operator.id,
+            'assigned_operator_name': get_operator_display_name(operator),
+        },
+        session_uuid=locked_session.session_uuid,
+    )
     return DeskActionResult(
         session=locked_session,
         ticket=ticket,
@@ -1015,6 +1183,38 @@ class SupportDeskService:
                 ticket.save(update_fields=['status', 'assigned_operator'])
 
             _sync_session_attrs(session, locked_session)
+            schedule_on_commit(
+                publish_session_event,
+                locked_session.session_uuid,
+                'message',
+                build_message_event_data(sys_msg, session=locked_session),
+                event_id=sys_msg.id,
+            )
+            schedule_on_commit(
+                publish_session_event,
+                locked_session.session_uuid,
+                'operator_joined',
+                build_status_event_data(
+                    locked_session,
+                    operator=operator,
+                    ticket=ticket,
+                    operator_connected=True,
+                    reason='claimed',
+                ),
+            )
+            schedule_on_commit(
+                publish_desk_event,
+                'queue_update',
+                {
+                    'reason': 'claimed',
+                    'session_uuid': str(locked_session.session_uuid),
+                    'ticket_id': ticket.id if ticket is not None else None,
+                    'status': ChatSessionStatus.ESCALATED,
+                    'assigned_operator_id': operator.id,
+                    'assigned_operator_name': get_operator_display_name(operator),
+                },
+                session_uuid=locked_session.session_uuid,
+            )
             return DeskActionResult(
                 session=locked_session,
                 ticket=ticket,
@@ -1122,6 +1322,39 @@ class SupportDeskService:
                 ticket.save(update_fields=['status', 'assigned_operator'])
 
             _sync_session_attrs(session, locked_session)
+            takeover_reason = 'takeover' if had_previous_operator else 'claimed'
+            schedule_on_commit(
+                publish_session_event,
+                locked_session.session_uuid,
+                'message',
+                build_message_event_data(sys_msg, session=locked_session),
+                event_id=sys_msg.id,
+            )
+            schedule_on_commit(
+                publish_session_event,
+                locked_session.session_uuid,
+                'operator_joined',
+                build_status_event_data(
+                    locked_session,
+                    operator=operator,
+                    ticket=ticket,
+                    operator_connected=True,
+                    reason=takeover_reason,
+                ),
+            )
+            schedule_on_commit(
+                publish_desk_event,
+                'queue_update',
+                {
+                    'reason': takeover_reason,
+                    'session_uuid': str(locked_session.session_uuid),
+                    'ticket_id': ticket.id if ticket is not None else None,
+                    'status': ChatSessionStatus.ESCALATED,
+                    'assigned_operator_id': operator.id,
+                    'assigned_operator_name': get_operator_display_name(operator),
+                },
+                session_uuid=locked_session.session_uuid,
+            )
             return DeskActionResult(
                 session=locked_session,
                 ticket=ticket,
@@ -1153,8 +1386,28 @@ class SupportDeskService:
             )
             locked_session.last_message_at = msg.created_at
             locked_session.updated_at = msg.created_at
-            locked_session.save(update_fields=['last_message_at', 'updated_at'])
+            locked_session.save(
+                update_fields=['last_message_at', 'updated_at']
+            )
             _sync_session_attrs(session, locked_session)
+            schedule_on_commit(
+                publish_session_event,
+                locked_session.session_uuid,
+                'message',
+                build_message_event_data(msg, session=locked_session),
+                event_id=msg.id,
+            )
+            schedule_on_commit(
+                publish_desk_event,
+                'queue_update',
+                {
+                    'reason': 'customer_message',
+                    'session_uuid': str(locked_session.session_uuid),
+                    'message_id': msg.id,
+                    'status': locked_session.status,
+                },
+                session_uuid=locked_session.session_uuid,
+            )
             return msg
 
     @staticmethod
@@ -1187,6 +1440,8 @@ class SupportDeskService:
                 'updated_at',
             ]
 
+            auto_join_sys_msg: ChatMessage | None = None
+            auto_join_ticket: SupportTicket | None = None
             if validated_source == MessageSource.TELEGRAM:
                 ticket = (
                     SupportTicket.objects.select_for_update()
@@ -1194,6 +1449,7 @@ class SupportDeskService:
                     .order_by('-created_at', '-id')
                     .first()
                 )
+                auto_join_ticket = ticket
                 was_already_in_progress = (
                     ticket is not None and ticket.status == TicketStatus.IN_PROGRESS
                 )
@@ -1216,7 +1472,7 @@ class SupportDeskService:
                     if not was_already_in_progress:
                         became_in_progress = True
                 if became_in_progress:
-                    ChatMessage.objects.create(
+                    auto_join_sys_msg = ChatMessage.objects.create(
                         session=locked_session,
                         role=MessageRole.SYSTEM,
                         source=MessageSource.SYSTEM,
@@ -1250,6 +1506,55 @@ class SupportDeskService:
             locked_session.updated_at = msg.created_at
             locked_session.save(update_fields=session_update_fields)
             _sync_session_attrs(session, locked_session)
+
+            if auto_join_sys_msg is not None:
+                schedule_on_commit(
+                    publish_session_event,
+                    locked_session.session_uuid,
+                    'message',
+                    build_message_event_data(
+                        auto_join_sys_msg, session=locked_session
+                    ),
+                    event_id=auto_join_sys_msg.id,
+                )
+                schedule_on_commit(
+                    publish_session_event,
+                    locked_session.session_uuid,
+                    'operator_joined',
+                    build_status_event_data(
+                        locked_session,
+                        operator=operator,
+                        ticket=auto_join_ticket,
+                        operator_connected=True,
+                        reason='telegram_auto_claim',
+                    ),
+                )
+            schedule_on_commit(
+                publish_session_event,
+                locked_session.session_uuid,
+                'message',
+                build_message_event_data(
+                    msg,
+                    session=locked_session,
+                    operator_name=(
+                        get_operator_display_name(operator)
+                        if operator is not None
+                        else 'Адміністратор ресторану'
+                    ),
+                ),
+                event_id=msg.id,
+            )
+            schedule_on_commit(
+                publish_desk_event,
+                'queue_update',
+                {
+                    'reason': 'operator_message',
+                    'session_uuid': str(locked_session.session_uuid),
+                    'message_id': msg.id,
+                    'status': locked_session.status,
+                },
+                session_uuid=locked_session.session_uuid,
+            )
             return msg
 
     @staticmethod
@@ -1316,6 +1621,36 @@ class SupportDeskService:
                 ]
             )
             _sync_session_attrs(session, locked_session)
+            schedule_on_commit(
+                publish_session_event,
+                locked_session.session_uuid,
+                'message',
+                build_message_event_data(sys_msg, session=locked_session),
+                event_id=sys_msg.id,
+            )
+            schedule_on_commit(
+                publish_session_event,
+                locked_session.session_uuid,
+                'status_changed',
+                build_status_event_data(
+                    locked_session,
+                    operator=None,
+                    ticket=ticket,
+                    operator_connected=False,
+                    reason='returned_to_ai',
+                ),
+            )
+            schedule_on_commit(
+                publish_desk_event,
+                'queue_update',
+                {
+                    'reason': 'returned_to_ai',
+                    'session_uuid': str(locked_session.session_uuid),
+                    'ticket_id': ticket.id if ticket is not None else None,
+                    'status': ChatSessionStatus.ACTIVE,
+                },
+                session_uuid=locked_session.session_uuid,
+            )
             return DeskActionResult(
                 session=locked_session,
                 ticket=ticket,
@@ -1384,6 +1719,36 @@ class SupportDeskService:
                 ]
             )
             _sync_session_attrs(session, locked_session)
+            schedule_on_commit(
+                publish_session_event,
+                locked_session.session_uuid,
+                'message',
+                build_message_event_data(sys_msg, session=locked_session),
+                event_id=sys_msg.id,
+            )
+            schedule_on_commit(
+                publish_session_event,
+                locked_session.session_uuid,
+                'session_resolved',
+                build_status_event_data(
+                    locked_session,
+                    operator=None,
+                    ticket=ticket,
+                    operator_connected=False,
+                    reason='resolved',
+                ),
+            )
+            schedule_on_commit(
+                publish_desk_event,
+                'queue_update',
+                {
+                    'reason': 'resolved',
+                    'session_uuid': str(locked_session.session_uuid),
+                    'ticket_id': ticket.id if ticket is not None else None,
+                    'status': ChatSessionStatus.RESOLVED,
+                },
+                session_uuid=locked_session.session_uuid,
+            )
             return DeskActionResult(
                 session=locked_session,
                 ticket=ticket,
@@ -1421,6 +1786,15 @@ class SupportDeskService:
             if new_read_id > locked_session.operator_last_read_id:
                 locked_session.operator_last_read_id = new_read_id
                 locked_session.save(update_fields=['operator_last_read_id'])
+                schedule_on_commit(
+                    publish_desk_event,
+                    'queue_update',
+                    {
+                        'reason': 'marked_read',
+                        'session_uuid': str(locked_session.session_uuid),
+                    },
+                    session_uuid=locked_session.session_uuid,
+                )
             _sync_session_attrs(session, locked_session)
             return locked_session.operator_last_read_id
 

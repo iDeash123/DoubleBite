@@ -13,6 +13,7 @@ from config.security import (
     get_client_ip,
     rate_limit_429_response,
 )
+from config.transactions import schedule_on_commit
 from django.db import close_old_connections, connections
 from django.http import (
     HttpRequest,
@@ -21,7 +22,7 @@ from django.http import (
     StreamingHttpResponse,
 )
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from orders.middleware import get_guest_token
 
 from support import services as support_services
@@ -34,6 +35,12 @@ from support.models import (
     MessageSource,
     TicketReason,
     TicketStatus,
+)
+from support.realtime import (
+    build_message_event_data,
+    publish_desk_event,
+    publish_session_event,
+    subscribe_client_session_events,
 )
 from support.services import (
     ChatSessionService,
@@ -76,7 +83,9 @@ def _save_message(
     source: str | None = None,
 ) -> ChatMessage:
     _close_non_atomic_connections()
-    session = ChatSession.objects.get(session_uuid=session_uuid)
+    session = ChatSession.objects.select_related('user').get(
+        session_uuid=session_uuid
+    )
     resolved_source = source
     if resolved_source is None:
         if role == MessageRole.ASSISTANT:
@@ -95,6 +104,25 @@ def _save_message(
         last_message_at=msg.created_at,
         updated_at=msg.created_at,
     )
+    if role != MessageRole.TOOL:
+        schedule_on_commit(
+            publish_session_event,
+            session.session_uuid,
+            'message',
+            build_message_event_data(msg, session=session),
+            event_id=msg.id,
+        )
+        schedule_on_commit(
+            publish_desk_event,
+            'queue_update',
+            {
+                'reason': 'ai_chat_message',
+                'session_uuid': str(session.session_uuid),
+                'message_id': msg.id,
+                'status': session.status,
+            },
+            session_uuid=session.session_uuid,
+        )
     return msg
 
 
@@ -430,6 +458,37 @@ def _parse_after_id(raw_value: str | None) -> tuple[int | None, str | None]:
     return value, None
 
 
+def _resolve_sse_after_id(request: HttpRequest) -> tuple[int | None, str | None]:
+    query_after_id, error = _parse_after_id(request.GET.get('after_id'))
+    if error is not None:
+        return None, error
+
+    header_after_id, header_error = _parse_after_id(
+        request.headers.get('Last-Event-ID')
+    )
+    if header_error is not None:
+        header_after_id = None
+
+    if query_after_id is not None and header_after_id is not None:
+        return max(query_after_id, header_after_id), None
+    if header_after_id is not None:
+        return header_after_id, None
+    return query_after_id, None
+
+
+def _resolve_client_session_for_events(request: HttpRequest) -> ChatSession | None:
+    _close_non_atomic_connections()
+    try:
+        user = getattr(request, 'user', None)
+        if (user is None or not user.is_authenticated) and not get_guest_token(
+            request, create=False
+        ):
+            return None
+        return ChatSessionService.get_latest_session(request)
+    finally:
+        _close_non_atomic_connections()
+
+
 def _parse_json_body(
     request: HttpRequest,
     *,
@@ -742,4 +801,45 @@ def chat_history_view(request: HttpRequest) -> JsonResponse:
         'messages': messages,
     })
     response['Cache-Control'] = 'no-store'
+    return response
+
+
+@require_http_methods(['GET'])
+async def chat_events_view(request: HttpRequest) -> HttpResponse:
+    after_id, after_id_error = _resolve_sse_after_id(request)
+    if after_id_error is not None:
+        err = JsonResponse({'error': after_id_error}, status=400)
+        err['Cache-Control'] = 'no-store'
+        return err
+
+    session = await sync_to_async(
+        _resolve_client_session_for_events, thread_sensitive=True
+    )(request)
+    if session is None:
+        not_found = JsonResponse(
+            {'error': 'Активну сесію чату не знайдено.'},
+            status=404,
+        )
+        not_found['Cache-Control'] = 'no-store'
+        return not_found
+
+    if not hasattr(request, 'scope'):
+        fallback = HttpResponse(
+            'Потік подій доступний лише через ASGI.',
+            status=503,
+            content_type='text/plain; charset=utf-8',
+        )
+        fallback['Cache-Control'] = 'no-store'
+        fallback['X-SSE-Fallback'] = 'polling'
+        return fallback
+
+    response = StreamingHttpResponse(
+        subscribe_client_session_events(
+            session.session_uuid,
+            after_id=after_id,
+        ),
+        content_type='text/event-stream',
+    )
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
     return response
