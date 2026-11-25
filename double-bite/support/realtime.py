@@ -38,6 +38,9 @@ DESK_QUEUE_CHANNEL = 'support:desk:queue'
 DEFAULT_HEARTBEAT_INTERVAL = 15.0
 DEFAULT_DB_POLL_INTERVAL = 1.5
 DEFAULT_SSE_RETRY_MS = 3000
+DEFAULT_SYNC_REDIS_CONNECT_TIMEOUT = 0.4
+DEFAULT_SYNC_REDIS_SOCKET_TIMEOUT = 0.5
+DEFAULT_SYNC_PUBLISH_FAILURE_COOLDOWN = 10.0
 
 OPERATOR_PUBLIC_LABEL = 'Адміністратор ресторану'
 CLIENT_AI_LABEL = 'Double Bite Консьєрж'
@@ -60,6 +63,7 @@ DESK_EVENT_TYPES = frozenset({
 
 _SYNC_CLIENT_LOCK = threading.Lock()
 _SYNC_REDIS_CLIENTS: dict[str, redis.Redis] = {}
+_SYNC_PUBLISH_BACKOFF_UNTIL: dict[str, float] = {}
 
 
 def session_channel(session_uuid: uuid.UUID | str) -> str:
@@ -108,8 +112,8 @@ def _get_sync_redis_client(redis_url: str) -> redis.Redis:
             client = redis.Redis.from_url(
                 redis_url,
                 decode_responses=True,
-                socket_connect_timeout=1.5,
-                socket_timeout=1.5,
+                socket_connect_timeout=DEFAULT_SYNC_REDIS_CONNECT_TIMEOUT,
+                socket_timeout=DEFAULT_SYNC_REDIS_SOCKET_TIMEOUT,
             )
             _SYNC_REDIS_CLIENTS[redis_url] = client
         return client
@@ -128,9 +132,42 @@ def reset_realtime_clients() -> None:
     with _SYNC_CLIENT_LOCK:
         clients = list(_SYNC_REDIS_CLIENTS.values())
         _SYNC_REDIS_CLIENTS.clear()
+        _SYNC_PUBLISH_BACKOFF_UNTIL.clear()
     for client in clients:
         with contextlib.suppress(Exception):
             client.close()
+
+
+def _begin_sync_publish_attempt(redis_url: str) -> tuple[bool, bool]:
+    """Return (should_attempt, is_probe) for a sync publish to redis_url."""
+    cooldown = DEFAULT_SYNC_PUBLISH_FAILURE_COOLDOWN
+    if cooldown <= 0:
+        return True, False
+    now = time.monotonic()
+    with _SYNC_CLIENT_LOCK:
+        until = _SYNC_PUBLISH_BACKOFF_UNTIL.get(redis_url)
+        if until is None:
+            return True, False
+        if now < until:
+            return False, False
+        # Reserve a single-flight probe lease so concurrent threads do not stampede
+        # an unreachable Redis while this caller checks recovery.
+        _SYNC_PUBLISH_BACKOFF_UNTIL[redis_url] = now + cooldown
+        return True, True
+
+
+def _record_sync_publish_failure(redis_url: str) -> None:
+    cooldown = DEFAULT_SYNC_PUBLISH_FAILURE_COOLDOWN
+    if cooldown <= 0:
+        return
+    now = time.monotonic()
+    with _SYNC_CLIENT_LOCK:
+        _SYNC_PUBLISH_BACKOFF_UNTIL[redis_url] = now + cooldown
+
+
+def _clear_sync_publish_backoff(redis_url: str) -> None:
+    with _SYNC_CLIENT_LOCK:
+        _SYNC_PUBLISH_BACKOFF_UNTIL.pop(redis_url, None)
 
 
 def _resolve_sender_kind(role: str) -> str:
@@ -433,12 +470,20 @@ def _publish_to_channel(channel: str, payload: dict[str, Any]) -> bool:
     redis_url = get_realtime_redis_url()
     if not redis_url:
         return False
+    should_attempt, is_probe = _begin_sync_publish_attempt(redis_url)
+    if not should_attempt:
+        logger.debug(
+            'Skipping Redis publish for channel %s (%s) during failure cooldown',
+            channel,
+            payload.get('type'),
+        )
+        return False
     raw = json.dumps(payload, ensure_ascii=False)
     try:
         client = _get_sync_redis_client(redis_url)
         client.publish(channel, raw)
-        return True
     except (RedisError, OSError) as exc:
+        _record_sync_publish_failure(redis_url)
         logger.warning(
             'Redis publish failed for channel %s (%s): %s',
             channel,
@@ -446,6 +491,14 @@ def _publish_to_channel(channel: str, payload: dict[str, Any]) -> bool:
             exc,
         )
         return False
+    _clear_sync_publish_backoff(redis_url)
+    if is_probe:
+        logger.info(
+            'Redis publish recovered for channel %s (%s)',
+            channel,
+            payload.get('type'),
+        )
+    return True
 
 
 def publish_session_event(

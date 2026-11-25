@@ -105,6 +105,7 @@ function supportDeskController(initial) {
     eventSource: null,
     sseSessionUuid: '',
     sseConnected: false,
+    sseNeedsQueueCatchup: false,
     sseReconnectTimer: null,
     sseClosedErrors: 0,
     queueRefreshTimer: null,
@@ -269,6 +270,10 @@ function supportDeskController(initial) {
 
     refreshQueue() {
       if (!window.htmx) return;
+      if (this.queueRefreshTimer) {
+        clearTimeout(this.queueRefreshTimer);
+        this.queueRefreshTimer = null;
+      }
       window.htmx.ajax('GET', this.buildQueueUrl(), {
         target: '#desk-queue',
         swap: 'innerHTML',
@@ -302,6 +307,7 @@ function supportDeskController(initial) {
       this.pendingThreadState = null;
       this.clearMarkReadTimer();
       this.sseClosedErrors = 0;
+      this.sseNeedsQueueCatchup = false;
       this.closeEventSource(true);
       if (window.history && window.history.replaceState) {
         window.history.replaceState(null, '', `/support/desk/${encodeURIComponent(uuid)}/`);
@@ -697,6 +703,7 @@ function supportDeskController(initial) {
     },
 
     stopRealtime() {
+      this.sseNeedsQueueCatchup = false;
       this.closeEventSource(true);
       this.clearMarkReadTimer();
       if (this.queueRefreshTimer) {
@@ -744,9 +751,14 @@ function supportDeskController(initial) {
 
       es.onopen = () => {
         if (this.eventSource !== es) return;
+        const needsQueueCatchup = this.sseNeedsQueueCatchup;
         this.sseConnected = true;
         this.sseClosedErrors = 0;
+        this.sseNeedsQueueCatchup = false;
         this.stopPolling();
+        if (needsQueueCatchup) {
+          this.scheduleQueueRefresh(0);
+        }
       };
 
       es.addEventListener('message', (evt) => {
@@ -858,6 +870,7 @@ function supportDeskController(initial) {
           this.stopRealtime();
           return;
         }
+        this.sseNeedsQueueCatchup = true;
         if (!this.pollTimer && !this.pollingInFlight) {
           this.startPolling(false);
         }
@@ -884,6 +897,9 @@ function supportDeskController(initial) {
         return;
       }
       if (this.getEventSourceCtor()) {
+        if (immediate) {
+          this.sseNeedsQueueCatchup = false;
+        }
         this.connectEventSource(immediate);
         if (immediate) {
           this.scheduleQueueRefresh(0);

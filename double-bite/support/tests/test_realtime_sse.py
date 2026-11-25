@@ -3,6 +3,7 @@ import json
 import re
 import shutil
 import subprocess
+import threading
 import uuid
 from collections import defaultdict
 from typing import Any
@@ -353,6 +354,182 @@ class RealtimeHelpersUnitTest(TestCase):
             ok_desk = realtime.publish_desk_event('queue_update', {'reason': 'test'})
             self.assertFalse(ok_session)
             self.assertFalse(ok_desk)
+
+    def test_sync_redis_client_uses_tight_timeouts(self):
+        with patch('support.realtime.redis.Redis.from_url') as mock_from_url:
+            sentinel = object()
+            mock_from_url.return_value = sentinel
+            client = realtime._get_sync_redis_client('redis://tight-timeout:6379/0')
+            self.assertIs(client, sentinel)
+            mock_from_url.assert_called_once_with(
+                'redis://tight-timeout:6379/0',
+                decode_responses=True,
+                socket_connect_timeout=realtime.DEFAULT_SYNC_REDIS_CONNECT_TIMEOUT,
+                socket_timeout=realtime.DEFAULT_SYNC_REDIS_SOCKET_TIMEOUT,
+            )
+            self.assertLessEqual(realtime.DEFAULT_SYNC_REDIS_CONNECT_TIMEOUT, 0.5)
+            self.assertLessEqual(realtime.DEFAULT_SYNC_REDIS_SOCKET_TIMEOUT, 0.5)
+
+    def test_sync_publish_failure_backoff_per_url_recovery_and_reset(self):
+        now_box = [100.0]
+        calls_by_url: dict[str, int] = defaultdict(int)
+        failing_urls: set[str] = {'redis://dead-a:6379/0'}
+
+        class FlakyClient:
+            def __init__(self, url: str) -> None:
+                self.url = url
+
+            def publish(self, channel: str, data: str) -> int:
+                calls_by_url[self.url] += 1
+                if self.url in failing_urls:
+                    raise redis.exceptions.ConnectionError(f'{self.url} unreachable')
+                return 1
+
+        with (
+            patch('support.realtime.time.monotonic', side_effect=lambda: now_box[0]),
+            patch(
+                'support.realtime._get_sync_redis_client',
+                side_effect=lambda url: FlakyClient(url),
+            ),
+        ):
+            url_a = 'redis://dead-a:6379/0'
+            url_b = 'redis://healthy-b:6379/0'
+            cooldown = realtime.DEFAULT_SYNC_PUBLISH_FAILURE_COOLDOWN
+            self.assertGreater(cooldown, 0.0)
+
+            # 1. Initial publish fails once, then next 3 calls within the same POST skip Redis
+            with override_settings(SUPPORT_REALTIME_REDIS_URL=url_a):
+                self.assertFalse(
+                    realtime.publish_session_event(
+                        uuid.uuid4(), 'message', {'id': 1, 'content': 'a'}, event_id=1
+                    )
+                )
+                self.assertEqual(calls_by_url[url_a], 1)
+
+                now_box[0] += 0.05
+                self.assertFalse(
+                    realtime.publish_session_event(
+                        uuid.uuid4(), 'status_changed', {'status': 'ESCALATED'}
+                    )
+                )
+                self.assertFalse(
+                    realtime.publish_desk_event('queue_update', {'reason': 'escalated'})
+                )
+                now_box[0] += cooldown - 0.1
+                self.assertFalse(
+                    realtime.publish_desk_event('queue_update', {'reason': 'still_cooling'})
+                )
+                self.assertEqual(calls_by_url[url_a], 1)
+
+            # 2. Backoff is per-URL: an independent URL still publishes normally
+            with override_settings(SUPPORT_REALTIME_REDIS_URL=url_b):
+                self.assertTrue(
+                    realtime.publish_desk_event('queue_update', {'reason': 'other_url'})
+                )
+                self.assertEqual(calls_by_url[url_b], 1)
+
+            # 3. After cooldown expires while still dead -> probes once and re-arms cooldown
+            now_box[0] += 0.2
+            with override_settings(SUPPORT_REALTIME_REDIS_URL=url_a):
+                self.assertFalse(
+                    realtime.publish_desk_event('queue_update', {'reason': 'probe_fail'})
+                )
+                self.assertEqual(calls_by_url[url_a], 2)
+                self.assertFalse(
+                    realtime.publish_desk_event('queue_update', {'reason': 'rearmed_skip'})
+                )
+                self.assertEqual(calls_by_url[url_a], 2)
+
+            # 4. After cooldown expires and Redis is back -> auto-recovers and resumes publishing
+            failing_urls.discard(url_a)
+            now_box[0] += cooldown + 0.1
+            with override_settings(SUPPORT_REALTIME_REDIS_URL=url_a):
+                self.assertTrue(
+                    realtime.publish_desk_event('queue_update', {'reason': 'probe_ok'})
+                )
+                self.assertEqual(calls_by_url[url_a], 3)
+                self.assertTrue(
+                    realtime.publish_desk_event('queue_update', {'reason': 'after_recovery'})
+                )
+                self.assertEqual(calls_by_url[url_a], 4)
+
+            # 5. reset_realtime_clients() clears active cooldown immediately
+            failing_urls.add(url_a)
+            with override_settings(SUPPORT_REALTIME_REDIS_URL=url_a):
+                self.assertFalse(
+                    realtime.publish_desk_event('queue_update', {'reason': 'fail_again'})
+                )
+                self.assertEqual(calls_by_url[url_a], 5)
+                self.assertFalse(
+                    realtime.publish_desk_event('queue_update', {'reason': 'skipped'})
+                )
+                self.assertEqual(calls_by_url[url_a], 5)
+
+                realtime.reset_realtime_clients()
+                failing_urls.discard(url_a)
+                self.assertTrue(
+                    realtime.publish_desk_event('queue_update', {'reason': 'after_reset'})
+                )
+                self.assertEqual(calls_by_url[url_a], 6)
+
+    def test_sync_publish_backoff_single_flight_probe_is_thread_safe(self):
+        now_box = [200.0]
+        probe_entered = threading.Event()
+        release_probe = threading.Event()
+        publish_attempts = 0
+        attempts_lock = threading.Lock()
+        mode = {'state': 'fail'}
+
+        class BlockingProbeClient:
+            def publish(self, channel: str, data: str) -> int:
+                nonlocal publish_attempts
+                with attempts_lock:
+                    publish_attempts += 1
+                if mode['state'] == 'fail':
+                    raise redis.exceptions.ConnectionError('initial failure')
+                if mode['state'] == 'probe':
+                    probe_entered.set()
+                    release_probe.wait(timeout=5.0)
+                    return 1
+                return 1
+
+        url = 'redis://concurrent-probe:6379/0'
+        with (
+            override_settings(SUPPORT_REALTIME_REDIS_URL=url),
+            patch('support.realtime.time.monotonic', side_effect=lambda: now_box[0]),
+            patch(
+                'support.realtime._get_sync_redis_client',
+                return_value=BlockingProbeClient(),
+            ),
+        ):
+            self.assertFalse(realtime.publish_desk_event('queue_update', {'reason': 'init'}))
+            self.assertEqual(publish_attempts, 1)
+
+            # Advance past cooldown and start a single probe in thread 1
+            now_box[0] += realtime.DEFAULT_SYNC_PUBLISH_FAILURE_COOLDOWN + 1.0
+            mode['state'] = 'probe'
+            t1_result: list[bool] = []
+            t1 = threading.Thread(
+                target=lambda: t1_result.append(
+                    realtime.publish_desk_event('queue_update', {'reason': 't1_probe'})
+                )
+            )
+            t1.start()
+            self.assertTrue(probe_entered.wait(timeout=2.0))
+
+            # Concurrent thread 2 must skip immediately without stampeding Redis
+            t2_ok = realtime.publish_desk_event('queue_update', {'reason': 't2_concurrent'})
+            self.assertFalse(t2_ok)
+            self.assertEqual(publish_attempts, 2)
+
+            release_probe.set()
+            t1.join(timeout=2.0)
+            self.assertEqual(t1_result, [True])
+
+            # After probe succeeds, backoff is cleared so subsequent calls publish immediately
+            mode['state'] = 'ok'
+            self.assertTrue(realtime.publish_desk_event('queue_update', {'reason': 'post_probe'}))
+            self.assertEqual(publish_attempts, 3)
 
 
 class RealtimeSseEndpointsValidationAndRbacTest(TestCase):
@@ -2854,3 +3031,260 @@ class FrontendEventSourceJsBehaviorTest(TestCase):
         self.assertEqual(result['markReadCountOnMobileQueue'], 1)
         self.assertTrue(result['bufferedMsg23Rendered'])
         self.assertTrue(result['triggeredCorrectiveReload'])
+
+    def test_desk_controller_refreshes_queue_once_after_sse_disconnect_reconnect(self):
+        script = f"""
+        const vm = require('vm');
+        const timers = new Map();
+        let nextTimerId = 1;
+        const docListeners = {{}};
+        const bodyListeners = {{}};
+        const htmxCalls = [];
+
+        let threadRoot = {{
+          dataset: {{
+            sessionUuid: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+            sessionStatus: 'ESCALATED',
+            assignedOperatorId: '7',
+            isOwnedByMe: '1',
+            lastMessageId: '30',
+          }},
+        }};
+
+        const doc = {{
+          hidden: false,
+          cookie: 'csrftoken=desk-csrf',
+          body: {{
+            addEventListener: (ev, fn) => {{ (bodyListeners[ev] ||= []).push(fn); }},
+            removeEventListener: (ev, fn) => {{
+              bodyListeners[ev] = (bodyListeners[ev] || []).filter(f => f !== fn);
+            }},
+          }},
+          getElementById: (id) => (id === 'desk-thread-root' ? threadRoot : null),
+          querySelector: () => null,
+          addEventListener: (ev, fn) => {{ (docListeners[ev] ||= []).push(fn); }},
+          removeEventListener: (ev, fn) => {{
+            docListeners[ev] = (docListeners[ev] || []).filter(f => f !== fn);
+          }},
+          dispatchVisibility: (hiddenVal) => {{
+            doc.hidden = hiddenVal;
+            for (const fn of (docListeners.visibilitychange || [])) fn();
+          }},
+        }};
+
+        const instances = [];
+        class FakeEventSource {{
+          static CONNECTING = 0;
+          static OPEN = 1;
+          static CLOSED = 2;
+          constructor(url) {{
+            this.url = url;
+            this.readyState = FakeEventSource.CONNECTING;
+            this.closed = false;
+            this.handlers = {{}};
+            this.onopen = null;
+            this.onerror = null;
+            instances.push(this);
+          }}
+          addEventListener(type, fn) {{ (this.handlers[type] ||= []).push(fn); }}
+          emitOpen() {{
+            this.readyState = FakeEventSource.OPEN;
+            if (this.onopen) this.onopen({{}});
+          }}
+          emitError(readyState = FakeEventSource.CONNECTING) {{
+            this.readyState = readyState;
+            if (this.onerror) this.onerror({{}});
+          }}
+          close() {{
+            this.closed = true;
+            this.readyState = FakeEventSource.CLOSED;
+          }}
+        }}
+
+        const sandbox = {{
+          document: doc,
+          window: {{
+            innerWidth: 1280,
+            history: {{ replaceState: () => {{}} }},
+            htmx: {{
+              ajax: (method, url, opts) => htmxCalls.push({{ method, url, target: opts.target }}),
+            }},
+            EventSource: FakeEventSource,
+          }},
+          EventSource: FakeEventSource,
+          URLSearchParams,
+          encodeURIComponent,
+          decodeURIComponent,
+          JSON,
+          Math,
+          Array,
+          Boolean,
+          String,
+          Number,
+          setTimeout: (fn, ms) => {{
+            const id = nextTimerId++;
+            timers.set(id, {{ fn, ms }});
+            return id;
+          }},
+          clearTimeout: (id) => {{ timers.delete(id); }},
+        }};
+
+        const queueCallsCount = () => htmxCalls.filter(c => c.target === '#desk-queue').length;
+
+        (async () => {{
+          vm.runInNewContext({json.dumps(self.desk_controller_src)}, sandbox);
+          const desk = sandbox.supportDeskController({{
+            activeTab: 'waiting',
+            searchQuery: '',
+            activeSessionUuid: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+            lastMessageId: 30,
+            sessionStatus: 'ESCALATED',
+            assignedOperatorId: '7',
+            isOwnedByMe: true,
+          }});
+          desk.$nextTick = (cb) => cb();
+          desk.init();
+
+          // 1. Initial connect: zero extra queue fetches
+          const es1 = instances[0];
+          es1.emitOpen();
+          const afterInitialOpen = queueCallsCount();
+
+          // 2. Normal session switch: afterSwap refreshes queue once, new es2.onopen adds 0 extra fetches
+          desk.selectSession('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee');
+          threadRoot = {{
+            dataset: {{
+              sessionUuid: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+              sessionStatus: 'ESCALATED',
+              assignedOperatorId: '',
+              isOwnedByMe: '0',
+              lastMessageId: '40',
+            }},
+          }};
+          for (const fn of (bodyListeners['htmx:afterSwap'] || [])) {{
+            fn({{ detail: {{ target: {{ id: 'desk-workspace' }} }} }});
+          }}
+          const queueBeforeSwitchOpen = queueCallsCount();
+          const es2 = instances[1];
+          es2.emitOpen();
+          const queueDeltaOnSwitchOpen = queueCallsCount() - queueBeforeSwitchOpen;
+
+          // 3. Transient SSE disconnect (onerror CONNECTING) -> auto-reconnect (onopen) before 4s poll fires
+          const queueBeforeTransient = queueCallsCount();
+          es2.emitError(FakeEventSource.CONNECTING);
+          const pollArmedDuringTransient = Array.from(timers.values()).some(t => t.ms === 4000);
+          es2.emitOpen();
+          const queueDeltaOnTransientReconnect = queueCallsCount() - queueBeforeTransient;
+          const timersAfterTransientReconnect = timers.size;
+
+          // Repeated onopen without another onerror must NOT refresh again
+          es2.emitOpen();
+          const queueDeltaOnRepeatedOpen = queueCallsCount() - (queueBeforeTransient + queueDeltaOnTransientReconnect);
+
+          // 4. CLOSED disconnect -> reconnect timer -> es3.onopen refreshes queue once
+          const queueBeforeClosed = queueCallsCount();
+          es2.emitError(FakeEventSource.CLOSED);
+          const reconnectEntry = Array.from(timers.entries()).find(([, v]) => v.ms === 10000);
+          timers.delete(reconnectEntry[0]);
+          reconnectEntry[1].fn();
+          const es3 = instances[2];
+          es3.emitOpen();
+          const queueDeltaOnClosedReconnect = queueCallsCount() - queueBeforeClosed;
+
+          // 5. Disconnect + reconnect while threadLoading === true defers refresh until afterSwap
+          const queueBeforeLoadingReconnect = queueCallsCount();
+          desk.refreshThread('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee');
+          es3.emitError(FakeEventSource.CONNECTING);
+          es3.emitOpen();
+          const queueDeltaWhileLoading = queueCallsCount() - queueBeforeLoadingReconnect;
+          for (const fn of (bodyListeners['htmx:afterSwap'] || [])) {{
+            fn({{ detail: {{ target: {{ id: 'desk-workspace' }} }} }});
+          }}
+          const queueDeltaAfterLoadingSwap = queueCallsCount() - queueBeforeLoadingReconnect;
+
+          // 6. Disconnect followed by session switch BEFORE reconnect -> no duplicate refresh on es4.onopen
+          es3.emitError(FakeEventSource.CONNECTING);
+          const queueBeforeSwitchAfterError = queueCallsCount();
+          desk.selectSession('ffffffff-ffff-ffff-ffff-ffffffffffff');
+          threadRoot = {{
+            dataset: {{
+              sessionUuid: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+              sessionStatus: 'ESCALATED',
+              assignedOperatorId: '',
+              isOwnedByMe: '0',
+              lastMessageId: '50',
+            }},
+          }};
+          for (const fn of (bodyListeners['htmx:afterSwap'] || [])) {{
+            fn({{ detail: {{ target: {{ id: 'desk-workspace' }} }} }});
+          }}
+          const es4 = instances[3];
+          es4.emitOpen();
+          const queueDeltaOnSwitchAfterError = queueCallsCount() - queueBeforeSwitchAfterError;
+
+          // 7. Disconnect followed by visibility hide/show -> single refresh on resume, no duplicate on es5.onopen
+          es4.emitError(FakeEventSource.CONNECTING);
+          const queueBeforeVisibility = queueCallsCount();
+          doc.dispatchVisibility(true);
+          doc.dispatchVisibility(false);
+          const es5 = instances[4];
+          es5.emitOpen();
+          const queueDeltaOnVisibilityResume = queueCallsCount() - queueBeforeVisibility;
+
+          desk.destroy();
+
+          // 8. Empty desk (no active session) also catches up queue on transient reconnect
+          threadRoot = null;
+          const emptyDesk = sandbox.supportDeskController({{
+            activeTab: 'waiting',
+            searchQuery: '',
+            activeSessionUuid: '',
+            lastMessageId: 0,
+            sessionStatus: '',
+            assignedOperatorId: '',
+            isOwnedByMe: false,
+          }});
+          emptyDesk.$nextTick = (cb) => cb();
+          const queueBeforeEmpty = queueCallsCount();
+          emptyDesk.init();
+          const esEmpty = instances[instances.length - 1];
+          esEmpty.emitOpen();
+          const emptyDeltaInitial = queueCallsCount() - queueBeforeEmpty;
+          esEmpty.emitError(FakeEventSource.CONNECTING);
+          esEmpty.emitOpen();
+          const emptyDeltaReconnect = queueCallsCount() - (queueBeforeEmpty + emptyDeltaInitial);
+          emptyDesk.destroy();
+
+          process.stdout.write(JSON.stringify({{
+            afterInitialOpen,
+            queueDeltaOnSwitchOpen,
+            pollArmedDuringTransient,
+            queueDeltaOnTransientReconnect,
+            timersAfterTransientReconnect,
+            queueDeltaOnRepeatedOpen,
+            queueDeltaOnClosedReconnect,
+            queueDeltaWhileLoading,
+            queueDeltaAfterLoadingSwap,
+            queueDeltaOnSwitchAfterError,
+            queueDeltaOnVisibilityResume,
+            emptyDeltaInitial,
+            emptyDeltaReconnect,
+            timersAfterDestroy: timers.size,
+          }}));
+        }})().catch(err => {{ console.error(err); process.exit(1); }});
+        """
+        result = self._run_node_script(script)
+        self.assertEqual(result['afterInitialOpen'], 0)
+        self.assertEqual(result['queueDeltaOnSwitchOpen'], 0)
+        self.assertTrue(result['pollArmedDuringTransient'])
+        self.assertEqual(result['queueDeltaOnTransientReconnect'], 1)
+        self.assertEqual(result['timersAfterTransientReconnect'], 0)
+        self.assertEqual(result['queueDeltaOnRepeatedOpen'], 0)
+        self.assertEqual(result['queueDeltaOnClosedReconnect'], 1)
+        self.assertEqual(result['queueDeltaWhileLoading'], 0)
+        self.assertEqual(result['queueDeltaAfterLoadingSwap'], 1)
+        self.assertEqual(result['queueDeltaOnSwitchAfterError'], 1)
+        self.assertEqual(result['queueDeltaOnVisibilityResume'], 1)
+        self.assertEqual(result['emptyDeltaInitial'], 0)
+        self.assertEqual(result['emptyDeltaReconnect'], 1)
+        self.assertEqual(result['timersAfterDestroy'], 0)
