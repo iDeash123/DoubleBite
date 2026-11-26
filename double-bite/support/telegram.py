@@ -251,6 +251,12 @@ def build_ticket_card_text(
         status_line = '🔄 Клієнт почав новий діалог'
     elif outcome in ('resolved', 'admin_resolved'):
         status_line = '✅ Завершено'
+    elif ticket.status == TicketStatus.RESOLVED:
+        status_line = (
+            '🤖 Повернуто AI-консьєржу'
+            if session.status == ChatSessionStatus.ACTIVE
+            else '✅ Завершено'
+        )
     elif ticket.status == TicketStatus.IN_PROGRESS or session.assigned_operator_id is not None:
         owner = ticket.assigned_operator or session.assigned_operator
         owner_label = (
@@ -361,7 +367,11 @@ def build_ticket_card_text(
 def _find_ticket_for_session(session_id: Any) -> SupportTicket | None:
     return (
         SupportTicket.objects.select_related(
-            'session', 'session__user', 'order', 'assigned_operator'
+            'session',
+            'session__user',
+            'session__assigned_operator',
+            'order',
+            'assigned_operator',
         )
         .filter(session_id=session_id, telegram_thread_id__isnull=False)
         .order_by('-created_at', '-id')
@@ -399,7 +409,11 @@ def sync_ticket_escalated_to_telegram(ticket_id: int) -> bool:
 
     ticket = (
         SupportTicket.objects.select_related(
-            'session', 'session__user', 'order', 'assigned_operator'
+            'session',
+            'session__user',
+            'session__assigned_operator',
+            'order',
+            'assigned_operator',
         )
         .filter(pk=ticket_id)
         .first()
@@ -424,10 +438,12 @@ def sync_ticket_escalated_to_telegram(ticket_id: int) -> bool:
     if not isinstance(thread_id, int) or isinstance(thread_id, bool) or thread_id <= 0:
         return False
 
-    SupportTicket.objects.filter(
+    updated_rows = SupportTicket.objects.filter(
         pk=ticket.id,
         telegram_thread_id__isnull=True,
     ).update(telegram_thread_id=thread_id)
+    if updated_rows == 0:
+        return False
     ticket.telegram_thread_id = thread_id
 
     card_text = build_ticket_card_text(ticket)
@@ -484,12 +500,13 @@ def sync_customer_message_to_telegram(message_id: int) -> bool:
         ticket is None
         or ticket.telegram_thread_id is None
         or ticket.status == TicketStatus.RESOLVED
+        or ticket.session.status != ChatSessionStatus.ESCALATED
     ):
         return False
 
-    customer_name = html.escape(
+    customer_name = _escape_truncated(
         format_session_customer_name(msg.session),
-        quote=False,
+        160,
     )
     prefix = f'👤 <b>{customer_name}:</b>\n'
     text = _format_telegram_html_message(prefix, msg.content)
@@ -532,12 +549,13 @@ def sync_operator_message_to_telegram(message_id: int) -> bool:
         ticket is None
         or ticket.telegram_thread_id is None
         or ticket.status == TicketStatus.RESOLVED
+        or ticket.session.status != ChatSessionStatus.ESCALATED
     ):
         return False
 
-    operator_name = html.escape(
+    operator_name = _escape_truncated(
         get_operator_display_name(msg.sender_user),
-        quote=False,
+        160,
     )
     prefix = f'💬 <b>[Веб-пульт · {operator_name}]:</b>\n'
     text = _format_telegram_html_message(prefix, msg.content)
@@ -571,7 +589,11 @@ def sync_ticket_card_updated_to_telegram(
 
     ticket = (
         SupportTicket.objects.select_related(
-            'session', 'session__user', 'order', 'assigned_operator'
+            'session',
+            'session__user',
+            'session__assigned_operator',
+            'order',
+            'assigned_operator',
         )
         .filter(pk=ticket_id)
         .first()
@@ -621,7 +643,11 @@ def sync_ticket_claimed_to_telegram(
 
     ticket = (
         SupportTicket.objects.select_related(
-            'session', 'session__user', 'order', 'assigned_operator'
+            'session',
+            'session__user',
+            'session__assigned_operator',
+            'order',
+            'assigned_operator',
         )
         .filter(pk=ticket_id)
         .first()
@@ -669,7 +695,11 @@ def sync_ticket_closed_to_telegram(
 
     ticket = (
         SupportTicket.objects.select_related(
-            'session', 'session__user', 'order', 'assigned_operator'
+            'session',
+            'session__user',
+            'session__assigned_operator',
+            'order',
+            'assigned_operator',
         )
         .filter(pk=ticket_id)
         .first()

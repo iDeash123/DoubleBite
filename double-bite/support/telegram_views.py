@@ -41,6 +41,7 @@ from support.telegram import (
 logger = logging.getLogger('support')
 User = get_user_model()
 _INT32_MAX = 2**31 - 1
+_INT64_MAX = 2**63 - 1
 _VALID_CALLBACK_ACTIONS = frozenset({'claim', 'return_ai', 'resolve'})
 
 
@@ -59,7 +60,7 @@ def _resolve_telegram_operator(from_user: dict[str, Any]) -> tuple[Any | None, s
         tg_display = 'Адміністратор (Telegram)'
 
     tg_user_id = from_user.get('id')
-    if _is_strict_int(tg_user_id) and tg_user_id > 0:
+    if _is_strict_int(tg_user_id) and 1 <= tg_user_id <= _INT64_MAX:
         user = User.objects.filter(telegram_id=tg_user_id, is_active=True).first()
         if user is not None and is_support_operator(user):
             return user, get_operator_display_name(user)
@@ -164,8 +165,12 @@ def _handle_callback_query(
         return JsonResponse({'ok': True, 'status': 'conflict', 'error': str(exc)})
     except (InvalidSessionStateError, SessionNotFoundError) as exc:
         answer_telegram_callback_query(callback_id, str(exc), show_alert=True)
-        ticket.refresh_from_db(fields=['status'])
-        if ticket.status == TicketStatus.RESOLVED:
+        current_status = (
+            SupportTicket.objects.filter(pk=ticket.id)
+            .values_list('status', flat=True)
+            .first()
+        )
+        if current_status == TicketStatus.RESOLVED:
             sync_ticket_card_updated_to_telegram(ticket.id, force_closed=True)
         return JsonResponse({'ok': True, 'status': 'invalid_state', 'error': str(exc)})
 
@@ -192,11 +197,11 @@ def _handle_topic_message(
         return JsonResponse({'ok': True, 'ignored': 'bot_message'})
 
     thread_id = message.get('message_thread_id')
-    if not _is_strict_int(thread_id) or thread_id <= 0:
+    if not _is_strict_int(thread_id) or not (1 <= thread_id <= _INT64_MAX):
         return JsonResponse({'ok': True, 'ignored': 'no_thread_id'})
 
     tg_message_id = message.get('message_id')
-    if not _is_strict_int(tg_message_id) or tg_message_id <= 0:
+    if not _is_strict_int(tg_message_id) or not (1 <= tg_message_id <= _INT64_MAX):
         return JsonResponse({'ok': True, 'ignored': 'invalid_message_id'})
 
     raw_text = message.get('text')

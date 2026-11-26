@@ -760,8 +760,15 @@ class TelegramWebhookTest(TransactionTestCase):
         self.assertIn('closeForumTopic', [m for m, _ in calls_resolve])
 
         # Stale button press on already resolved ticket returns alert and clears buttons
+        # without reverting the card status back to "Очікує на адміністратора"
         # and MUST NOT mutate a newer active ticket on the same session.
-        with patch('support.telegram.httpx.post', return_value=_fake_tg_response(True)) as mock_stale:
+        stale_calls: list[tuple[str, dict]] = []
+
+        def record_stale(url, json=None, timeout=None):
+            stale_calls.append((url.rsplit('/', 1)[-1], dict(json or {})))
+            return _fake_tg_response(True)
+
+        with patch('support.telegram.httpx.post', side_effect=record_stale):
             resp_stale = self.client.post(
                 self.webhook_url,
                 data=json.dumps({
@@ -782,7 +789,10 @@ class TelegramWebhookTest(TransactionTestCase):
             )
         self.assertEqual(resp_stale.status_code, 200)
         self.assertEqual(resp_stale.json()['status'], 'invalid_state')
-        self.assertTrue(mock_stale.called)
+        stale_edit = next(p for m, p in stale_calls if m == 'editMessageText')
+        self.assertEqual(stale_edit['reply_markup'], {'inline_keyboard': []})
+        self.assertIn('✅ Завершено', stale_edit['text'])
+        self.assertNotIn('Очікує на адміністратора', stale_edit['text'])
 
         # Create a fresh ticket on a new escalated session, resolve it via return_ai,
         # re-escalate, and press stale resolve:<old_ticket_id> -> new ticket stays OPEN.
@@ -796,7 +806,13 @@ class TelegramWebhookTest(TransactionTestCase):
             new_t = ChatSessionService.escalate_session(
                 sess_re, TicketReason.COMPLAINT, 'Новий тікет після повернення AI'
             )
-        with patch('support.telegram.httpx.post', return_value=_fake_tg_response(True)):
+        stale_old_calls: list[tuple[str, dict]] = []
+
+        def record_stale_old(url, json=None, timeout=None):
+            stale_old_calls.append((url.rsplit('/', 1)[-1], dict(json or {})))
+            return _fake_tg_response(True)
+
+        with patch('support.telegram.httpx.post', side_effect=record_stale_old):
             resp_stale_old = self.client.post(
                 self.webhook_url,
                 data=json.dumps({
@@ -817,6 +833,10 @@ class TelegramWebhookTest(TransactionTestCase):
             )
         self.assertEqual(resp_stale_old.status_code, 200)
         self.assertEqual(resp_stale_old.json()['status'], 'invalid_state')
+        stale_old_edit = next(p for m, p in stale_old_calls if m == 'editMessageText')
+        self.assertIn('✅ Завершено', stale_old_edit['text'])
+        self.assertNotIn('Очікує на адміністратора', stale_old_edit['text'])
+        self.assertNotIn('В роботі', stale_old_edit['text'])
         new_t.refresh_from_db()
         sess_re.refresh_from_db()
         self.assertEqual(new_t.status, TicketStatus.OPEN)
@@ -1171,3 +1191,120 @@ class TelegramAdminAndCommandTest(TransactionTestCase):
         self.assertIn('message_id', resp.json())
         edited_text = next(p['text'] for m, p in tg_calls if m == 'editMessageText')
         self.assertIn('В роботі · Анна', edited_text)
+
+    @override_settings(**TEST_TELEGRAM_SETTINGS)
+    def test_resolved_ticket_card_fallback_and_int64_overflow_guards(self):
+        customer = User.objects.create_user(
+            email='card-fallback@example.com',
+            password='Password123!',
+            first_name='<' * 140,
+            last_name='&' * 140,
+            role=Role.CUSTOMER,
+        )
+        operator = User.objects.create_user(
+            email='card-op@example.com',
+            password='Password123!',
+            first_name='<' * 140,
+            role=Role.RESTAURANT_ADMIN,
+        )
+        session = ChatSession.objects.create(
+            user=customer,
+            status=ChatSessionStatus.ACTIVE,
+            is_escalated=False,
+        )
+        ticket_returned = SupportTicket.objects.create(
+            session=session,
+            reason=TicketReason.HUMAN_REQUESTED,
+            status=TicketStatus.RESOLVED,
+            assigned_operator=operator,
+        )
+        card_ai = tg.build_ticket_card_text(ticket_returned)
+        self.assertIn('🤖 Повернуто AI-консьєржу', card_ai)
+        self.assertNotIn('Очікує на адміністратора', card_ai)
+        self.assertNotIn('В роботі', card_ai)
+
+        session.status = ChatSessionStatus.RESOLVED
+        session.save(update_fields=['status'])
+        card_resolved = tg.build_ticket_card_text(ticket_returned)
+        self.assertIn('✅ Завершено', card_resolved)
+        self.assertNotIn('Очікує на адміністратора', card_resolved)
+
+        # Long names with HTML entities stay within Telegram's 4096-char message limit
+        session.status = ChatSessionStatus.ESCALATED
+        session.is_escalated = True
+        session.assigned_operator = operator
+        session.save(update_fields=['status', 'is_escalated', 'assigned_operator'])
+        SupportTicket.objects.create(
+            session=session,
+            reason=TicketReason.HUMAN_REQUESTED,
+            status=TicketStatus.IN_PROGRESS,
+            assigned_operator=operator,
+            telegram_thread_id=9301,
+        )
+        cust_msg = ChatMessage.objects.create(
+            session=session,
+            role=MessageRole.USER,
+            source=MessageSource.WEB,
+            content='<' * 2000,
+        )
+        op_msg = ChatMessage.objects.create(
+            session=session,
+            role=MessageRole.OPERATOR,
+            sender_user=operator,
+            source=MessageSource.WEB,
+            content='&' * 2000,
+        )
+        sent_texts: list[str] = []
+
+        def capture_send(url, json=None, timeout=None):
+            if url.endswith('/sendMessage'):
+                sent_texts.append((json or {}).get('text', ''))
+            return _fake_tg_response({'message_id': 9399})
+
+        with patch('support.telegram.httpx.post', side_effect=capture_send):
+            tg.sync_customer_message_to_telegram(cust_msg.id)
+            tg.sync_operator_message_to_telegram(op_msg.id)
+
+        self.assertEqual(len(sent_texts), 2)
+        for text in sent_texts:
+            self.assertLessEqual(len(text), tg.TELEGRAM_MESSAGE_LIMIT)
+            self.assertEqual(text.count('<b>'), text.count('</b>'))
+
+        # Out-of-range > int64 IDs in webhook JSON are ignored cleanly without 500
+        client = Client()
+        huge_id = 2**80
+        resp_huge_thread = client.post(
+            reverse('support:telegram_webhook'),
+            data=json.dumps({
+                'update_id': 9951,
+                'message': {
+                    'message_id': 12345,
+                    'message_thread_id': huge_id,
+                    'chat': {'id': -1001999888777},
+                    'from': {'id': huge_id, 'is_bot': False, 'first_name': 'Test'},
+                    'text': 'Overflow test',
+                },
+            }),
+            content_type='application/json',
+            HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='super-secret-webhook-token',
+        )
+        self.assertEqual(resp_huge_thread.status_code, 200)
+        self.assertEqual(resp_huge_thread.json()['ignored'], 'no_thread_id')
+
+        resp_huge_msg = client.post(
+            reverse('support:telegram_webhook'),
+            data=json.dumps({
+                'update_id': 9952,
+                'message': {
+                    'message_id': huge_id,
+                    'message_thread_id': 9301,
+                    'chat': {'id': -1001999888777},
+                    'from': {'id': huge_id, 'is_bot': False, 'first_name': 'Test'},
+                    'text': 'Overflow msg id test',
+                },
+            }),
+            content_type='application/json',
+            HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='super-secret-webhook-token',
+        )
+        self.assertEqual(resp_huge_msg.status_code, 200)
+        self.assertEqual(resp_huge_msg.json()['ignored'], 'invalid_message_id')
