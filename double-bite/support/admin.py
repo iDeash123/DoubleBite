@@ -124,6 +124,12 @@ class SupportTicketAdmin(admin.ModelAdmin):
                     .order_by('pk')
                 )
 
+            open_ticket_ids = list(
+                SupportTicket.objects.filter(
+                    pk__in=ticket_ids,
+                    status__in=[TicketStatus.OPEN, TicketStatus.IN_PROGRESS],
+                ).values_list('pk', 'telegram_thread_id')
+            )
             SupportTicket.objects.filter(
                 pk__in=ticket_ids,
                 status__in=[TicketStatus.OPEN, TicketStatus.IN_PROGRESS],
@@ -131,6 +137,15 @@ class SupportTicketAdmin(admin.ModelAdmin):
                 status=TicketStatus.RESOLVED,
                 resolved_at=now,
             )
+            from support.telegram import sync_ticket_closed_to_telegram
+
+            for closed_ticket_id, thread_id in open_ticket_ids:
+                if thread_id is not None:
+                    schedule_on_commit(
+                        sync_ticket_closed_to_telegram,
+                        closed_ticket_id,
+                        outcome='admin_resolved',
+                    )
 
             if session_ids:
                 open_session_ids = set(

@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import desk_views, views
+from . import desk_views, telegram_views, views
 
 app_name = 'support'
 
@@ -11,6 +11,7 @@ urlpatterns = [
     path('chat/reset/', views.chat_reset_view, name='chat_reset'),
     path('chat/history/', views.chat_history_view, name='chat_history'),
     path('chat/events/', views.chat_events_view, name='chat_events'),
+    path('telegram/webhook/', telegram_views.telegram_webhook_view, name='telegram_webhook'),
     path('desk/', desk_views.desk_index_view, name='desk_index'),
     path('desk/events/', desk_views.desk_events_view, name='desk_events'),
     path(

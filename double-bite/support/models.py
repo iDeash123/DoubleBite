@@ -166,6 +166,12 @@ class ChatMessage(models.Model):
         choices=MessageSource.choices,
         default=MessageSource.WEB,
     )
+    telegram_message_id = models.BigIntegerField(
+        'Telegram Message ID',
+        null=True,
+        blank=True,
+        unique=True,
+    )
     content = models.TextField(
         'Вміст повідомлення',
         blank=True,
@@ -233,6 +239,17 @@ class SupportTicket(models.Model):
         blank=True,
         related_name='assigned_support_tickets',
         verbose_name='Призначений оператор',
+    )
+    telegram_thread_id = models.BigIntegerField(
+        'Telegram Topic ID',
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    telegram_control_message_id = models.BigIntegerField(
+        'Telegram Control Message ID',
+        null=True,
+        blank=True,
     )
     created_at = models.DateTimeField('Створено', auto_now_add=True)
     resolved_at = models.DateTimeField('Вирішено о', null=True, blank=True)

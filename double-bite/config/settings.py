@@ -56,6 +56,11 @@ is_testing = (
 )
 IS_TESTING = is_testing
 
+TELEGRAM_BOT_ENABLED = False if is_testing else env_bool('TELEGRAM_BOT_ENABLED', False)
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '').strip()
+TELEGRAM_SUPPORT_CHAT_ID = os.getenv('TELEGRAM_SUPPORT_CHAT_ID', '').strip()
+TELEGRAM_WEBHOOK_SECRET = os.getenv('TELEGRAM_WEBHOOK_SECRET', '').strip()
+
 DJANGO_ADMIN_URL = normalize_admin_url(os.getenv('DJANGO_ADMIN_URL', 'admin/'))
 
 SECRET_KEY = os.getenv('SECRET_KEY', '')

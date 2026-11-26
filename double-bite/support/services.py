@@ -635,7 +635,16 @@ class ChatSessionService:
                         .order_by('pk')
                     )
                     locked_sessions.extend(locked_guest_sessions)
-                _resolve_sessions_and_tickets(locked_sessions, timezone.now())
+                closed_tickets = _resolve_sessions_and_tickets(locked_sessions, timezone.now())
+                from support.telegram import sync_ticket_closed_to_telegram
+
+                for closed_ticket in closed_tickets:
+                    if closed_ticket.telegram_thread_id is not None:
+                        schedule_on_commit(
+                            sync_ticket_closed_to_telegram,
+                            closed_ticket.id,
+                            outcome='client_reset',
+                        )
                 for old_session in locked_sessions:
                     schedule_on_commit(
                         publish_session_event,
@@ -705,7 +714,16 @@ class ChatSessionService:
                 )
                 .order_by('pk')
             )
-            _resolve_sessions_and_tickets(locked_sessions, timezone.now())
+            closed_tickets = _resolve_sessions_and_tickets(locked_sessions, timezone.now())
+            from support.telegram import sync_ticket_closed_to_telegram
+
+            for closed_ticket in closed_tickets:
+                if closed_ticket.telegram_thread_id is not None:
+                    schedule_on_commit(
+                        sync_ticket_closed_to_telegram,
+                        closed_ticket.id,
+                        outcome='client_reset',
+                    )
             for old_session in locked_sessions:
                 schedule_on_commit(
                     publish_session_event,
@@ -873,8 +891,10 @@ class ChatSessionService:
             _sync_session_attrs(session, locked_session)
 
             from support.emails import send_ticket_escalated_email
+            from support.telegram import sync_ticket_escalated_to_telegram
 
             schedule_on_commit(send_ticket_escalated_email, ticket)
+            schedule_on_commit(sync_ticket_escalated_to_telegram, ticket.id)
             schedule_on_commit(
                 publish_session_event,
                 locked_session.session_uuid,
@@ -911,9 +931,9 @@ class ChatSessionService:
 def _resolve_sessions_and_tickets(
     locked_sessions: list[ChatSession],
     now: datetime,
-) -> None:
+) -> list[SupportTicket]:
     if not locked_sessions:
-        return
+        return []
     session_pks = [s.pk for s in locked_sessions]
     open_tickets = list(
         SupportTicket.objects.select_for_update()
@@ -937,6 +957,7 @@ def _resolve_sessions_and_tickets(
         assigned_at=None,
         updated_at=now,
     )
+    return open_tickets
 
 
 def _resolve_customer_phone(
@@ -1109,6 +1130,20 @@ def _proactive_takeover_locked(
         },
         session_uuid=locked_session.session_uuid,
     )
+    from support.telegram import (
+        sync_ticket_claimed_to_telegram,
+        sync_ticket_escalated_to_telegram,
+    )
+
+    if ticket.telegram_thread_id is None:
+        schedule_on_commit(sync_ticket_escalated_to_telegram, ticket.id)
+    else:
+        schedule_on_commit(
+            sync_ticket_claimed_to_telegram,
+            ticket.id,
+            operator_name=get_operator_display_name(operator),
+            is_takeover=True,
+        )
     return DeskActionResult(
         session=locked_session,
         ticket=ticket,
@@ -1121,14 +1156,41 @@ class SupportDeskService:
     def claim_session(
         session: ChatSession | uuid.UUID | str,
         operator: Any,
+        *,
+        source: str = MessageSource.WEB,
+        actor_name: str = '',
+        expected_ticket_id: int | None = None,
     ) -> DeskActionResult:
-        _require_operator(operator)
+        validated_source = _validate_message_source(
+            source, allowed=_OPERATOR_MESSAGE_SOURCES
+        )
+        _require_operator(
+            operator,
+            allow_none=(validated_source == MessageSource.TELEGRAM),
+        )
+        resolved_actor = (
+            get_operator_display_name(operator)
+            if operator is not None
+            else (actor_name.strip() or 'Адміністратор (Telegram)')
+        )
         with _sqlite_support_guard(), transaction.atomic():
             locked_session = _lock_session(session)
             if locked_session.status != ChatSessionStatus.ESCALATED:
                 raise InvalidSessionStateError(
                     'Взяти в роботу можна лише ескальовану сесію.'
                 )
+
+            if expected_ticket_id is not None:
+                expected_ticket = (
+                    SupportTicket.objects.select_for_update()
+                    .filter(pk=expected_ticket_id, session=locked_session)
+                    .first()
+                )
+                if (
+                    expected_ticket is None
+                    or expected_ticket.status not in _OPEN_TICKET_STATUSES
+                ):
+                    raise InvalidSessionStateError('Тікет вже закрито.')
 
             ticket = (
                 SupportTicket.objects.select_for_update()
@@ -1138,7 +1200,7 @@ class SupportDeskService:
             )
 
             if locked_session.assigned_operator_id is not None:
-                if locked_session.assigned_operator_id != operator.id:
+                if operator is None or locked_session.assigned_operator_id != operator.id:
                     owner = locked_session.assigned_operator
                     raise SessionOwnershipConflictError(
                         f'Діалог вже веде {get_operator_display_name(owner)}.',
@@ -1158,38 +1220,61 @@ class SupportDeskService:
                     system_message=None,
                 )
 
+            if (
+                operator is None
+                and ticket is not None
+                and ticket.status == TicketStatus.IN_PROGRESS
+            ):
+                raise SessionOwnershipConflictError(
+                    'Звернення вже взято в роботу.',
+                    owner=None,
+                )
+
             now = timezone.now()
-            sys_msg = ChatMessage.objects.create(
-                session=locked_session,
-                role=MessageRole.SYSTEM,
-                source=MessageSource.SYSTEM,
-                content='До діалогу підключився адміністратор ресторану.',
+            already_in_progress = (
+                ticket is not None and ticket.status == TicketStatus.IN_PROGRESS
             )
-            locked_session.assigned_operator = operator
-            locked_session.assigned_at = now
-            locked_session.last_message_at = sys_msg.created_at
-            locked_session.updated_at = sys_msg.created_at
-            locked_session.save(
-                update_fields=[
-                    'assigned_operator',
-                    'assigned_at',
-                    'last_message_at',
-                    'updated_at',
-                ]
-            )
+            sys_msg: ChatMessage | None = None
+            session_update_fields = ['updated_at']
+            if not already_in_progress:
+                sys_msg = ChatMessage.objects.create(
+                    session=locked_session,
+                    role=MessageRole.SYSTEM,
+                    source=MessageSource.SYSTEM,
+                    content='До діалогу підключився адміністратор ресторану.',
+                )
+                locked_session.last_message_at = sys_msg.created_at
+                locked_session.updated_at = sys_msg.created_at
+                session_update_fields.append('last_message_at')
+            else:
+                locked_session.updated_at = now
+
+            if operator is not None:
+                locked_session.assigned_operator = operator
+                locked_session.assigned_at = now
+                session_update_fields.extend(['assigned_operator', 'assigned_at'])
+
+            locked_session.save(update_fields=session_update_fields)
             if ticket is not None:
-                ticket.status = TicketStatus.IN_PROGRESS
-                ticket.assigned_operator = operator
-                ticket.save(update_fields=['status', 'assigned_operator'])
+                ticket_fields: list[str] = []
+                if ticket.status != TicketStatus.IN_PROGRESS:
+                    ticket.status = TicketStatus.IN_PROGRESS
+                    ticket_fields.append('status')
+                if operator is not None and ticket.assigned_operator_id != operator.id:
+                    ticket.assigned_operator = operator
+                    ticket_fields.append('assigned_operator')
+                if ticket_fields:
+                    ticket.save(update_fields=ticket_fields)
 
             _sync_session_attrs(session, locked_session)
-            schedule_on_commit(
-                publish_session_event,
-                locked_session.session_uuid,
-                'message',
-                build_message_event_data(sys_msg, session=locked_session),
-                event_id=sys_msg.id,
-            )
+            if sys_msg is not None:
+                schedule_on_commit(
+                    publish_session_event,
+                    locked_session.session_uuid,
+                    'message',
+                    build_message_event_data(sys_msg, session=locked_session),
+                    event_id=sys_msg.id,
+                )
             schedule_on_commit(
                 publish_session_event,
                 locked_session.session_uuid,
@@ -1210,11 +1295,20 @@ class SupportDeskService:
                     'session_uuid': str(locked_session.session_uuid),
                     'ticket_id': ticket.id if ticket is not None else None,
                     'status': ChatSessionStatus.ESCALATED,
-                    'assigned_operator_id': operator.id,
-                    'assigned_operator_name': get_operator_display_name(operator),
+                    'assigned_operator_id': operator.id if operator is not None else None,
+                    'assigned_operator_name': resolved_actor,
                 },
                 session_uuid=locked_session.session_uuid,
             )
+            if ticket is not None:
+                from support.telegram import sync_ticket_claimed_to_telegram
+
+                schedule_on_commit(
+                    sync_ticket_claimed_to_telegram,
+                    ticket.id,
+                    operator_name=resolved_actor,
+                    is_takeover=False,
+                )
             return DeskActionResult(
                 session=locked_session,
                 ticket=ticket,
@@ -1355,6 +1449,15 @@ class SupportDeskService:
                 },
                 session_uuid=locked_session.session_uuid,
             )
+            if ticket is not None:
+                from support.telegram import sync_ticket_claimed_to_telegram
+
+                schedule_on_commit(
+                    sync_ticket_claimed_to_telegram,
+                    ticket.id,
+                    operator_name=get_operator_display_name(operator),
+                    is_takeover=had_previous_operator,
+                )
             return DeskActionResult(
                 session=locked_session,
                 ticket=ticket,
@@ -1408,6 +1511,9 @@ class SupportDeskService:
                 },
                 session_uuid=locked_session.session_uuid,
             )
+            from support.telegram import sync_customer_message_to_telegram
+
+            schedule_on_commit(sync_customer_message_to_telegram, msg.id)
             return msg
 
     @staticmethod
@@ -1417,6 +1523,8 @@ class SupportDeskService:
         content: str,
         *,
         source: str = MessageSource.WEB,
+        telegram_message_id: int | None = None,
+        actor_name: str = '',
     ) -> ChatMessage:
         validated_source = _validate_message_source(
             source, allowed=_OPERATOR_MESSAGE_SOURCES
@@ -1426,9 +1534,31 @@ class SupportDeskService:
             allow_none=(validated_source == MessageSource.TELEGRAM),
         )
         cleaned = _validate_message_content(content)
+        if telegram_message_id is not None and (
+            isinstance(telegram_message_id, bool)
+            or not isinstance(telegram_message_id, int)
+            or telegram_message_id <= 0
+        ):
+            raise ValueError('telegram_message_id must be a positive integer')
+
+        resolved_tg_actor = (
+            get_operator_display_name(operator)
+            if operator is not None
+            else (actor_name.strip() or 'Адміністратор (Telegram)')
+        )
 
         with _sqlite_support_guard(), transaction.atomic():
             locked_session = _lock_session(session)
+            if telegram_message_id is not None:
+                existing_msg = (
+                    ChatMessage.objects.select_related('session', 'sender_user')
+                    .filter(telegram_message_id=telegram_message_id)
+                    .first()
+                )
+                if existing_msg is not None:
+                    _sync_session_attrs(session, locked_session)
+                    return existing_msg
+
             if locked_session.status != ChatSessionStatus.ESCALATED:
                 raise InvalidSessionStateError(
                     'Відповідати можна лише в ескальованій сесії.'
@@ -1442,6 +1572,7 @@ class SupportDeskService:
 
             auto_join_sys_msg: ChatMessage | None = None
             auto_join_ticket: SupportTicket | None = None
+            operator_assigned_now = False
             if validated_source == MessageSource.TELEGRAM:
                 ticket = (
                     SupportTicket.objects.select_for_update()
@@ -1469,6 +1600,7 @@ class SupportDeskService:
                     locked_session.assigned_operator = operator
                     locked_session.assigned_at = timezone.now()
                     session_update_fields.extend(['assigned_operator', 'assigned_at'])
+                    operator_assigned_now = True
                     if not was_already_in_progress:
                         became_in_progress = True
                 if became_in_progress:
@@ -1491,13 +1623,28 @@ class SupportDeskService:
                         owner=owner,
                     )
 
-            msg = ChatMessage.objects.create(
-                session=locked_session,
-                role=MessageRole.OPERATOR,
-                sender_user=operator,
-                source=validated_source,
-                content=cleaned,
-            )
+            try:
+                with transaction.atomic():
+                    msg = ChatMessage.objects.create(
+                        session=locked_session,
+                        role=MessageRole.OPERATOR,
+                        sender_user=operator,
+                        source=validated_source,
+                        telegram_message_id=telegram_message_id,
+                        content=cleaned,
+                    )
+            except IntegrityError:
+                if telegram_message_id is not None:
+                    existing_msg = (
+                        ChatMessage.objects.select_related('session', 'sender_user')
+                        .filter(telegram_message_id=telegram_message_id)
+                        .first()
+                    )
+                    if existing_msg is not None:
+                        _sync_session_attrs(session, locked_session)
+                        return existing_msg
+                raise
+
             locked_session.last_message_at = msg.created_at
             locked_session.operator_last_read_id = max(
                 locked_session.operator_last_read_id,
@@ -1517,6 +1664,7 @@ class SupportDeskService:
                     ),
                     event_id=auto_join_sys_msg.id,
                 )
+            if auto_join_sys_msg is not None or operator_assigned_now:
                 schedule_on_commit(
                     publish_session_event,
                     locked_session.session_uuid,
@@ -1529,6 +1677,18 @@ class SupportDeskService:
                         reason='telegram_auto_claim',
                     ),
                 )
+            if (
+                validated_source == MessageSource.TELEGRAM
+                and auto_join_ticket is not None
+                and (auto_join_sys_msg is not None or operator_assigned_now)
+            ):
+                from support.telegram import sync_ticket_card_updated_to_telegram
+
+                schedule_on_commit(
+                    sync_ticket_card_updated_to_telegram,
+                    auto_join_ticket.id,
+                    actor_name=resolved_tg_actor,
+                )
             schedule_on_commit(
                 publish_session_event,
                 locked_session.session_uuid,
@@ -1539,7 +1699,7 @@ class SupportDeskService:
                     operator_name=(
                         get_operator_display_name(operator)
                         if operator is not None
-                        else 'Адміністратор ресторану'
+                        else (actor_name.strip() or 'Адміністратор ресторану')
                     ),
                 ),
                 event_id=msg.id,
@@ -1555,6 +1715,10 @@ class SupportDeskService:
                 },
                 session_uuid=locked_session.session_uuid,
             )
+            if validated_source == MessageSource.WEB:
+                from support.telegram import sync_operator_message_to_telegram
+
+                schedule_on_commit(sync_operator_message_to_telegram, msg.id)
             return msg
 
     @staticmethod
@@ -1563,6 +1727,8 @@ class SupportDeskService:
         operator: Any,
         *,
         source: str = MessageSource.WEB,
+        actor_name: str = '',
+        expected_ticket_id: int | None = None,
     ) -> DeskActionResult:
         validated_source = _validate_message_source(
             source, allowed=_OPERATOR_MESSAGE_SOURCES
@@ -1571,12 +1737,29 @@ class SupportDeskService:
             operator,
             allow_none=(validated_source == MessageSource.TELEGRAM),
         )
+        resolved_actor = (
+            get_operator_display_name(operator)
+            if operator is not None
+            else actor_name.strip()
+        )
         with _sqlite_support_guard(), transaction.atomic():
             locked_session = _lock_session(session)
             if locked_session.status != ChatSessionStatus.ESCALATED:
                 raise InvalidSessionStateError(
                     'Повернути AI можна лише для ескальованої сесії.'
                 )
+
+            if expected_ticket_id is not None:
+                expected_ticket = (
+                    SupportTicket.objects.select_for_update()
+                    .filter(pk=expected_ticket_id, session=locked_session)
+                    .first()
+                )
+                if (
+                    expected_ticket is None
+                    or expected_ticket.status not in _OPEN_TICKET_STATUSES
+                ):
+                    raise InvalidSessionStateError('Тікет вже закрито.')
 
             now = timezone.now()
             open_tickets = list(
@@ -1651,6 +1834,15 @@ class SupportDeskService:
                 },
                 session_uuid=locked_session.session_uuid,
             )
+            if ticket is not None:
+                from support.telegram import sync_ticket_closed_to_telegram
+
+                schedule_on_commit(
+                    sync_ticket_closed_to_telegram,
+                    ticket.id,
+                    outcome='returned_to_ai',
+                    actor_name=resolved_actor,
+                )
             return DeskActionResult(
                 session=locked_session,
                 ticket=ticket,
@@ -1663,6 +1855,8 @@ class SupportDeskService:
         operator: Any,
         *,
         source: str = MessageSource.WEB,
+        actor_name: str = '',
+        expected_ticket_id: int | None = None,
     ) -> DeskActionResult:
         validated_source = _validate_message_source(
             source, allowed=_OPERATOR_MESSAGE_SOURCES
@@ -1671,10 +1865,27 @@ class SupportDeskService:
             operator,
             allow_none=(validated_source == MessageSource.TELEGRAM),
         )
+        resolved_actor = (
+            get_operator_display_name(operator)
+            if operator is not None
+            else actor_name.strip()
+        )
         with _sqlite_support_guard(), transaction.atomic():
             locked_session = _lock_session(session)
             if locked_session.status not in _ACTIVE_SESSION_STATUSES:
                 raise InvalidSessionStateError('Сесію чату вже завершено.')
+
+            if expected_ticket_id is not None:
+                expected_ticket = (
+                    SupportTicket.objects.select_for_update()
+                    .filter(pk=expected_ticket_id, session=locked_session)
+                    .first()
+                )
+                if (
+                    expected_ticket is None
+                    or expected_ticket.status not in _OPEN_TICKET_STATUSES
+                ):
+                    raise InvalidSessionStateError('Тікет вже закрито.')
 
             now = timezone.now()
             open_tickets = list(
@@ -1749,6 +1960,15 @@ class SupportDeskService:
                 },
                 session_uuid=locked_session.session_uuid,
             )
+            if ticket is not None:
+                from support.telegram import sync_ticket_closed_to_telegram
+
+                schedule_on_commit(
+                    sync_ticket_closed_to_telegram,
+                    ticket.id,
+                    outcome='resolved',
+                    actor_name=resolved_actor,
+                )
             return DeskActionResult(
                 session=locked_session,
                 ticket=ticket,

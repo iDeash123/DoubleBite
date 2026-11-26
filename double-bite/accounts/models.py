@@ -73,6 +73,12 @@ class User(AbstractUser):
         choices=Role.choices,
         default=Role.CUSTOMER,
     )
+    telegram_id = models.BigIntegerField(
+        'Telegram ID',
+        null=True,
+        blank=True,
+        unique=True,
+    )
     created_at = models.DateTimeField('Дата створення', auto_now_add=True)
 
     USERNAME_FIELD = 'email'
