@@ -32,7 +32,7 @@ from orders.middleware import (
     PRE_LOGIN_GUEST_TOKEN_SESSION_KEY,
 )
 
-from support.agent.client import MistralSupportAgent
+from support.agent.client import GeminiSupportAgent
 from support.agent.prompts import SYSTEM_PROMPT
 from support.agent.tools import execute_agent_tool
 from support.models import (
@@ -1063,8 +1063,8 @@ class OperatorHistoryAndPromptTest(TestCase):
             f'{OPERATOR_HISTORY_PREFIX}Ми вже готуємо нову гарячу піцу безкоштовно.',
         )
 
-    @patch('support.agent.client.Mistral')
-    async def test_mistral_agent_receives_operator_context_mapped_to_assistant(self, mock_mistral_cls):
+    @patch('support.agent.client.GeminiClient')
+    async def test_gemini_agent_receives_operator_context_mapped_to_assistant(self, mock_gemini_cls):
         from asgiref.sync import sync_to_async
 
         def setup_session():
@@ -1114,9 +1114,9 @@ class OperatorHistoryAndPromptTest(TestCase):
 
         mock_client = AsyncMock()
         mock_client.chat.stream_async.side_effect = fake_stream_async
-        mock_mistral_cls.return_value.__aenter__.return_value = mock_client
+        mock_gemini_cls.return_value.__aenter__.return_value = mock_client
 
-        agent = MistralSupportAgent(api_key='fake-key')
+        agent = GeminiSupportAgent(api_key='fake-key')
         events = [ev async for ev in agent.stream_chat_response(history)]
         self.assertEqual(events, [{'token': 'Заміна вже у дорозі!'}])
 
@@ -1125,9 +1125,9 @@ class OperatorHistoryAndPromptTest(TestCase):
         self.assertIn(OPERATOR_HISTORY_PREFIX, captured_messages[2]['content'])
         self.assertIn('Відправили заміну курʼєром.', captured_messages[2]['content'])
 
-    @patch('support.agent.client.Mistral')
-    async def test_mistral_agent_coalesces_consecutive_roles_and_drops_leading_assistant(
-        self, mock_mistral_cls
+    @patch('support.agent.client.GeminiClient')
+    async def test_gemini_agent_coalesces_consecutive_roles_and_drops_leading_assistant(
+        self, mock_gemini_cls
     ):
         class _MockStream:
             def __aiter__(self):
@@ -1158,9 +1158,9 @@ class OperatorHistoryAndPromptTest(TestCase):
 
         mock_client = AsyncMock()
         mock_client.chat.stream_async.side_effect = fake_stream_async
-        mock_mistral_cls.return_value.__aenter__.return_value = mock_client
+        mock_gemini_cls.return_value.__aenter__.return_value = mock_client
 
-        agent = MistralSupportAgent(api_key='fake-key')
+        agent = GeminiSupportAgent(api_key='fake-key')
 
         # 1) Realistic AI-escalation -> assistant reply -> 2 operator replies -> return_to_ai -> user
         history_after_handoff = [

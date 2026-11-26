@@ -26,7 +26,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from orders.middleware import get_guest_token
 
 from support import services as support_services
-from support.agent.client import MistralSupportAgent
+from support.agent.client import GeminiSupportAgent
 from support.models import (
     ChatMessage,
     ChatSession,
@@ -358,7 +358,7 @@ async def chat_stream_view(request: HttpRequest) -> HttpResponse:
     )
 
     history = await sync_to_async(_get_history, thread_sensitive=True)(session_uuid)
-    agent = MistralSupportAgent()
+    agent = GeminiSupportAgent()
 
     async def event_generator() -> AsyncGenerator[str, None]:
         assistant_chunks: list[str] = []

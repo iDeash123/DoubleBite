@@ -7,7 +7,7 @@ from django.test import RequestFactory, TestCase
 from menu.models import Category, Dish
 from orders.models import Order, OrderStatus
 
-from support.agent.client import MistralSupportAgent
+from support.agent.client import GeminiSupportAgent
 from support.agent.prompts import SYSTEM_PROMPT
 from support.models import ChatSession
 
@@ -74,7 +74,7 @@ class MockAsyncStream:
         self.closed = True
 
 
-class MistralSupportAgentTest(TestCase):
+class GeminiSupportAgentTest(TestCase):
     def setUp(self):
         self.factory = RequestFactory()
         self.user = User.objects.create_user(
@@ -113,16 +113,16 @@ class MistralSupportAgentTest(TestCase):
         return request
 
     def test_agent_initialization(self):
-        agent = MistralSupportAgent(
+        agent = GeminiSupportAgent(
             api_key='test-key',
-            model='mistral-large-latest',
+            model='gemini-2.5-pro',
             temperature=0.5,
             max_tokens=512,
             timeout_ms=12000,
             max_rounds=4,
         )
         self.assertEqual(agent.api_key, 'test-key')
-        self.assertEqual(agent.model, 'mistral-large-latest')
+        self.assertEqual(agent.model, 'gemini-2.5-pro')
         self.assertEqual(agent.temperature, 0.5)
         self.assertEqual(agent.max_tokens, 512)
         self.assertEqual(agent.timeout_ms, 12000)
@@ -136,7 +136,7 @@ class MistralSupportAgentTest(TestCase):
         self.assertIn('+380 44 123 45 67', SYSTEM_PROMPT)
 
     async def test_missing_api_key_yields_message(self):
-        agent = MistralSupportAgent(api_key='')
+        agent = GeminiSupportAgent(api_key='')
         tokens = []
         async for event in agent.stream_chat_response([{'role': 'user', 'content': 'Привіт'}]):
             if 'token' in event:
@@ -144,12 +144,12 @@ class MistralSupportAgentTest(TestCase):
         self.assertTrue(len(tokens) > 0)
         self.assertIn('тимчасово недоступний', tokens[0])
 
-    @patch('support.agent.client.Mistral')
+    @patch('support.agent.client.GeminiClient')
     async def test_direct_response_streams_via_stream_async_with_timeouts_and_max_tokens(
-        self, mock_mistral_cls
+        self, mock_gemini_cls
     ):
         mock_client = AsyncMock()
-        mock_mistral_cls.return_value.__aenter__.return_value = mock_client
+        mock_gemini_cls.return_value.__aenter__.return_value = mock_client
 
         stream = MockAsyncStream([
             MockChunk('Доброго дня! '),
@@ -157,7 +157,7 @@ class MistralSupportAgentTest(TestCase):
         ])
         mock_client.chat.stream_async.return_value = stream
 
-        agent = MistralSupportAgent(api_key='fake-key', max_tokens=777, timeout_ms=18000)
+        agent = GeminiSupportAgent(api_key='fake-key', max_tokens=777, timeout_ms=18000)
         events = []
         async for ev in agent.stream_chat_response([{'role': 'user', 'content': 'Привіт'}]):
             events.append(ev)
@@ -166,7 +166,7 @@ class MistralSupportAgentTest(TestCase):
             events,
             [{'token': 'Доброго дня! '}, {'token': 'Чим можу допомогти?'}],
         )
-        mock_mistral_cls.assert_called_once_with(api_key='fake-key', timeout_ms=18000)
+        mock_gemini_cls.assert_called_once_with(api_key='fake-key', timeout_ms=18000)
         mock_client.chat.complete_async.assert_not_called()
         mock_client.chat.stream_async.assert_called_once()
         call_kwargs = mock_client.chat.stream_async.call_args.kwargs
@@ -175,10 +175,10 @@ class MistralSupportAgentTest(TestCase):
         self.assertIn('tools', call_kwargs)
         self.assertTrue(stream.closed)
 
-    @patch('support.agent.client.Mistral')
-    async def test_response_with_tool_call_check_order(self, mock_mistral_cls):
+    @patch('support.agent.client.GeminiClient')
+    async def test_response_with_tool_call_check_order(self, mock_gemini_cls):
         mock_client = AsyncMock()
-        mock_mistral_cls.return_value.__aenter__.return_value = mock_client
+        mock_gemini_cls.return_value.__aenter__.return_value = mock_client
 
         tc_chunk = MockChunk(
             tool_calls=[
@@ -200,7 +200,7 @@ class MistralSupportAgentTest(TestCase):
         ]
 
         req = self._get_request()
-        agent = MistralSupportAgent(api_key='fake-key')
+        agent = GeminiSupportAgent(api_key='fake-key')
         tokens = []
         async for ev in agent.stream_chat_response(
             [{'role': 'user', 'content': 'Де моє замовлення DB-4001?'}],
@@ -215,10 +215,10 @@ class MistralSupportAgentTest(TestCase):
         mock_client.chat.complete_async.assert_not_called()
         self.assertEqual(mock_client.chat.stream_async.call_count, 2)
 
-    @patch('support.agent.client.Mistral')
-    async def test_response_with_tool_call_escalate(self, mock_mistral_cls):
+    @patch('support.agent.client.GeminiClient')
+    async def test_response_with_tool_call_escalate(self, mock_gemini_cls):
         mock_client = AsyncMock()
-        mock_mistral_cls.return_value.__aenter__.return_value = mock_client
+        mock_gemini_cls.return_value.__aenter__.return_value = mock_client
 
         tc_chunk = MockChunk(
             tool_calls=[
@@ -239,7 +239,7 @@ class MistralSupportAgentTest(TestCase):
         ]
 
         req = self._get_request()
-        agent = MistralSupportAgent(api_key='fake-key')
+        agent = GeminiSupportAgent(api_key='fake-key')
         events = []
         async for ev in agent.stream_chat_response(
             [{'role': 'user', 'content': 'Поклич людину терміново!'}],
@@ -253,10 +253,10 @@ class MistralSupportAgentTest(TestCase):
         self.assertTrue(esc_event['escalated'])
         self.assertEqual(esc_event['support_phone'], '+380 44 123 45 67')
 
-    @patch('support.agent.client.Mistral')
-    async def test_response_with_tool_call_cart_flushes_after_streamed_text(self, mock_mistral_cls):
+    @patch('support.agent.client.GeminiClient')
+    async def test_response_with_tool_call_cart_flushes_after_streamed_text(self, mock_gemini_cls):
         mock_client = AsyncMock()
-        mock_mistral_cls.return_value.__aenter__.return_value = mock_client
+        mock_gemini_cls.return_value.__aenter__.return_value = mock_client
 
         tc_chunk = MockChunk(
             tool_calls=[
@@ -274,7 +274,7 @@ class MistralSupportAgentTest(TestCase):
         ]
 
         req = self._get_request()
-        agent = MistralSupportAgent(api_key='fake-key')
+        agent = GeminiSupportAgent(api_key='fake-key')
         events = []
         async for ev in agent.stream_chat_response(
             [{'role': 'user', 'content': 'Додай кальцоне в кошик'}],
@@ -289,12 +289,12 @@ class MistralSupportAgentTest(TestCase):
         self.assertTrue(events[cart_idx]['cart_mutation'])
         self.assertEqual(events[cart_idx]['cart_items_count'], 1)
 
-    @patch('support.agent.client.Mistral')
+    @patch('support.agent.client.GeminiClient')
     async def test_multi_round_tool_chain_search_then_add_to_cart_then_reply(
-        self, mock_mistral_cls
+        self, mock_gemini_cls
     ):
         mock_client = AsyncMock()
-        mock_mistral_cls.return_value.__aenter__.return_value = mock_client
+        mock_gemini_cls.return_value.__aenter__.return_value = mock_client
 
         round1_chunks = [
             MockChunk(
@@ -339,7 +339,7 @@ class MistralSupportAgentTest(TestCase):
         ]
 
         req = self._get_request()
-        agent = MistralSupportAgent(api_key='fake-key', max_rounds=3)
+        agent = GeminiSupportAgent(api_key='fake-key', max_rounds=3)
         events = []
         async for ev in agent.stream_chat_response(
             [{'role': 'user', 'content': 'Знайди кальцоне і додай 2 шт'}],
@@ -356,12 +356,12 @@ class MistralSupportAgentTest(TestCase):
         self.assertEqual(cart_ev['cart_items_count'], 2)
         self.assertEqual(events[-1], cart_ev)
 
-    @patch('support.agent.client.Mistral')
+    @patch('support.agent.client.GeminiClient')
     async def test_max_rounds_exhaustion_runs_final_stream_without_tools(
-        self, mock_mistral_cls
+        self, mock_gemini_cls
     ):
         mock_client = AsyncMock()
-        mock_mistral_cls.return_value.__aenter__.return_value = mock_client
+        mock_gemini_cls.return_value.__aenter__.return_value = mock_client
 
         r1 = MockAsyncStream([
             MockChunk(
@@ -391,7 +391,7 @@ class MistralSupportAgentTest(TestCase):
         mock_client.chat.stream_async.side_effect = [r1, r2, final_r3]
 
         req = self._get_request()
-        agent = MistralSupportAgent(api_key='fake-key', max_rounds=2, max_tokens=500, timeout_ms=15000)
+        agent = GeminiSupportAgent(api_key='fake-key', max_rounds=2, max_tokens=500, timeout_ms=15000)
         events = []
         async for ev in agent.stream_chat_response(
             [{'role': 'user', 'content': 'Знайди і додай кальцоне'}],
@@ -409,12 +409,12 @@ class MistralSupportAgentTest(TestCase):
         self.assertTrue(events[-1]['cart_mutation'])
 
     @patch('support.agent.client.execute_agent_tool')
-    @patch('support.agent.client.Mistral')
+    @patch('support.agent.client.GeminiClient')
     async def test_malformed_tool_args_return_error_json_without_crashing(
-        self, mock_mistral_cls, mock_exec_tool
+        self, mock_gemini_cls, mock_exec_tool
     ):
         mock_client = AsyncMock()
-        mock_mistral_cls.return_value.__aenter__.return_value = mock_client
+        mock_gemini_cls.return_value.__aenter__.return_value = mock_client
 
         bad_calls = [
             MockDeltaToolCall(index=0, call_id='c0', name='search_dishes', arguments='null'),
@@ -432,7 +432,7 @@ class MistralSupportAgentTest(TestCase):
 
         mock_client.chat.stream_async.side_effect = fake_stream_async
 
-        agent = MistralSupportAgent(api_key='fake-key')
+        agent = GeminiSupportAgent(api_key='fake-key')
         events = []
         async for ev in agent.stream_chat_response([{'role': 'user', 'content': 'Тест'}]):
             events.append(ev)
@@ -449,10 +449,10 @@ class MistralSupportAgentTest(TestCase):
                 {'error': 'Invalid tool arguments, expected JSON object'},
             )
 
-    @patch('support.agent.client.Mistral')
-    async def test_empty_choices_none_data_and_think_chunks_ignored(self, mock_mistral_cls):
+    @patch('support.agent.client.GeminiClient')
+    async def test_empty_choices_none_data_and_think_chunks_ignored(self, mock_gemini_cls):
         mock_client = AsyncMock()
-        mock_mistral_cls.return_value.__aenter__.return_value = mock_client
+        mock_gemini_cls.return_value.__aenter__.return_value = mock_client
 
         think_part = MagicMock()
         think_part.type = 'thinking'
@@ -468,7 +468,7 @@ class MistralSupportAgentTest(TestCase):
         ]
         mock_client.chat.stream_async.return_value = MockAsyncStream(chunks)
 
-        agent = MistralSupportAgent(api_key='fake-key')
+        agent = GeminiSupportAgent(api_key='fake-key')
         events = []
         async for ev in agent.stream_chat_response([{'role': 'user', 'content': 'Привіт'}]):
             events.append(ev)
@@ -477,12 +477,12 @@ class MistralSupportAgentTest(TestCase):
 
     @patch('support.agent.client.asyncio.sleep', new_callable=AsyncMock)
     @patch('support.agent.client._SYSTEM_RANDOM')
-    @patch('support.agent.client.Mistral')
+    @patch('support.agent.client.GeminiClient')
     async def test_rate_limit_429_retry_backoff_includes_jitter(
-        self, mock_mistral_cls, mock_rng, mock_sleep
+        self, mock_gemini_cls, mock_rng, mock_sleep
     ):
         mock_client = AsyncMock()
-        mock_mistral_cls.return_value.__aenter__.return_value = mock_client
+        mock_gemini_cls.return_value.__aenter__.return_value = mock_client
         mock_rng.uniform.side_effect = [0.25, 0.75]
 
         err_429 = RuntimeError('Rate limit')
@@ -494,7 +494,7 @@ class MistralSupportAgentTest(TestCase):
             MockAsyncStream([MockChunk('Успіх після ретраю')]),
         ]
 
-        agent = MistralSupportAgent(api_key='fake-key')
+        agent = GeminiSupportAgent(api_key='fake-key')
         events = []
         async for ev in agent.stream_chat_response([{'role': 'user', 'content': 'Привіт'}]):
             events.append(ev)
@@ -506,13 +506,13 @@ class MistralSupportAgentTest(TestCase):
         self.assertAlmostEqual(mock_sleep.await_args_list[0].args[0], 2.25)
         self.assertAlmostEqual(mock_sleep.await_args_list[1].args[0], 4.75)
 
-    @patch('support.agent.client.Mistral')
-    async def test_api_exception_fallback(self, mock_mistral_cls):
+    @patch('support.agent.client.GeminiClient')
+    async def test_api_exception_fallback(self, mock_gemini_cls):
         mock_client = AsyncMock()
-        mock_mistral_cls.return_value.__aenter__.return_value = mock_client
+        mock_gemini_cls.return_value.__aenter__.return_value = mock_client
         mock_client.chat.stream_async.side_effect = RuntimeError('Connection reset')
 
-        agent = MistralSupportAgent(api_key='fake-key')
+        agent = GeminiSupportAgent(api_key='fake-key')
         events = []
         async for ev in agent.stream_chat_response([{'role': 'user', 'content': 'Привіт'}]):
             events.append(ev)
@@ -520,3 +520,84 @@ class MistralSupportAgentTest(TestCase):
         self.assertEqual(len(events), 1)
         self.assertIn('error', events[0])
         self.assertIn('+380 44 123 45 67', events[0]['error'])
+
+
+class GeminiHttpClientTest(TestCase):
+    async def test_gemini_client_streams_sse_parses_events_and_propagates_timeout(self):
+        import httpx
+
+        from support.agent.gemini import GeminiClient
+
+        captured_requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured_requests.append(request)
+            chunk_1 = json.dumps({'choices': [{'delta': {'content': 'Привіт '}}]})
+            chunk_2 = json.dumps({
+                'choices': [{'delta': {'content': 'світ!'}}],
+                'usage': {'prompt_tokens': 5, 'completion_tokens': 2, 'total_tokens': 7},
+            })
+            sse_body = (
+                f'data: {chunk_1}\n\n'
+                'data: {broken json}\n\n'
+                f'data: {chunk_2}\n\n'
+                'data: [DONE]\n\n'
+            ).encode()
+            return httpx.Response(
+                200,
+                headers={'Content-Type': 'text/event-stream'},
+                content=sse_body,
+            )
+
+        transport = httpx.MockTransport(handler)
+        mock_http = httpx.AsyncClient(transport=transport, timeout=12.0)
+        with patch('support.agent.gemini.httpx.AsyncClient', return_value=mock_http):
+            async with GeminiClient(api_key='test-gemini-key', timeout_ms=12000) as client:
+                stream = await client.chat.stream_async(
+                    model='gemini-2.5-flash',
+                    messages=[{'role': 'user', 'content': 'Привіт'}],
+                    tools=[{'type': 'function', 'function': {'name': 'ping'}}],
+                    temperature=0.2,
+                    max_tokens=256,
+                    timeout_ms=5500,
+                    reasoning_effort='low',
+                )
+                chunks = [chunk async for chunk in stream]
+                await stream.close()
+
+        self.assertTrue(mock_http.is_closed)
+
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual(chunks[0].data.choices[0].delta.content, 'Привіт ')
+        self.assertEqual(chunks[1].data.choices[0].delta.content, 'світ!')
+        self.assertEqual(chunks[1].data.usage.total_tokens, 7)
+
+        req = captured_requests[0]
+        self.assertEqual(req.headers['Authorization'], 'Bearer test-gemini-key')
+        self.assertEqual(req.extensions['timeout']['read'], 5.5)
+        body = json.loads(req.content.decode('utf-8'))
+        self.assertEqual(body['model'], 'gemini-2.5-flash')
+        self.assertEqual(body['reasoning_effort'], 'low')
+        self.assertEqual(body['tool_choice'], 'auto')
+        self.assertTrue(body['stream'])
+
+    async def test_gemini_client_raises_gemini_api_error_with_status_code_on_http_error(self):
+        import httpx
+
+        from support.agent.gemini import GeminiAPIError, GeminiClient
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, text='quota exceeded')
+
+        transport = httpx.MockTransport(handler)
+        mock_http = httpx.AsyncClient(transport=transport, timeout=5.0)
+        with patch('support.agent.gemini.httpx.AsyncClient', return_value=mock_http):
+            async with GeminiClient(api_key='test-gemini-key', timeout_ms=5000) as client:
+                with self.assertRaises(GeminiAPIError) as ctx:
+                    await client.chat.stream_async(
+                        model='gemini-2.5-flash',
+                        messages=[{'role': 'user', 'content': 'Привіт'}],
+                    )
+        self.assertTrue(mock_http.is_closed)
+        self.assertEqual(ctx.exception.status_code, 429)
+        self.assertIn('quota exceeded', ctx.exception.body)

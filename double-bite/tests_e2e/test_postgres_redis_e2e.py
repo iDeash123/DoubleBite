@@ -715,7 +715,7 @@ class EndToEndGuestFlowAndAsgiWsgiTests(TransactionTestCase):
         self.assertEqual(order.status, OrderStatus.CANCELLED)
 
     @patch(
-        'support.agent.client.MistralSupportAgent.stream_chat_response',
+        'support.agent.client.GeminiSupportAgent.stream_chat_response',
         side_effect=_mock_e2e_stream_tokens,
     )
     async def test_asgi_sse_chat_stream_works_without_allow_async_unsafe(self, mock_stream):
@@ -737,7 +737,7 @@ class EndToEndGuestFlowAndAsgiWsgiTests(TransactionTestCase):
         self.assertIn('"done": true', joined)
 
     @patch(
-        'support.agent.client.MistralSupportAgent.stream_chat_response',
+        'support.agent.client.GeminiSupportAgent.stream_chat_response',
         side_effect=_mock_e2e_stream_tokens,
     )
     def test_wsgi_sse_chat_stream_works_without_type_error(self, mock_stream):
@@ -761,7 +761,7 @@ class EndToEndGuestFlowAndAsgiWsgiTests(TransactionTestCase):
 
     @unittest.skipUnless(connection.vendor == 'postgresql', 'Requires PostgreSQL')
     @patch(
-        'support.agent.client.MistralSupportAgent.stream_chat_response',
+        'support.agent.client.GeminiSupportAgent.stream_chat_response',
         side_effect=_mock_e2e_stream_tokens,
     )
     def test_wsgi_abrupt_disconnect_does_not_leak_postgres_connections(self, mock_stream):

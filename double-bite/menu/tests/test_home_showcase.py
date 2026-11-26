@@ -153,7 +153,7 @@ class HomeShowcaseTest(TestCase):
         self.assertContains(response, '25–45 ХВ')
         self.assertContains(response, 'ТЕРМОБОКСИ З СЕНСОРАМИ')
         self.assertContains(response, 'БЕЗКОШТОВНА ДОСТАВКА ВІД 500 ₴')
-        self.assertContains(response, 'MISTRAL AI CONCIERGE АКТИВНИЙ 24/7')
+        self.assertContains(response, 'GEMINI AI CONCIERGE АКТИВНИЙ 24/7')
         self.assertNotContains(response, 'db-ticker__row--big')
         self.assertNotContains(response, 'Live logistics')
         self.assertNotContains(response, '2026-Q1 OK')

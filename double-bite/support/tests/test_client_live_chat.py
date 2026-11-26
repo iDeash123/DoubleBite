@@ -285,7 +285,7 @@ class ClientLiveChatApiTest(TestCase):
     # POST /support/chat/message/
     # ------------------------------------------------------------------
 
-    @patch('support.agent.client.MistralSupportAgent.stream_chat_response')
+    @patch('support.agent.client.GeminiSupportAgent.stream_chat_response')
     def test_chat_message_success_authenticated_and_does_not_call_ai(self, mock_ai):
         self.client_a.force_login(self.user_a)
         esc = self.client_a.post('/support/chat/escalate/')
@@ -705,7 +705,7 @@ class ClientLiveChatApiTest(TestCase):
     # Preservation of 409 on POST /support/chat/stream/
     # ------------------------------------------------------------------
 
-    @patch('support.agent.client.MistralSupportAgent.stream_chat_response')
+    @patch('support.agent.client.GeminiSupportAgent.stream_chat_response')
     async def test_stream_preserves_409_after_manual_escalate_and_proactive_takeover(
         self, mock_stream
     ):
@@ -979,7 +979,7 @@ class ChatWidgetFrontendBehaviorTest(TestCase):
             '/support/chat/history/?after_id=',
             'Оператор',
             'Покликати оператора',
-            'Mistral AI',
+            'Gemini AI',
             'Очікуємо менеджера',
             'Адміністратор',
             'Завершено',
@@ -1188,7 +1188,7 @@ class ChatWidgetFrontendBehaviorTest(TestCase):
                 return {
                   ok: false,
                   status: 500,
-                  json: async () => ({ error: 'Mistral тимчасово недоступний' }),
+                  json: async () => ({ error: 'Gemini тимчасово недоступний' }),
                 };
               }
               return {

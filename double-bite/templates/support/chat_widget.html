@@ -493,7 +493,7 @@ window.__formatMarkdown = function(text) {
       }
     },
     async loadHistory() {
-      const defaultWelcome = 'Вітаю! Я інтелектуальний помічник Double Bite на базі Mistral AI. Допоможу обрати авторські ресторанні страви, врахувати індивідуальні вподобання чи алергени, або дізнатися деталі щодо доставки.';
+      const defaultWelcome = 'Вітаю! Я інтелектуальний помічник Double Bite на базі Gemini AI. Допоможу обрати авторські ресторанні страви, врахувати індивідуальні вподобання чи алергени, або дізнатися деталі щодо доставки.';
       try {
         const res = await fetch('/support/chat/history/', { cache: 'no-store' });
         if (res.ok) {
@@ -1182,7 +1182,7 @@ window.__formatMarkdown = function(text) {
             class="w-1.5 h-1.5 rounded-full shrink-0"
             aria-hidden="true"
           ></span>
-          <span x-text="isResolved ? 'Завершено' : (isEscalated ? (operatorConnected ? 'Адміністратор' : 'Очікуємо менеджера') : 'Mistral AI')"></span>
+          <span x-text="isResolved ? 'Завершено' : (isEscalated ? (operatorConnected ? 'Адміністратор' : 'Очікуємо менеджера') : 'Gemini AI')"></span>
         </span>
         <span class="text-xs font-sans text-db-subtle leading-tight" x-text="isResolved ? 'Звернення завершено' : (isEscalated ? (operatorConnected ? 'Менеджер на звʼязку' : 'Запит передано · можете дописати деталі') : 'Персональний гастро-консьєрж')"></span>
       </div>

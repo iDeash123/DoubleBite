@@ -1,4 +1,4 @@
-"""System prompts for Mistral AI Support Agent."""
+"""System prompts for Gemini AI Support Agent."""
 
 SYSTEM_PROMPT = (
     "Ти — інтелектуальний асистент служби клієнтської підтримки сервісу "
