@@ -21,6 +21,7 @@
   class="w-full desk-shell-height flex overflow-hidden bg-db-paper border-t border-db-linen/50"
 >
   <aside
+    id="desk-queue-panel"
     :class="mobileView === 'queue' ? 'flex w-full lg:w-80 xl:w-[340px]' : 'hidden lg:flex lg:w-80 xl:w-[340px]'"
     class="flex-col shrink-0 bg-db-paper border-r border-db-linen h-full overflow-hidden"
     aria-label="Список діалогів"
@@ -28,7 +29,7 @@
     <div class="px-3.5 pt-3.5 pb-2.5 border-b border-db-linen bg-db-paper shrink-0 space-y-2.5">
       <div class="flex items-center justify-between gap-2">
         <h1 class="font-serif text-xl font-medium text-db-text">Пульт підтримки</h1>
-        <span class="font-mono tabular-nums text-[11px] text-db-subtle">10:00–22:00</span>
+        <span class="font-mono tabular-nums text-[11px] text-db-subtle">{{ working_hours_label|default:"10:00–22:00" }}</span>
       </div>
       <div class="relative">
         <label for="desk-search-input" class="sr-only">Пошук звернень</label>
@@ -172,6 +173,9 @@ function supportDeskController(initial) {
           this.expandedPast = {};
           this.syncThreadMetadata();
           this.syncDrawerInert();
+          if (this.contextDrawerOpen && !this.isDesktop()) {
+            this.focusContextClose();
+          }
           if (this.pendingSseMessages.length > 0) {
             const matching = this.pendingSseMessages
               .filter((entry) => entry && entry.sessionUuid === this.activeSessionUuid)
@@ -241,6 +245,7 @@ function supportDeskController(initial) {
           const root = document.getElementById('desk-thread-root');
           this.activeSessionUuid = root ? (root.dataset.sessionUuid || '') : '';
           this.syncThreadMetadata();
+          this.syncDrawerInert();
           if (window.history && window.history.replaceState) {
             const restoredPath = this.activeSessionUuid
               ? `/support/desk/${encodeURIComponent(this.activeSessionUuid)}/`
@@ -377,22 +382,37 @@ function supportDeskController(initial) {
     },
 
     isDesktop() {
+      if (this.desktopMediaQuery && typeof this.desktopMediaQuery.matches === 'boolean') {
+        return this.desktopMediaQuery.matches;
+      }
+      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        return Boolean(window.matchMedia('(min-width: 1024px)').matches);
+      }
       return typeof window !== 'undefined' ? window.innerWidth >= 1024 : true;
     },
 
     syncDrawerInert() {
-      if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
-      const threadMain = document.getElementById('desk-thread-main');
-      if (threadMain) {
-        threadMain.inert = Boolean(this.contextDrawerOpen && !this.isDesktop());
+      if (typeof document === 'undefined') return;
+      const shouldInert = Boolean(this.contextDrawerOpen && !this.isDesktop());
+      if (typeof document.getElementById === 'function') {
+        const threadMain = document.getElementById('desk-thread-main');
+        if (threadMain) {
+          threadMain.inert = shouldInert;
+        }
+        const queuePanel = document.getElementById('desk-queue-panel');
+        if (queuePanel) {
+          queuePanel.inert = shouldInert;
+        }
+      }
+      if (typeof document.querySelector === 'function') {
+        const siteHeader = document.querySelector('body > header');
+        if (siteHeader) {
+          siteHeader.inert = shouldInert;
+        }
       }
     },
 
-    openContextDrawer() {
-      if (this.isDesktop()) return;
-      this.isDesktopViewport = false;
-      this.contextDrawerOpen = true;
-      this.syncDrawerInert();
+    focusContextClose() {
       const focusClose = () => {
         if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
         const closeBtn = document.getElementById('desk-context-close-btn');
@@ -405,6 +425,14 @@ function supportDeskController(initial) {
       } else {
         focusClose();
       }
+    },
+
+    openContextDrawer() {
+      if (this.isDesktop()) return;
+      this.isDesktopViewport = false;
+      this.contextDrawerOpen = true;
+      this.syncDrawerInert();
+      this.focusContextClose();
     },
 
     closeContextDrawer(options = {}) {
@@ -810,7 +838,7 @@ function supportDeskController(initial) {
     },
 
     scheduleMarkRead() {
-      const isThreadVisible = window.innerWidth >= 1024 || this.mobileView === 'chat';
+      const isThreadVisible = this.isDesktop() || this.mobileView === 'chat';
       if (
         document.hidden ||
         !this.activeSessionUuid ||
@@ -825,7 +853,7 @@ function supportDeskController(initial) {
       const targetUuid = this.activeSessionUuid;
       this.markReadTimer = setTimeout(() => {
         this.markReadTimer = null;
-        const stillVisible = window.innerWidth >= 1024 || this.mobileView === 'chat';
+        const stillVisible = this.isDesktop() || this.mobileView === 'chat';
         if (
           document.hidden ||
           !this.isOwnedByMe ||
@@ -1091,7 +1119,7 @@ function supportDeskController(initial) {
       this.pollingInFlight = true;
       let queuedAfterSwap = false;
       try {
-        const isThreadVisible = window.innerWidth >= 1024 || this.mobileView === 'chat';
+        const isThreadVisible = this.isDesktop() || this.mobileView === 'chat';
         if (this.activeSessionUuid && !this.threadLoading && isThreadVisible) {
           const polledUuid = this.activeSessionUuid;
           const url = `/support/desk/api/sessions/${encodeURIComponent(polledUuid)}/messages/?after_id=${encodeURIComponent(String(this.lastMessageId || 0))}`;

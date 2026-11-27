@@ -41,6 +41,7 @@ from support.services import (
     SessionOwnershipConflictError,
     SupportDeskService,
     get_operator_display_name,
+    get_working_hours_label,
 )
 from support.views import (
     _close_non_atomic_connections,
@@ -154,6 +155,7 @@ def desk_index_view(request: HttpRequest) -> HttpResponse:
             'active_session_uuid': (
                 str(active_session.session_uuid) if active_session is not None else ''
             ),
+            'working_hours_label': get_working_hours_label(),
         },
     )
 
@@ -194,6 +196,7 @@ def desk_session_view(request: HttpRequest, session_uuid: uuid.UUID) -> HttpResp
             'queue': queue_data,
             'thread': thread_context,
             'active_session_uuid': str(session.session_uuid),
+            'working_hours_label': get_working_hours_label(),
         },
     )
 

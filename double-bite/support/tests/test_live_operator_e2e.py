@@ -676,17 +676,31 @@ class SupportDeskResponsiveAndAssetAuditTest(TestCase):
 
         # Mobile Queue <-> Chat toggle & Context slide-over drawer accessibility attributes
         self.assertIn('@keydown.escape.window="if (contextDrawerOpen) closeContextDrawer()"', html)
+        self.assertIn('id="desk-queue-panel"', html)
         self.assertIn('id="desk-thread-main"', html)
         self.assertIn('id="desk-context-open-btn"', html)
         self.assertIn('aria-controls="desk-context-panel"', html)
         self.assertIn('id="desk-context-close-btn"', html)
         self.assertIn('w-[min(24rem,88vw)]', html)
         self.assertIn('lg:static lg:inset-auto', html)
+        self.assertIn('z-[45]', html)
+
+        # Header action bar must wrap cleanly inside narrow mobile viewports (no shrink-0 overflow)
+        self.assertIn('flex flex-wrap items-center gap-2 min-w-0 max-w-full', html)
+        self.assertNotIn('flex flex-wrap items-center gap-2 shrink-0', html)
+        # Operator navbar label hides below lg to prevent tablet (768px) horizontal overflow
+        self.assertIn('<span class="hidden lg:inline">Підтримка</span>', html)
 
         # Touch targets >= 44px & iOS anti-zoom text-base sm:text-sm on inputs
         self.assertIn('min-h-[44px]', html)
         self.assertIn('min-w-[44px]', html)
         self.assertIn('text-base sm:text-sm', html)
+
+        # Dynamic working hours label from settings
+        with override_settings(SUPPORT_WORK_START_HOUR=9, SUPPORT_WORK_END_HOUR=21):
+            res_hours = self.client.get(reverse('support:desk_index'))
+            self.assertEqual(res_hours.status_code, 200)
+            self.assertIn('09:00–21:00', res_hours.content.decode('utf-8'))
 
     def test_desk_controller_mobile_drawer_focus_inert_and_resize_behavior_in_node(self):
         if not self.node_bin:
@@ -701,25 +715,32 @@ class SupportDeskResponsiveAndAssetAuditTest(TestCase):
           removeEventListener(ev, fn) {{ if (ev === 'change' && mqListener === fn) mqListener = null; }},
         }};
 
-        const threadMain = {{ inert: false }};
+        let threadMain = {{ inert: false }};
+        const queuePanel = {{ inert: false }};
+        const siteHeader = {{ inert: false }};
         const focusLog = [];
-        const closeBtn = {{ focus(opts) {{ focusLog.push(['close', Boolean(opts && opts.preventScroll)]); }} }};
+        let closeBtn = {{ focus(opts) {{ focusLog.push(['close-1', Boolean(opts && opts.preventScroll)]); }} }};
         const openBtn = {{ focus(opts) {{ focusLog.push(['open', Boolean(opts && opts.preventScroll)]); }} }};
+        const bodyListeners = {{}};
 
         const doc = {{
           hidden: false,
           cookie: 'csrftoken=mobile-test',
           body: {{
-            addEventListener() {{}},
-            removeEventListener() {{}},
+            addEventListener(ev, fn) {{ bodyListeners[ev] = fn; }},
+            removeEventListener(ev, fn) {{ if (bodyListeners[ev] === fn) delete bodyListeners[ev]; }},
           }},
           getElementById(id) {{
             if (id === 'desk-thread-main') return threadMain;
+            if (id === 'desk-queue-panel') return queuePanel;
             if (id === 'desk-context-close-btn') return closeBtn;
             if (id === 'desk-context-open-btn') return openBtn;
             return null;
           }},
-          querySelector() {{ return null; }},
+          querySelector(sel) {{
+            if (sel === 'body > header') return siteHeader;
+            return null;
+          }},
           addEventListener() {{}},
           removeEventListener() {{}},
         }};
@@ -754,21 +775,42 @@ class SupportDeskResponsiveAndAssetAuditTest(TestCase):
 
         const initialDesktop = desk.isDesktopViewport;
 
-        // Open drawer on mobile: inert=true, focuses close button with preventScroll
+        // Open drawer on mobile: inert=true across thread, queue, and site header; focuses close button
         desk.openContextDrawer();
         const openState = {{
           drawerOpen: desk.contextDrawerOpen,
-          inert: threadMain.inert,
+          threadInert: threadMain.inert,
+          queueInert: queuePanel.inert,
+          headerInert: siteHeader.inert,
           focusLog: [...focusLog],
         }};
 
-        // Close drawer on mobile: inert=false, restores focus to trigger button
+        // Simulate HTMX #desk-workspace swap while mobile drawer is open (new DOM nodes)
+        threadMain = {{ inert: false }};
+        closeBtn = {{ focus(opts) {{ focusLog.push(['close-2', Boolean(opts && opts.preventScroll)]); }} }};
+        bodyListeners['htmx:afterSwap']({{ detail: {{ target: {{ id: 'desk-workspace' }} }} }});
+        const afterSwapWhileOpen = {{
+          drawerOpen: desk.contextDrawerOpen,
+          threadInert: threadMain.inert,
+          queueInert: queuePanel.inert,
+          headerInert: siteHeader.inert,
+          lastFocus: focusLog[focusLog.length - 1],
+        }};
+
+        // Close drawer on mobile: inert=false everywhere, restores focus to trigger button
         desk.closeContextDrawer();
         const closedState = {{
           drawerOpen: desk.contextDrawerOpen,
-          inert: threadMain.inert,
-          focusLog: [...focusLog],
+          threadInert: threadMain.inert,
+          queueInert: queuePanel.inert,
+          headerInert: siteHeader.inert,
+          lastFocus: focusLog[focusLog.length - 1],
         }};
+
+        // isDesktop() follows matchMedia('(min-width: 1024px)') even if innerWidth differs
+        win.innerWidth = 1030;
+        mq.matches = false;
+        const followsMatchMediaMobile = !desk.isDesktop();
 
         // Re-open on mobile, then resize viewport to desktop (>= 1024px)
         desk.openContextDrawer();
@@ -779,7 +821,9 @@ class SupportDeskResponsiveAndAssetAuditTest(TestCase):
         const afterResizeDesktop = {{
           drawerOpen: desk.contextDrawerOpen,
           isDesktopViewport: desk.isDesktopViewport,
-          inert: threadMain.inert,
+          threadInert: threadMain.inert,
+          queueInert: queuePanel.inert,
+          headerInert: siteHeader.inert,
           focusStolenOnResize: focusLog.length !== focusCountBeforeResize,
         }};
 
@@ -792,7 +836,9 @@ class SupportDeskResponsiveAndAssetAuditTest(TestCase):
         const afterBackToQueue = {{
           mobileView: desk.mobileView,
           drawerOpen: desk.contextDrawerOpen,
-          inert: threadMain.inert,
+          threadInert: threadMain.inert,
+          queueInert: queuePanel.inert,
+          headerInert: siteHeader.inert,
         }};
 
         desk.destroy();
@@ -801,7 +847,9 @@ class SupportDeskResponsiveAndAssetAuditTest(TestCase):
         console.log(JSON.stringify({{
           initialDesktop,
           openState,
+          afterSwapWhileOpen,
           closedState,
+          followsMatchMediaMobile,
           afterResizeDesktop,
           afterBackToQueue,
           listenerCleanedUp,
@@ -820,21 +868,37 @@ class SupportDeskResponsiveAndAssetAuditTest(TestCase):
 
         self.assertFalse(result['initialDesktop'])
         self.assertTrue(result['openState']['drawerOpen'])
-        self.assertTrue(result['openState']['inert'])
-        self.assertEqual(result['openState']['focusLog'], [['close', True]])
+        self.assertTrue(result['openState']['threadInert'])
+        self.assertTrue(result['openState']['queueInert'])
+        self.assertTrue(result['openState']['headerInert'])
+        self.assertEqual(result['openState']['focusLog'], [['close-1', True]])
+
+        self.assertTrue(result['afterSwapWhileOpen']['drawerOpen'])
+        self.assertTrue(result['afterSwapWhileOpen']['threadInert'])
+        self.assertTrue(result['afterSwapWhileOpen']['queueInert'])
+        self.assertTrue(result['afterSwapWhileOpen']['headerInert'])
+        self.assertEqual(result['afterSwapWhileOpen']['lastFocus'], ['close-2', True])
 
         self.assertFalse(result['closedState']['drawerOpen'])
-        self.assertFalse(result['closedState']['inert'])
-        self.assertEqual(result['closedState']['focusLog'], [['close', True], ['open', True]])
+        self.assertFalse(result['closedState']['threadInert'])
+        self.assertFalse(result['closedState']['queueInert'])
+        self.assertFalse(result['closedState']['headerInert'])
+        self.assertEqual(result['closedState']['lastFocus'], ['open', True])
+
+        self.assertTrue(result['followsMatchMediaMobile'])
 
         self.assertFalse(result['afterResizeDesktop']['drawerOpen'])
         self.assertTrue(result['afterResizeDesktop']['isDesktopViewport'])
-        self.assertFalse(result['afterResizeDesktop']['inert'])
+        self.assertFalse(result['afterResizeDesktop']['threadInert'])
+        self.assertFalse(result['afterResizeDesktop']['queueInert'])
+        self.assertFalse(result['afterResizeDesktop']['headerInert'])
         self.assertFalse(result['afterResizeDesktop']['focusStolenOnResize'])
 
         self.assertEqual(result['afterBackToQueue']['mobileView'], 'queue')
         self.assertFalse(result['afterBackToQueue']['drawerOpen'])
-        self.assertFalse(result['afterBackToQueue']['inert'])
+        self.assertFalse(result['afterBackToQueue']['threadInert'])
+        self.assertFalse(result['afterBackToQueue']['queueInert'])
+        self.assertFalse(result['afterBackToQueue']['headerInert'])
         self.assertTrue(result['listenerCleanedUp'])
 
     def test_compiled_tailwind_css_contains_desk_utilities_and_zero_external_cdns(self):
@@ -856,6 +920,8 @@ class SupportDeskResponsiveAndAssetAuditTest(TestCase):
             r'lg\:shadow-none',
             r'xl\:w-\[340px\]',
             r'xl\:w-\[360px\]',
+            r'z-\[45\]',
+            'max-w-full',
             'width:min(24rem,88vw)',
         ]
         for snippet in required_snippets:
