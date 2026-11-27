@@ -9,23 +9,29 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from asgiref.sync import sync_to_async
-from config.constants import DEFAULT_RESTAURANT_HOTLINE
+from config.constants import (
+    DEFAULT_GEMINI_MAX_TOKENS,
+    DEFAULT_GEMINI_MODEL,
+    DEFAULT_GEMINI_REASONING_EFFORT,
+    DEFAULT_GEMINI_TEMPERATURE,
+    DEFAULT_GEMINI_TIMEOUT_MS,
+    DEFAULT_RESTAURANT_HOTLINE,
+)
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, SynchronousOnlyOperation
 from django.db import DatabaseError
 from django.http import HttpRequest
 
+from support.cache import get_static_ai_prefix
 from support.models import ChatSession
 
 from .gemini import GeminiClient
-from .prompts import SYSTEM_PROMPT
 from .tools import SUPPORT_AGENT_TOOLS, execute_agent_tool
 
 logger = logging.getLogger('support')
 
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2
-DEFAULT_GEMINI_TIMEOUT_MS = 30000
 DEFAULT_MAX_ROUNDS = 3
 CART_MUTATION_TOOLS = frozenset({'add_to_cart', 'remove_from_cart', 'update_cart_quantity'})
 INVALID_TOOL_ARGS_ERROR = 'Invalid tool arguments, expected JSON object'
@@ -61,32 +67,48 @@ class GeminiSupportAgent:
                 or ''
             )
 
-        self.model = model or os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
-        self.temperature = float(
+        self.model = (
+            model
+            or os.getenv('GEMINI_MODEL')
+            or getattr(settings, 'GEMINI_MODEL', DEFAULT_GEMINI_MODEL)
+        )
+        raw_temp = (
             temperature
             if temperature is not None
-            else os.getenv('GEMINI_TEMPERATURE', '0.2')
+            else (
+                os.getenv('GEMINI_TEMPERATURE')
+                or getattr(settings, 'GEMINI_TEMPERATURE', DEFAULT_GEMINI_TEMPERATURE)
+            )
         )
-        self.max_tokens = int(
+        self.temperature = float(raw_temp)
+        raw_max_tokens = (
             max_tokens
             if max_tokens is not None
-            else os.getenv('GEMINI_MAX_TOKENS', '1024')
+            else (
+                os.getenv('GEMINI_MAX_TOKENS')
+                or getattr(settings, 'GEMINI_MAX_TOKENS', DEFAULT_GEMINI_MAX_TOKENS)
+            )
         )
+        self.max_tokens = int(raw_max_tokens)
 
         if timeout_ms is not None:
             resolved_timeout = int(timeout_ms)
         else:
             raw_timeout = os.getenv('GEMINI_TIMEOUT_MS', '').strip()
+            default_timeout = int(
+                getattr(settings, 'GEMINI_TIMEOUT_MS', DEFAULT_GEMINI_TIMEOUT_MS)
+            )
             try:
-                resolved_timeout = (
-                    int(raw_timeout) if raw_timeout else DEFAULT_GEMINI_TIMEOUT_MS
-                )
+                resolved_timeout = int(raw_timeout) if raw_timeout else default_timeout
             except ValueError:
-                resolved_timeout = DEFAULT_GEMINI_TIMEOUT_MS
+                resolved_timeout = default_timeout
         self.timeout_ms = (
             resolved_timeout if resolved_timeout > 0 else DEFAULT_GEMINI_TIMEOUT_MS
         )
-        self.reasoning_effort = os.getenv('GEMINI_REASONING_EFFORT', 'low').strip()
+        self.reasoning_effort = (
+            os.getenv('GEMINI_REASONING_EFFORT')
+            or getattr(settings, 'GEMINI_REASONING_EFFORT', DEFAULT_GEMINI_REASONING_EFFORT)
+        ).strip()
         self.max_rounds = max(1, int(max_rounds))
 
     @staticmethod
@@ -103,14 +125,14 @@ class GeminiSupportAgent:
 
             cart = CartService.get_cart(request)
             if not cart or cart.items.count() == 0:
-                return '\n\nПОТОЧНИЙ СТАН КОШИКА КЛІЄНТА: кошик наразі порожній.'
+                return 'ПОТОЧНИЙ СТАН КОШИКА КЛІЄНТА: кошик наразі порожній.'
             items_desc = [
-                f'- {item.dish.title} ({item.quantity} шт.)'
+                f'- {item.dish.title} ({item.quantity} шт., {item.total_price} грн)'
                 for item in cart.items.select_related('dish').all()
                 if item.dish
             ]
             return (
-                '\n\nПОТОЧНИЙ СТАН КОШИКА КЛІЄНТА:\n'
+                'ПОТОЧНИЙ СТАН КОШИКА КЛІЄНТА:\n'
                 + '\n'.join(items_desc)
                 + f'\nЗагальна сума: {cart.total_amount} грн'
             )
@@ -126,6 +148,61 @@ class GeminiSupportAgent:
         ) as exc:
             logger.warning('Failed to load cart context for support agent: %s', exc)
             return ''
+
+    @classmethod
+    def _build_dynamic_context(
+        cls,
+        request: HttpRequest | None,
+        session: ChatSession | None = None,
+    ) -> str:
+        sections: list[str] = []
+        cart_context = cls._get_cart_context(request)
+        if cart_context:
+            sections.append(cart_context)
+        if not sections:
+            return ''
+        joined = '\n\n'.join(sections)
+        return f'[КОНТЕКСТ ПОТОЧНОГО КЛІЄНТА]\n{joined}\n[/КОНТЕКСТ]'
+
+    @staticmethod
+    def _normalize_gemini_messages(
+        static_prefix: str,
+        chat_history: list[dict[str, Any]],
+        dynamic_context: str = '',
+    ) -> list[dict[str, Any]]:
+        messages: list[dict[str, Any]] = [
+            {'role': 'system', 'content': static_prefix}
+        ]
+        for msg in chat_history:
+            role = msg.get('role', 'user')
+            if role == 'operator':
+                role = 'assistant'
+            if role not in ('user', 'assistant'):
+                continue
+            content = str(msg.get('content', '') or '').strip()
+            if not content:
+                continue
+            if len(messages) == 1 and role == 'assistant':
+                continue
+            if messages[-1]['role'] == role:
+                prev = messages[-1]['content']
+                messages[-1]['content'] = f'{prev}\n\n{content}' if prev else content
+            else:
+                messages.append({'role': role, 'content': content})
+
+        cleaned_context = dynamic_context.strip()
+        if cleaned_context:
+            target_idx: int | None = None
+            for idx in range(len(messages) - 1, 0, -1):
+                if messages[idx]['role'] == 'user':
+                    target_idx = idx
+                    break
+            if target_idx is not None:
+                existing_text = messages[target_idx]['content']
+                messages[target_idx]['content'] = f'{cleaned_context}\n\n{existing_text}'
+            else:
+                messages.append({'role': 'user', 'content': cleaned_context})
+        return messages
 
     async def stream_chat_response(
         self,
@@ -145,36 +222,17 @@ class GeminiSupportAgent:
             }
             return
 
-        cart_context = await sync_to_async(
-            self._get_cart_context, thread_sensitive=True
-        )(request)
-        system_content = SYSTEM_PROMPT + cart_context
-
-        messages: list[dict[str, Any]] = [
-            {'role': 'system', 'content': system_content}
-        ]
-        for msg in chat_history:
-            role = msg.get('role', 'user')
-            if role == 'operator':
-                role = 'assistant'
-            if role not in ('user', 'assistant'):
-                continue
-            content = str(msg.get('content', '') or '').strip()
-            if not content:
-                # Gemini rejects empty message content (HTTP 400).
-                continue
-            if len(messages) == 1 and role == 'assistant':
-                # Gemini requires the first non-system turn to be 'user'
-                # (can happen if the 20-message window slices off a prior user turn).
-                continue
-            if messages[-1]['role'] == role:
-                if content:
-                    prev = messages[-1]['content']
-                    messages[-1]['content'] = (
-                        f'{prev}\n\n{content}' if prev else content
-                    )
-            else:
-                messages.append({'role': role, 'content': content})
+        static_prefix = await sync_to_async(
+            get_static_ai_prefix, thread_sensitive=True
+        )()
+        dynamic_context = await sync_to_async(
+            self._build_dynamic_context, thread_sensitive=True
+        )(request, session)
+        messages = self._normalize_gemini_messages(
+            static_prefix,
+            chat_history,
+            dynamic_context=dynamic_context,
+        )
 
         try:
             async for chunk in self._stream_gemini(messages, request, session):
@@ -190,10 +248,6 @@ class GeminiSupportAgent:
                 f'за телефоном: {hotline}.'
             )
         }
-
-    # ------------------------------------------------------------------
-    # Gemini streaming & tool helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _extract_delta_text(content: Any) -> str:
@@ -228,8 +282,22 @@ class GeminiSupportAgent:
         is_dict = isinstance(usage, dict)
         for key in ('prompt_tokens', 'completion_tokens', 'total_tokens'):
             val = usage.get(key) if is_dict else getattr(usage, key, None)
-            if isinstance(val, int) and not isinstance(val, bool):
+            if isinstance(val, int) and not isinstance(val, bool) and val >= 0:
                 round_usage[key] = val
+
+        details = (
+            usage.get('prompt_tokens_details')
+            if is_dict
+            else getattr(usage, 'prompt_tokens_details', None)
+        )
+        if details is not None:
+            cached = (
+                details.get('cached_tokens')
+                if isinstance(details, dict)
+                else getattr(details, 'cached_tokens', None)
+            )
+            if isinstance(cached, int) and not isinstance(cached, bool) and cached >= 0:
+                round_usage['cached_tokens'] = cached
 
     @staticmethod
     def _accumulate_tool_calls(
@@ -335,7 +403,6 @@ class GeminiSupportAgent:
                     'name': bucket['name'],
                     'arguments': msg_args,
                 },
-                # Gemini 3 requires the thought signature to be echoed back.
                 'extra_content': bucket.get('extra_content') or {
                     'google': {'thought_signature': 'skip_thought_signature_validator'}
                 },
@@ -363,6 +430,7 @@ class GeminiSupportAgent:
         tools_called: list[str] = []
         usage_totals = {
             'prompt_tokens': 0,
+            'cached_tokens': 0,
             'completion_tokens': 0,
             'total_tokens': 0,
         }
@@ -387,6 +455,7 @@ class GeminiSupportAgent:
                 tool_calls_by_index: dict[int, dict[str, Any]] = {}
                 round_usage = {
                     'prompt_tokens': 0,
+                    'cached_tokens': 0,
                     'completion_tokens': 0,
                     'total_tokens': 0,
                 }
@@ -504,6 +573,7 @@ class GeminiSupportAgent:
                 )
                 final_usage = {
                     'prompt_tokens': 0,
+                    'cached_tokens': 0,
                     'completion_tokens': 0,
                     'total_tokens': 0,
                 }
@@ -549,24 +619,16 @@ class GeminiSupportAgent:
             },
         )
 
-    # ------------------------------------------------------------------
-    # Retry helper (Gemini only)
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _is_rate_limit_error(exc: Exception) -> bool:
-        """Return True if *exc* looks like an HTTP 429 rate-limit error."""
-        # GeminiAPIError and HTTP client errors expose status_code directly.
         if hasattr(exc, 'status_code') and exc.status_code == 429:
             return True
-        # Some SDK versions expose the raw response object
         raw = getattr(exc, 'raw_response', None) or getattr(exc, 'http_res', None)
         if raw is not None and getattr(raw, 'status_code', None) == 429:
             return True
         return bool('429' in str(exc) and 'rate' in str(exc).lower())
 
     async def _call_with_retry(self, func, *args, **kwargs):
-        """Call *func* with retry + exponential backoff + jitter on 429 errors."""
         for attempt in range(MAX_RETRIES + 1):
             try:
                 return await func(*args, **kwargs)
@@ -595,5 +657,4 @@ class GeminiSupportAgent:
                     raise
 
 
-# Backward-compatible alias
 MistralSupportAgent = GeminiSupportAgent
