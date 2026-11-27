@@ -6,6 +6,7 @@ import os
 import secrets
 import time
 from collections.abc import AsyncGenerator
+from decimal import Decimal
 from typing import Any
 
 from asgiref.sync import sync_to_async
@@ -38,6 +39,10 @@ INVALID_TOOL_ARGS_ERROR = 'Invalid tool arguments, expected JSON object'
 _SYSTEM_RANDOM = secrets.SystemRandom()
 
 
+def _env_stripped(name: str) -> str:
+    return (os.getenv(name) or '').strip()
+
+
 def _to_plain(value: Any) -> Any:
     if isinstance(value, dict):
         return {k: _to_plain(v) for k, v in value.items()}
@@ -59,24 +64,24 @@ class GeminiSupportAgent:
         max_rounds: int = DEFAULT_MAX_ROUNDS,
     ):
         if api_key is not None:
-            self.api_key = api_key
+            self.api_key = str(api_key).strip()
         else:
             self.api_key = (
-                os.getenv('GEMINI_API_KEY')
-                or getattr(settings, 'GEMINI_API_KEY', '')
-                or ''
+                _env_stripped('GEMINI_API_KEY')
+                or str(getattr(settings, 'GEMINI_API_KEY', '') or '').strip()
             )
 
         self.model = (
-            model
-            or os.getenv('GEMINI_MODEL')
-            or getattr(settings, 'GEMINI_MODEL', DEFAULT_GEMINI_MODEL)
+            (model.strip() if isinstance(model, str) else '')
+            or _env_stripped('GEMINI_MODEL')
+            or str(getattr(settings, 'GEMINI_MODEL', DEFAULT_GEMINI_MODEL) or '').strip()
+            or DEFAULT_GEMINI_MODEL
         )
         raw_temp = (
             temperature
             if temperature is not None
             else (
-                os.getenv('GEMINI_TEMPERATURE')
+                _env_stripped('GEMINI_TEMPERATURE')
                 or getattr(settings, 'GEMINI_TEMPERATURE', DEFAULT_GEMINI_TEMPERATURE)
             )
         )
@@ -85,7 +90,7 @@ class GeminiSupportAgent:
             max_tokens
             if max_tokens is not None
             else (
-                os.getenv('GEMINI_MAX_TOKENS')
+                _env_stripped('GEMINI_MAX_TOKENS')
                 or getattr(settings, 'GEMINI_MAX_TOKENS', DEFAULT_GEMINI_MAX_TOKENS)
             )
         )
@@ -94,7 +99,7 @@ class GeminiSupportAgent:
         if timeout_ms is not None:
             resolved_timeout = int(timeout_ms)
         else:
-            raw_timeout = os.getenv('GEMINI_TIMEOUT_MS', '').strip()
+            raw_timeout = _env_stripped('GEMINI_TIMEOUT_MS')
             default_timeout = int(
                 getattr(settings, 'GEMINI_TIMEOUT_MS', DEFAULT_GEMINI_TIMEOUT_MS)
             )
@@ -106,9 +111,16 @@ class GeminiSupportAgent:
             resolved_timeout if resolved_timeout > 0 else DEFAULT_GEMINI_TIMEOUT_MS
         )
         self.reasoning_effort = (
-            os.getenv('GEMINI_REASONING_EFFORT')
-            or getattr(settings, 'GEMINI_REASONING_EFFORT', DEFAULT_GEMINI_REASONING_EFFORT)
-        ).strip()
+            _env_stripped('GEMINI_REASONING_EFFORT')
+            or str(
+                getattr(
+                    settings,
+                    'GEMINI_REASONING_EFFORT',
+                    DEFAULT_GEMINI_REASONING_EFFORT,
+                )
+                or ''
+            ).strip()
+        )
         self.max_rounds = max(1, int(max_rounds))
 
     @staticmethod
@@ -124,17 +136,27 @@ class GeminiSupportAgent:
             from orders.services import CartService
 
             cart = CartService.get_cart(request)
-            if not cart or cart.items.count() == 0:
+            if not cart:
+                return 'ПОТОЧНИЙ СТАН КОШИКА КЛІЄНТА: кошик наразі порожній.'
+            available_items = [
+                item
+                for item in cart.items.select_related('dish', 'dish__category').all()
+                if item.is_available
+            ]
+            if not available_items:
                 return 'ПОТОЧНИЙ СТАН КОШИКА КЛІЄНТА: кошик наразі порожній.'
             items_desc = [
                 f'- {item.dish.title} ({item.quantity} шт., {item.total_price} грн)'
-                for item in cart.items.select_related('dish').all()
-                if item.dish
+                for item in available_items
             ]
+            total_amount = sum(
+                (item.total_price for item in available_items),
+                Decimal('0.00'),
+            )
             return (
                 'ПОТОЧНИЙ СТАН КОШИКА КЛІЄНТА:\n'
                 + '\n'.join(items_desc)
-                + f'\nЗагальна сума: {cart.total_amount} грн'
+                + f'\nЗагальна сума: {total_amount} грн'
             )
         except (
             ImportError,

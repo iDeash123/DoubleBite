@@ -1,3 +1,5 @@
+import os
+import pickle
 import tempfile
 from datetime import timedelta
 from decimal import Decimal
@@ -11,7 +13,8 @@ from django.contrib.sessions.backends.db import SessionStore
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
+from django.db.migrations.executor import MigrationExecutor
 from django.test import (
     RequestFactory,
     SimpleTestCase,
@@ -473,6 +476,121 @@ class StaticPrefixCacheContractTest(TestCase):
         actual_timeout = get_static_ai_prefix(cache_backend=timeout_backend)
         self.assertEqual(actual_timeout.encode('utf-8'), expected.encode('utf-8'))
 
+        corrupt_backend = _FailingCacheBackend(pickle.UnpicklingError('corrupt payload'))
+        actual_corrupt = get_static_ai_prefix(cache_backend=corrupt_backend)
+        self.assertEqual(actual_corrupt.encode('utf-8'), expected.encode('utf-8'))
+
+        eof_backend = _FailingCacheBackend(EOFError('truncated cache stream'))
+        actual_eof = get_static_ai_prefix(cache_backend=eof_backend)
+        self.assertEqual(actual_eof.encode('utf-8'), expected.encode('utf-8'))
+
+    def test_promotion_scoped_to_unavailable_targets_is_excluded_and_m2m_invalidates(self) -> None:
+        stoplist_only = Promotion.objects.create(
+            title='Акція лише на стоп-лист',
+            slug='promo-stoplist-only',
+            promo_type=PromoType.PERCENT,
+            discount_value=Decimal('20.00'),
+            is_active=True,
+        )
+        stoplist_only.applicable_dishes.add(self.unavailable_dish)
+        prefix = build_static_ai_prefix()
+        self.assertNotIn('Акція лише на стоп-лист', prefix)
+        self.assertNotIn(f'dishes:{self.unavailable_dish.id}', prefix)
+
+        mixed = Promotion.objects.create(
+            title='Змішана акція',
+            slug='promo-mixed-targets',
+            promo_type=PromoType.FIXED_AMOUNT,
+            discount_value=Decimal('30.00'),
+            is_active=True,
+        )
+        mixed.applicable_dishes.add(self.margherita, self.unavailable_dish)
+        mixed_prefix = build_static_ai_prefix()
+        self.assertIn('Змішана акція', mixed_prefix)
+        self.assertIn(f'dishes:{self.margherita.id}', mixed_prefix)
+        self.assertNotIn(f'dishes:{self.unavailable_dish.id}', mixed_prefix)
+
+        get_static_ai_prefix(force_refresh=True)
+        with self.captureOnCommitCallbacks(execute=True):
+            mixed.applicable_dishes.remove(self.margherita)
+        self.assertIsNone(cache.get(STATIC_AI_PREFIX_CACHE_KEY))
+        self.assertNotIn('Змішана акція', get_static_ai_prefix())
+
+        get_static_ai_prefix(force_refresh=True)
+        with self.captureOnCommitCallbacks(execute=True):
+            mixed.applicable_dishes.clear()
+        self.assertIsNone(cache.get(STATIC_AI_PREFIX_CACHE_KEY))
+        self.assertIn('Змішана акція', get_static_ai_prefix())
+
+    def test_prefix_cache_clamps_ttl_to_promotion_time_boundaries(self) -> None:
+        now = timezone.now()
+        expiring_promo = Promotion.objects.create(
+            title='Акція що завершується',
+            slug='promo-expiring-boundary',
+            promo_type=PromoType.PERCENT,
+            discount_value=Decimal('5.00'),
+            is_active=True,
+            ends_at=now + timedelta(seconds=15),
+        )
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = None
+        prefix = get_static_ai_prefix(cache_backend=mock_cache)
+        self.assertIn('Акція що завершується', prefix)
+        stored_ttl = mock_cache.set.call_args.kwargs['timeout']
+        self.assertGreaterEqual(stored_ttl, 1)
+        self.assertLessEqual(stored_ttl, 16)
+
+        expiring_promo.delete()
+        Promotion.objects.create(
+            title='Майбутня акція',
+            slug='promo-starting-boundary',
+            promo_type=PromoType.PERCENT,
+            discount_value=Decimal('12.00'),
+            is_active=True,
+            starts_at=now + timedelta(seconds=22),
+        )
+        mock_cache.reset_mock()
+        mock_cache.get.return_value = None
+        prefix_future = get_static_ai_prefix(cache_backend=mock_cache)
+        self.assertNotIn('Майбутня акція', prefix_future)
+        future_ttl = mock_cache.set.call_args.kwargs['timeout']
+        self.assertGreaterEqual(future_ttl, 1)
+        self.assertLessEqual(future_ttl, 23)
+
+    def test_agent_init_handles_whitespace_env_vars_and_cart_excludes_stoplist(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                'GEMINI_API_KEY': '   ',
+                'GEMINI_MODEL': '   ',
+                'GEMINI_TEMPERATURE': '   ',
+                'GEMINI_MAX_TOKENS': '   ',
+                'GEMINI_REASONING_EFFORT': '   ',
+            },
+        ):
+            with override_settings(GEMINI_API_KEY=''):
+                agent = GeminiSupportAgent()
+        self.assertEqual(agent.api_key, '')
+        self.assertEqual(agent.model, settings.GEMINI_MODEL)
+        self.assertAlmostEqual(agent.temperature, float(settings.GEMINI_TEMPERATURE))
+        self.assertEqual(agent.max_tokens, settings.GEMINI_MAX_TOKENS)
+
+        req = self._make_request(self.user_a)
+        CartService.add_dish(req, self.margherita.id, quantity=2)
+        CartService.add_dish(req, self.lemonade.id, quantity=1)
+        self.margherita.is_available = False
+        self.margherita.save(update_fields=['is_available'])
+
+        ctx = GeminiSupportAgent._get_cart_context(req)
+        self.assertNotIn('Маргарита Неаполь', ctx)
+        self.assertIn('Лимонад Юдзу (1 шт., 120.00 грн)', ctx)
+        self.assertIn('Загальна сума: 120.00 грн', ctx)
+
+        self.lemonade.is_available = False
+        self.lemonade.save(update_fields=['is_available'])
+        empty_ctx = GeminiSupportAgent._get_cart_context(req)
+        self.assertEqual(empty_ctx, 'ПОТОЧНИЙ СТАН КОШИКА КЛІЄНТА: кошик наразі порожній.')
+
     @patch('support.agent.client.GeminiClient')
     async def test_agent_succeeds_when_redis_cache_fails(
         self,
@@ -542,6 +660,43 @@ class StaticPrefixRealCommitInvalidationTest(TransactionTestCase):
         self.promo.save(update_fields=['is_active'])
         self.assertIsNone(cache.get(STATIC_AI_PREFIX_CACHE_KEY))
         self.assertNotIn('Вечірня акція 15%', get_static_ai_prefix())
+
+    def test_seed_db_computes_embeddings_outside_atomic_transaction(self) -> None:
+        in_atomic_flags: list[bool] = []
+
+        def _spy_get_embedding(text: str):
+            in_atomic_flags.append(connection.in_atomic_block)
+            return None
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            override_settings(MEDIA_ROOT=tmpdir),
+            patch('menu.management.commands.seed_db.get_embedding', side_effect=_spy_get_embedding),
+        ):
+            (Path(tmpdir) / 'dishes').mkdir(parents=True, exist_ok=True)
+            call_command('seed_db', force=True, skip_images=True)
+
+        self.assertGreater(len(in_atomic_flags), 100)
+        self.assertFalse(any(in_atomic_flags))
+
+    def test_slice_zero_migrations_reverse_and_reapply_cleanly(self) -> None:
+        executor = MigrationExecutor(connection)
+        leaf_targets = executor.loader.graph.leaf_nodes()
+        try:
+            MigrationExecutor(connection).migrate(
+                [('support', '0004_chatmessage_telegram_message_id_and_more')]
+            )
+            MigrationExecutor(connection).migrate(
+                [('orders', '0005_guest_token_payment_enums_and_constraints')]
+            )
+            MigrationExecutor(connection).migrate(
+                [('menu', '0005_ascii_slugs_and_indexes')]
+            )
+        finally:
+            MigrationExecutor(connection).migrate(leaf_targets)
+        self.assertIn(('menu', '0006_dish_nutrition_allergens_and_promotions'), leaf_targets)
+        self.assertIn(('orders', '0006_order_alphanumeric_receipt_and_chat_promo'), leaf_targets)
+        self.assertIn(('support', '0005_gemini_concierge_pro'), leaf_targets)
 
 
 class GeminiMessageNormalizationPropertyTest(SimpleTestCase):
@@ -630,6 +785,28 @@ class SliceZeroSchemaSeedAndFontsTest(TestCase):
         )
         with self.assertRaises(ValidationError):
             invalid_dates.save()
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Promotion.objects.bulk_create([
+                Promotion(
+                    title='Відʼємна знижка БД',
+                    slug='db-neg-discount',
+                    promo_type=PromoType.FIXED_AMOUNT,
+                    discount_value=Decimal('-1.00'),
+                    min_order_amount=Decimal('0.00'),
+                )
+            ])
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Promotion.objects.bulk_create([
+                Promotion(
+                    title='Відʼємна мінсума БД',
+                    slug='db-neg-min-order',
+                    promo_type=PromoType.FIXED_AMOUNT,
+                    discount_value=Decimal('10.00'),
+                    min_order_amount=Decimal('-5.00'),
+                )
+            ])
 
     def test_new_models_and_partial_unique_constraints(self) -> None:
         user = User.objects.create_user(
@@ -765,6 +942,28 @@ class SliceZeroSchemaSeedAndFontsTest(TestCase):
         for promo in active_promotions:
             self.assertTrue(promo.title.strip())
             self.assertTrue(promo.description.strip())
+
+        orange_juice = Dish.objects.get(slug='fresh-orange-juice')
+        self.assertNotIn('основа: очищена фільтрована вода', orange_juice.ingredients.lower())
+        vegan_burger = Dish.objects.get(slug='burger-beyond-meat-vegan')
+        self.assertTrue(vegan_burger.is_vegan)
+        self.assertNotIn('основа: булочка бріош', vegan_burger.ingredients.lower())
+        tempura_roll = Dish.objects.get(slug='roll-tempura-ebi-shrimp')
+        self.assertIn(AllergenCode.SOY, tempura_roll.allergen_codes)
+        for raw_slug in (
+            'roll-california-crab-tobiko',
+            'roll-spicy-salmon-aburi',
+            'roll-philadelphia-grill-nori',
+        ):
+            raw_roll = Dish.objects.get(slug=raw_slug)
+            self.assertTrue(raw_roll.contains_raw_fish, raw_slug)
+            self.assertFalse(raw_roll.safe_for_pregnancy, raw_slug)
+        for unsafe_set_slug in (
+            'set-italian-trio-pizza',
+            'set-family-pizza-wings-box',
+            'set-chef-tasting-experience',
+        ):
+            self.assertFalse(Dish.objects.get(slug=unsafe_set_slug).safe_for_pregnancy)
 
     def test_local_cyrillic_pdf_fonts_load_in_reportlab(self) -> None:
         fonts_dir = Path(settings.BASE_DIR) / 'static' / 'fonts' / 'pdf'
