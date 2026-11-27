@@ -2,17 +2,25 @@ import logging
 
 from config.transactions import schedule_on_commit
 from django.contrib import admin
+from support.cache import invalidate_static_ai_prefix
 from support.vector_search import (
     build_dish_embedding_text,
     get_embedding,
     get_embeddings_batch,
 )
 
-from .models import Category, Dish, DishOption
+from .models import Category, Dish, DishOption, Promotion
 
 logger = logging.getLogger('menu')
 
-_EMBEDDING_SOURCE_FIELDS = frozenset({'title', 'category', 'description', 'allergens'})
+_EMBEDDING_SOURCE_FIELDS = frozenset({
+    'title',
+    'category',
+    'description',
+    'ingredients',
+    'allergens',
+    'allergen_codes',
+})
 _ACTION_BATCH_SIZE = 32
 
 
@@ -55,12 +63,24 @@ class DishAdmin(admin.ModelAdmin):
         'price',
         'weight_grams',
         'calories',
+        'upsell_group',
         'is_vegetarian',
+        'is_vegan',
         'is_spicy',
+        'safe_for_pregnancy',
         'is_available',
     )
-    list_filter = ('category', 'is_available', 'is_vegetarian', 'is_spicy')
-    search_fields = ('title', 'description', 'allergens')
+    list_filter = (
+        'category',
+        'is_available',
+        'upsell_group',
+        'is_vegetarian',
+        'is_vegan',
+        'is_spicy',
+        'contains_raw_fish',
+        'safe_for_pregnancy',
+    )
+    search_fields = ('title', 'description', 'ingredients', 'allergens')
     list_select_related = ('category',)
     prepopulated_fields = {'slug': ('title',)}
     exclude = ('embedding',)
@@ -118,6 +138,7 @@ class DishAdmin(admin.ModelAdmin):
                     to_update, ['embedding'], batch_size=_ACTION_BATCH_SIZE
                 )
                 updated_count += len(to_update)
+                schedule_on_commit(invalidate_static_ai_prefix)
 
         if request is not None:
             if updated_count:
@@ -139,3 +160,20 @@ class DishOptionAdmin(admin.ModelAdmin):
     list_filter = ('dish__category',)
     search_fields = ('name', 'dish__title')
     list_select_related = ('dish',)
+
+
+@admin.register(Promotion)
+class PromotionAdmin(admin.ModelAdmin):
+    list_display = (
+        'title',
+        'promo_type',
+        'discount_value',
+        'min_order_amount',
+        'is_active',
+        'starts_at',
+        'ends_at',
+    )
+    list_filter = ('promo_type', 'is_active')
+    search_fields = ('title', 'slug', 'description')
+    prepopulated_fields = {'slug': ('title',)}
+    filter_horizontal = ('applicable_categories', 'applicable_dishes')

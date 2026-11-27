@@ -383,9 +383,13 @@ class OrdersMigration0005Test(TransactionTestCase):
         target_0005 = [('orders', '0005_guest_token_payment_enums_and_constraints')]
 
         executor = MigrationExecutor(connection)
+        leaf_targets = executor.loader.graph.leaf_nodes()
         executor.migrate(target_0004)
         try:
-            old_apps = executor.loader.project_state(target_0004).apps
+            executor_state = MigrationExecutor(connection)
+            old_apps = executor_state.loader.project_state(
+                list(executor_state.loader.applied_migrations)
+            ).apps
             OldUser = old_apps.get_model('accounts', 'User')
             OldCategory = old_apps.get_model('menu', 'Category')
             OldDish = old_apps.get_model('menu', 'Dish')
@@ -458,4 +462,4 @@ class OrdersMigration0005Test(TransactionTestCase):
             self.assertTrue(bool(migrated_order.guest_token))
             self.assertNotEqual(migrated_order.guest_token, 'raw_order_sess_xyz')
         finally:
-            MigrationExecutor(connection).migrate(target_0005)
+            MigrationExecutor(connection).migrate(leaf_targets)

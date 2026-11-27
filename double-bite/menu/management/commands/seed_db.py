@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 from accounts.models import DeliveryAddress, Role, User
 from allauth.account.models import EmailAddress
+from config.transactions import schedule_on_commit
 from config.validators import normalize_email
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -24,13 +25,221 @@ from orders.models import (
     PaymentStatus,
 )
 from PIL import Image, ImageDraw
-from support.models import ChatMessage, ChatSession, FAQKnowledge, SupportTicket
+from support.cache import invalidate_static_ai_prefix
+from support.models import (
+    AITurnAuditLog,
+    ChatAttachment,
+    ChatMessage,
+    ChatSession,
+    CustomerMemory,
+    FAQKnowledge,
+    StaffAuditLog,
+    SupportTicket,
+)
 from support.vector_search import generate_mock_embedding, get_embedding
 
-from menu.models import Category, Dish, DishOption
+from menu.models import (
+    AllergenCode,
+    Category,
+    Dish,
+    DishOption,
+    Promotion,
+    PromoType,
+    UpsellGroup,
+)
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 IMAGE_READ_CHUNK_BYTES = 64 * 1024
+
+_CATEGORY_UPSELL_GROUP: dict[str, str] = {
+    'pizza': UpsellGroup.MAIN,
+    'sushi': UpsellGroup.MAIN,
+    'sets': UpsellGroup.MAIN,
+    'burgers': UpsellGroup.MAIN,
+    'bowls-salads': UpsellGroup.SALAD_STARTER,
+    'desserts': UpsellGroup.DESSERT,
+    'drinks': UpsellGroup.DRINK,
+}
+
+_RAW_FISH_SLUGS = frozenset({
+    'roll-philadelphia-salmon',
+    'roll-philadelphia-tuna-deluxe',
+    'nigiri-assorti-chef-selection',
+    'roll-truffle-salmon-avocado',
+    'roll-philadelphia-roasted-sesame',
+    'gunkan-salmon-red-caviar',
+    'roll-red-dragon-salmon-eel',
+    'set-imperial-tokyo',
+    'set-philadelphia-mania',
+    'set-dragons-trio',
+    'set-double-bite-party-box',
+    'set-premium-nigiri-sashimi',
+    'set-romantic-evening-duo',
+    'set-salmon-kilogram-feast',
+    'set-sushi-party-xxl',
+    'bowl-salmon-avocado-edamame',
+    'poke-bowl-yellowfin-tuna',
+    'salad-nicoise-seared-tuna',
+})
+
+_PREGNANCY_UNSAFE_EXTRA_SLUGS = frozenset({
+    'pizza-carbonara-romana',
+    'pizza-quattro-formaggi',
+    'burger-brie-caramelized-pear',
+    'burger-gorgonzola-bacon-jam',
+    'burger-dor-blu-truffle',
+    'burger-camembert-cranberry',
+    'salad-warm-duck-berries',
+    'tiramisu-classic-mascarpone',
+})
+
+_VEGAN_SLUGS = frozenset({
+    'pizza-vegan-artichoke',
+    'roll-vegan-avocado-chuka',
+    'set-green-detox-vegan',
+    'burger-beyond-meat-vegan',
+    'bowl-vegan-tofu-quinoa',
+    'salad-green-detox-spinach-avocado',
+    'chia-pudding-coconut-mango',
+    'ceremonial-matcha-latte-uji',
+    'cold-brew-tonic',
+    'lemonade-passionfruit-basil',
+    'smoothie-detox-spirulina-kiwi',
+    'fresh-orange-juice',
+    'filter-coffee-ethiopia-specialty',
+    'cocktail-virgin-mojito',
+    'lemonade-lavender-blackberry',
+    'chai-masala-oat-milk',
+    'smoothie-mango-passionfruit-chia',
+    'fresh-pomegranate-juice',
+    'cascara-tonic-grapefruit',
+    'berry-spritz-non-alcoholic',
+})
+
+_ALLERGEN_KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (AllergenCode.SESAME, ('кунжут', 'сезам', 'тахіні')),
+    (AllergenCode.GLUTEN, ('глютен', 'вівсянк')),
+    (AllergenCode.LACTOSE, ('лактоз',)),
+    (AllergenCode.NUTS, ('горіх', 'фісташ', 'пекан', 'кеш', 'мигдал', 'кедров')),
+    (AllergenCode.PEANUTS, ('арахіс',)),
+    (AllergenCode.FISH, ('риб',)),
+    (AllergenCode.CRUSTACEANS, ('ракоподібн', 'креветк', 'краб')),
+    (AllergenCode.SOY, ('соя', 'соєв', 'тофу', 'едамаме')),
+    (AllergenCode.EGGS, ('яйц', 'яєч')),
+    (AllergenCode.MUSTARD, ('гірчиц',)),
+    (AllergenCode.CELERY, ('селер',)),
+)
+
+_MACRO_RATIOS: dict[tuple[str, bool], tuple[float, float]] = {
+    ('pizza', False): (0.17, 0.35),
+    ('pizza', True): (0.15, 0.33),
+    ('sushi', False): (0.24, 0.28),
+    ('sushi', True): (0.12, 0.30),
+    ('sets', False): (0.22, 0.32),
+    ('sets', True): (0.14, 0.30),
+    ('burgers', False): (0.24, 0.44),
+    ('burgers', True): (0.18, 0.40),
+    ('bowls-salads', False): (0.26, 0.38),
+    ('bowls-salads', True): (0.16, 0.42),
+    ('desserts', False): (0.09, 0.43),
+    ('desserts', True): (0.09, 0.43),
+    ('drinks', False): (0.04, 0.08),
+    ('drinks', True): (0.04, 0.08),
+}
+
+_CATEGORY_INGREDIENT_PREFIX: dict[str, str] = {
+    'pizza': 'ферментоване пшеничне тісто, оливкова олія Extra Virgin',
+    'sushi': 'рис для суші Akita Komachi, водорості норі',
+    'sets': 'асорті свіжих позицій власного приготування',
+    'burgers': 'булочка бріош, фірмовий соус',
+    'bowls-salads': 'свіжа зелень, авторська заправка',
+    'desserts': 'натуральна ваніль, добірні кондитерські інгредієнти',
+    'drinks': 'очищена фільтрована вода',
+}
+
+PROMOTIONS_DATA: list[dict] = [
+    {
+        'title': 'Знижка 10% на замовлення від 800 грн',
+        'slug': 'order-10-percent-from-800',
+        'description': 'Отримайте 10% знижки на все меню при замовленні на суму від 800 грн.',
+        'promo_type': PromoType.PERCENT,
+        'discount_value': Decimal('10.00'),
+        'min_order_amount': Decimal('800.00'),
+        'category_slugs': [],
+    },
+    {
+        'title': 'Мінус 100 грн на сети від 1000 грн',
+        'slug': 'sets-minus-100-from-1000',
+        'description': 'Фіксована знижка 100 грн на суші-сети та комбо-набори при замовленні від 1000 грн.',
+        'promo_type': PromoType.FIXED_AMOUNT,
+        'discount_value': Decimal('100.00'),
+        'min_order_amount': Decimal('1000.00'),
+        'category_slugs': ['sets'],
+    },
+    {
+        'title': 'Знижка 15% на піцу та напої від 600 грн',
+        'slug': 'pizza-drinks-15-percent-from-600',
+        'description': 'Замовляйте неаполітанську піцу та авторські напої на суму від 600 грн зі знижкою 15%.',
+        'promo_type': PromoType.PERCENT,
+        'discount_value': Decimal('15.00'),
+        'min_order_amount': Decimal('600.00'),
+        'category_slugs': ['pizza', 'drinks'],
+    },
+    {
+        'title': 'Подарунок до вечері від 1200 грн: лимонад Юдзу & Імбир',
+        'slug': 'free-lemonade-bundle-from-1200',
+        'description': 'При замовленні на суму від 1200 грн даруємо освіжаючий лимонад «Юдзу & Імбир» у подарунок.',
+        'promo_type': PromoType.BUNDLE_GIFT,
+        'discount_value': Decimal('0.00'),
+        'min_order_amount': Decimal('1200.00'),
+        'category_slugs': [],
+    },
+]
+
+
+def _extract_allergen_codes(allergens_text: str, description: str) -> list[str]:
+    lowered_allergens = (allergens_text or '').lower()
+    lowered_desc = (description or '').lower()
+    codes: set[str] = set()
+    for code, keywords in _ALLERGEN_KEYWORD_RULES:
+        if any(kw in lowered_allergens for kw in keywords):
+            codes.add(code)
+        elif code in (AllergenCode.SESAME, AllergenCode.PEANUTS) and any(
+            kw in lowered_desc for kw in keywords
+        ):
+            codes.add(code)
+    return sorted(codes)
+
+
+def _derive_macros(
+    category_slug: str,
+    calories: int,
+    *,
+    is_vegetarian: bool,
+) -> tuple[int, int, int]:
+    if calories <= 0:
+        return (0, 0, 0)
+    p_ratio, f_ratio = _MACRO_RATIOS.get((category_slug, is_vegetarian), (0.18, 0.34))
+    proteins = round((calories * p_ratio) / 4)
+    fats = round((calories * f_ratio) / 9)
+    remaining_kcal = max(0, calories - (proteins * 4) - (fats * 9))
+    carbs = round(remaining_kcal / 4)
+    if calories > 0 and proteins == 0 and fats == 0 and carbs == 0:
+        carbs = 1
+    return (proteins, fats, carbs)
+
+
+def _build_dish_ingredients(category_slug: str, dish_data: dict) -> str:
+    explicit = str(dish_data.get('ingredients', '') or '').strip()
+    if explicit:
+        return explicit
+    desc = str(dish_data.get('description', '') or '').strip().rstrip('.')
+    base = _CATEGORY_INGREDIENT_PREFIX.get(category_slug, '')
+    if not desc:
+        return base
+    if not base:
+        return desc
+    return f'{desc}; основа: {base}'
 
 
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -2313,7 +2522,11 @@ class Command(BaseCommand):
             dish_images = self._prepare_dish_images(skip_images=bool(options.get('skip_images')))
 
         with transaction.atomic():
-            self.stdout.write('Видалення старих тікетів, чатів та FAQ...')
+            self.stdout.write('Видалення старих тікетів, чатів, аудиту та FAQ...')
+            AITurnAuditLog.objects.all().delete()
+            StaffAuditLog.objects.all().delete()
+            ChatAttachment.objects.all().delete()
+            CustomerMemory.objects.all().delete()
             SupportTicket.objects.all().delete()
             ChatMessage.objects.all().delete()
             ChatSession.objects.all().delete()
@@ -2326,7 +2539,8 @@ class Command(BaseCommand):
             Cart.objects.all().delete()
             DeliveryAddress.objects.all().delete()
 
-            self.stdout.write('Видалення старих опцій, страв та категорій...')
+            self.stdout.write('Видалення старих акцій, опцій, страв та категорій...')
+            Promotion.objects.all().delete()
             DishOption.objects.all().delete()
             Dish.objects.all().delete()
             Category.objects.all().delete()
@@ -2475,7 +2689,17 @@ class Command(BaseCommand):
                 ),
             ]
             for q, a, c in faq_entries:
-                FAQKnowledge.objects.create(question=q, answer=a, category=c, is_active=True)
+                faq_embed_text = f'{q} {a} {c}'
+                faq_embedding = get_embedding(faq_embed_text)
+                if faq_embedding is None:
+                    faq_embedding = generate_mock_embedding(faq_embed_text)
+                FAQKnowledge.objects.create(
+                    question=q,
+                    answer=a,
+                    category=c,
+                    is_active=True,
+                    embedding=faq_embedding,
+                )
 
             self.stdout.write(
                 self.style.MIGRATE_HEADING(
@@ -2486,6 +2710,7 @@ class Command(BaseCommand):
             total_categories = 0
             total_dishes = 0
             total_options = 0
+            categories_by_slug: dict[str, Category] = {}
 
             for cat_data in CATEGORIES_DATA:
                 dishes_data = cat_data.get('dishes', [])
@@ -2496,6 +2721,7 @@ class Command(BaseCommand):
                     display_order=cat_data.get('display_order', 0),
                     is_active=True,
                 )
+                categories_by_slug[category.slug] = category
                 total_categories += 1
                 self.stdout.write(f' -> Категорія [{category.name}] ({len(dishes_data)} позицій)')
 
@@ -2504,9 +2730,41 @@ class Command(BaseCommand):
                     slug = d_data['slug']
                     final_image = dish_images.get(slug, f"dishes/{slug}.jpg")
 
+                    ingredients = _build_dish_ingredients(category.slug, d_data)
+                    allergen_codes = d_data.get('allergen_codes')
+                    if allergen_codes is None:
+                        allergen_codes = _extract_allergen_codes(
+                            d_data.get('allergens', ''),
+                            d_data.get('description', ''),
+                        )
+                    is_vegan = bool(d_data.get('is_vegan', slug in _VEGAN_SLUGS))
+                    is_vegetarian = bool(d_data.get('is_vegetarian', False) or is_vegan)
+                    contains_raw_fish = bool(
+                        d_data.get('contains_raw_fish', slug in _RAW_FISH_SLUGS)
+                    )
+                    safe_for_pregnancy = bool(
+                        d_data.get(
+                            'safe_for_pregnancy',
+                            not contains_raw_fish
+                            and slug not in _PREGNANCY_UNSAFE_EXTRA_SLUGS,
+                        )
+                    )
+                    upsell_group = d_data.get(
+                        'upsell_group',
+                        _CATEGORY_UPSELL_GROUP.get(category.slug, UpsellGroup.MAIN),
+                    )
+                    proteins, fats, carbs = _derive_macros(
+                        category.slug,
+                        int(d_data['calories']),
+                        is_vegetarian=is_vegetarian,
+                    )
+                    proteins_grams = int(d_data.get('proteins_grams', proteins))
+                    fats_grams = int(d_data.get('fats_grams', fats))
+                    carbs_grams = int(d_data.get('carbs_grams', carbs))
+
                     embed_text = (
                         f"{d_data['title']} {category.name} "
-                        f"{d_data['description']} {d_data.get('allergens', '')}"
+                        f"{ingredients} {d_data.get('allergens', '')}"
                     )
                     embedding = get_embedding(embed_text)
                     if embedding is None:
@@ -2517,12 +2775,21 @@ class Command(BaseCommand):
                         title=d_data['title'],
                         slug=d_data['slug'],
                         description=d_data['description'],
+                        ingredients=ingredients,
                         price=d_data['price'],
                         weight_grams=d_data['weight_grams'],
                         calories=d_data['calories'],
+                        proteins_grams=proteins_grams,
+                        fats_grams=fats_grams,
+                        carbs_grams=carbs_grams,
                         allergens=d_data.get('allergens', ''),
-                        is_vegetarian=d_data.get('is_vegetarian', False),
+                        allergen_codes=allergen_codes,
+                        is_vegetarian=is_vegetarian,
+                        is_vegan=is_vegan,
                         is_spicy=d_data.get('is_spicy', False),
+                        contains_raw_fish=contains_raw_fish,
+                        safe_for_pregnancy=safe_for_pregnancy,
+                        upsell_group=upsell_group,
                         is_available=True,
                         image=final_image,
                         embedding=embedding,
@@ -2536,6 +2803,26 @@ class Command(BaseCommand):
                             price_delta=price_delta,
                         )
                         total_options += 1
+
+            total_promotions = 0
+            for promo_data in PROMOTIONS_DATA:
+                promo = Promotion.objects.create(
+                    title=promo_data['title'],
+                    slug=promo_data['slug'],
+                    description=promo_data['description'],
+                    promo_type=promo_data['promo_type'],
+                    discount_value=promo_data['discount_value'],
+                    min_order_amount=promo_data['min_order_amount'],
+                    is_active=True,
+                )
+                cat_objs = [
+                    categories_by_slug[c_slug]
+                    for c_slug in promo_data.get('category_slugs', [])
+                    if c_slug in categories_by_slug
+                ]
+                if cat_objs:
+                    promo.applicable_categories.set(cat_objs)
+                total_promotions += 1
 
             dish_margherita = Dish.objects.filter(slug__contains='margherita').first() or Dish.objects.first()
             dish_pepperoni = Dish.objects.filter(slug__contains='pepperoni').first() or Dish.objects.last()
@@ -2582,12 +2869,15 @@ class Command(BaseCommand):
                     quantity=1,
                 )
 
+            schedule_on_commit(invalidate_static_ai_prefix)
+
         self.stdout.write(
             self.style.SUCCESS(
                 f'\nУспішно заповнено базу даних!\n'
                 f'  • Категорій створено: {total_categories}\n'
                 f'  • Страв з ембедінгами створено: {total_dishes}\n'
                 f'  • Опцій/модифікаторів створено: {total_options}\n'
+                f'  • Активних акцій створено: {total_promotions}\n'
                 f'  • FAQ статей створено: {len(faq_entries)}\n'
                 f'  • Демо-замовлень створено: 2\n'
                 f'  • Демо-адрес створено: 3\n'

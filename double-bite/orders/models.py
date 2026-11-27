@@ -280,6 +280,70 @@ class Order(models.Model):
         decimal_places=2,
         default=Decimal('0.00'),
     )
+    subtotal_amount = models.DecimalField(
+        'Сума страв (грн)',
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+    )
+    delivery_fee_amount = models.DecimalField(
+        'Вартість доставки (грн)',
+        max_digits=8,
+        decimal_places=2,
+        default=Decimal('0.00'),
+    )
+    discount_amount = models.DecimalField(
+        'Знижка (грн)',
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+    )
+    applied_promotion = models.ForeignKey(
+        'menu.Promotion',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='orders',
+        verbose_name='Застосована акція',
+    )
+    source_chat_session = models.ForeignKey(
+        'support.ChatSession',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_orders',
+        verbose_name='Сесія чату',
+    )
+    chat_idempotency_key = models.CharField(
+        'Ключ ідемпотентності чату',
+        max_length=64,
+        blank=True,
+        default='',
+        db_index=True,
+    )
+    receipt_number = models.CharField(
+        'Номер чека',
+        max_length=32,
+        blank=True,
+        default='',
+        db_index=True,
+    )
+    receipt_issued_at = models.DateTimeField(
+        'Час видачі чека',
+        null=True,
+        blank=True,
+    )
+    receipt_fiscal_code = models.CharField(
+        'Фіскальний код чека',
+        max_length=32,
+        blank=True,
+        default='',
+    )
+    receipt_sent_at = models.DateTimeField(
+        'Чек надіслано о',
+        null=True,
+        blank=True,
+    )
     eta_minutes = models.PositiveIntegerField(
         'Орієнтовний час доставки (хв)',
         default=30,
@@ -296,6 +360,18 @@ class Order(models.Model):
         verbose_name = 'Замовлення'
         verbose_name_plural = 'Замовлення'
         ordering = ('-created_at',)
+        constraints = [
+            models.UniqueConstraint(
+                fields=['chat_idempotency_key'],
+                condition=~Q(chat_idempotency_key=''),
+                name='unique_order_chat_idempotency_key',
+            ),
+            models.UniqueConstraint(
+                fields=['receipt_number'],
+                condition=~Q(receipt_number=''),
+                name='unique_order_receipt_number',
+            ),
+        ]
 
     @property
     def is_online_payment(self) -> bool:

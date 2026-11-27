@@ -7,12 +7,44 @@ from typing import Any
 from django.core.exceptions import SuspiciousFileOperation, ValidationError
 from django.core.validators import MinValueValidator, validate_slug
 from django.db import models
+from django.db.models import Q
 from django.db.models.fields.files import ImageFieldFile
 from django.urls import reverse
 from django.utils.text import slugify
 from pgvector.django import HnswIndex, VectorField
 
 logger = logging.getLogger('menu')
+
+
+class AllergenCode(models.TextChoices):
+    SESAME = 'sesame', 'Кунжут'
+    GLUTEN = 'gluten', 'Глютен'
+    LACTOSE = 'lactose', 'Лактоза'
+    NUTS = 'nuts', 'Горіхи'
+    PEANUTS = 'peanuts', 'Арахіс'
+    FISH = 'fish', 'Риба'
+    CRUSTACEANS = 'crustaceans', 'Ракоподібні'
+    SOY = 'soy', 'Соя'
+    EGGS = 'eggs', 'Яйця'
+    MUSTARD = 'mustard', 'Гірчиця'
+    CELERY = 'celery', 'Селера'
+
+
+class UpsellGroup(models.TextChoices):
+    MAIN = 'main', 'Основна страва'
+    DRINK = 'drink', 'Напій'
+    SALAD_STARTER = 'salad_starter', 'Салат або закуска'
+    DESSERT = 'dessert', 'Десерт'
+    SAUCE = 'sauce', 'Соус'
+
+
+class PromoType(models.TextChoices):
+    PERCENT = 'PERCENT', 'Відсоток'
+    FIXED_AMOUNT = 'FIXED_AMOUNT', 'Фіксована сума'
+    BUNDLE_GIFT = 'BUNDLE_GIFT', 'Подарунок або комбо'
+
+
+VALID_ALLERGEN_CODES = frozenset(AllergenCode.values)
 
 _CYRILLIC_APOSTROPHE_RE = re.compile(
     r"(?<=[а-яА-ЯіїєґІЇЄҐёъыэЁЪЫЭ])['’ʼ`](?=[а-яА-ЯіїєґІЇЄҐёъыэЁЪЫЭ])"
@@ -287,9 +319,24 @@ class Dish(models.Model):
         validators=[MinValueValidator(1)],
     )
     calories = models.PositiveIntegerField('Калорійність (ккал)', default=0, db_index=True)
+    ingredients = models.TextField('Склад', blank=True, default='')
+    proteins_grams = models.PositiveSmallIntegerField('Білки (г)', default=0)
+    fats_grams = models.PositiveSmallIntegerField('Жири (г)', default=0)
+    carbs_grams = models.PositiveSmallIntegerField('Вуглеводи (г)', default=0)
     allergens = models.CharField('Алергени', max_length=255, blank=True)
+    allergen_codes = models.JSONField('Коди алергенів', default=list, blank=True)
     is_vegetarian = models.BooleanField('Вегетаріанська', default=False, db_index=True)
+    is_vegan = models.BooleanField('Веганська', default=False, db_index=True)
     is_spicy = models.BooleanField('Гостра', default=False, db_index=True)
+    contains_raw_fish = models.BooleanField('Містить сиру рибу', default=False, db_index=True)
+    safe_for_pregnancy = models.BooleanField('Підходить вагітним', default=True, db_index=True)
+    upsell_group = models.CharField(
+        'Група допродажу',
+        max_length=20,
+        choices=UpsellGroup.choices,
+        default=UpsellGroup.MAIN,
+        db_index=True,
+    )
     is_available = models.BooleanField('В наявності', default=True, db_index=True)
     embedding = VectorField(
         'Векторний ембедінг',
@@ -339,6 +386,20 @@ class Dish(models.Model):
             if weight_val <= 0:
                 raise ValidationError({'weight_grams': 'Вага повинна бути більшою за 0.'})
             self.weight_grams = weight_val
+        if self.allergen_codes is None:
+            self.allergen_codes = []
+        if not isinstance(self.allergen_codes, list):
+            raise ValidationError({'allergen_codes': 'Коди алергенів мають бути списком.'})
+        normalized_codes: list[str] = []
+        for raw_code in self.allergen_codes:
+            if not isinstance(raw_code, str):
+                raise ValidationError({'allergen_codes': 'Кожен код алергену має бути рядком.'})
+            code = raw_code.strip().lower()
+            if code not in VALID_ALLERGEN_CODES:
+                raise ValidationError({'allergen_codes': f'Невідомий код алергену: {raw_code}.'})
+            if code not in normalized_codes:
+                normalized_codes.append(code)
+        self.allergen_codes = sorted(normalized_codes)
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         if not self.slug:
@@ -414,3 +475,107 @@ class DishOption(models.Model):
 
     def __str__(self) -> str:
         return f"{self.dish.title} - {self.name} (+{self.price_delta} грн)"
+
+
+class Promotion(models.Model):
+    title = models.CharField('Назва акції', max_length=160)
+    slug = models.SlugField('Slug', max_length=180, unique=True)
+    description = models.TextField('Умови акції', blank=True)
+    promo_type = models.CharField(
+        'Тип акції',
+        max_length=20,
+        choices=PromoType.choices,
+    )
+    discount_value = models.DecimalField(
+        'Розмір знижки',
+        max_digits=8,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.00'))],
+    )
+    min_order_amount = models.DecimalField(
+        'Мінімальна сума замовлення (грн)',
+        max_digits=8,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+    )
+    applicable_categories = models.ManyToManyField(
+        Category,
+        blank=True,
+        related_name='promotions',
+        verbose_name='Категорії дії акції',
+    )
+    applicable_dishes = models.ManyToManyField(
+        Dish,
+        blank=True,
+        related_name='promotions',
+        verbose_name='Страви дії акції',
+    )
+    is_active = models.BooleanField('Активна', default=True, db_index=True)
+    starts_at = models.DateTimeField('Початок дії', null=True, blank=True, db_index=True)
+    ends_at = models.DateTimeField('Завершення дії', null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField('Створено', auto_now_add=True)
+    updated_at = models.DateTimeField('Оновлено', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Акція'
+        verbose_name_plural = 'Акції'
+        ordering = ('-created_at', 'id')
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(discount_value__gte=Decimal('0.00')),
+                name='promotion_discount_value_gte_zero',
+            ),
+            models.CheckConstraint(
+                condition=Q(min_order_amount__gte=Decimal('0.00')),
+                name='promotion_min_order_amount_gte_zero',
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.slug:
+            validate_slug(self.slug)
+        if self.discount_value is not None:
+            try:
+                discount_val = (
+                    self.discount_value
+                    if isinstance(self.discount_value, Decimal)
+                    else Decimal(str(self.discount_value))
+                )
+            except (InvalidOperation, ValueError, TypeError) as exc:
+                raise ValidationError({'discount_value': 'Некоректне значення знижки.'}) from exc
+            if not discount_val.is_finite() or discount_val < Decimal('0.00'):
+                raise ValidationError({'discount_value': 'Знижка не може бути відʼємною.'})
+            if self.promo_type == PromoType.PERCENT and discount_val > Decimal('100.00'):
+                raise ValidationError({'discount_value': 'Відсоткова знижка не може перевищувати 100%.'})
+            self.discount_value = discount_val
+        if self.min_order_amount is not None:
+            try:
+                min_order_val = (
+                    self.min_order_amount
+                    if isinstance(self.min_order_amount, Decimal)
+                    else Decimal(str(self.min_order_amount))
+                )
+            except (InvalidOperation, ValueError, TypeError) as exc:
+                raise ValidationError({'min_order_amount': 'Некоректна мінімальна сума замовлення.'}) from exc
+            if not min_order_val.is_finite() or min_order_val < Decimal('0.00'):
+                raise ValidationError({'min_order_amount': 'Мінімальна сума замовлення не може бути відʼємною.'})
+            self.min_order_amount = min_order_val
+        if self.starts_at is not None and self.ends_at is not None and self.ends_at <= self.starts_at:
+            raise ValidationError({'ends_at': 'Дата завершення акції має бути пізнішою за дату початку.'})
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self.slug:
+            self.slug = _generate_unique_slug(
+                Promotion,
+                self.title,
+                fallback='promotion-item',
+                max_length=180,
+                instance_pk=self.pk,
+            )
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return self.title
