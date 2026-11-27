@@ -13,6 +13,7 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "python-dotenv>=1.0.1",
     "redis>=5.0.0",
+    "reportlab>=4.2.0",
     "stripe>=7.0.0",
     "uvicorn[standard]>=0.30.0",
     "whitenoise>=6.7",
@@ -21,6 +22,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "django-debug-toolbar>=8.0.0",
+    "hypothesis>=6.100",
     "pytest>=8.0",
     "pytest-django>=4.9",
     "ruff>=0.16.7",

@@ -11,6 +11,7 @@ logs/
 .venv/
 .python-version
 .pytest_cache/
+.hypothesis/
 .ruff_cache/
 .coverage
 htmlcov/
@@ -47,3 +48,4 @@ instructions/*
 
 # High-resolution showcase source assets (stored locally, not pushed to git)
 double-bite/static/images/showcase/8k/
+double-bite/tests_e2e/
