@@ -48,4 +48,4 @@ instructions/*
 
 # High-resolution showcase source assets (stored locally, not pushed to git)
 double-bite/static/images/showcase/8k/
-double-bite/tests_e2e/
+double-bite/tests_e2e/test_no_code_comments.py
