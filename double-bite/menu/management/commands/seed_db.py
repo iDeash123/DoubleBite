@@ -63,12 +63,15 @@ _CATEGORY_UPSELL_GROUP: dict[str, str] = {
 
 _RAW_FISH_SLUGS = frozenset({
     'roll-philadelphia-salmon',
+    'roll-california-crab-tobiko',
     'roll-philadelphia-tuna-deluxe',
+    'roll-spicy-salmon-aburi',
     'nigiri-assorti-chef-selection',
     'roll-truffle-salmon-avocado',
     'roll-philadelphia-roasted-sesame',
     'gunkan-salmon-red-caviar',
     'roll-red-dragon-salmon-eel',
+    'roll-philadelphia-grill-nori',
     'set-imperial-tokyo',
     'set-philadelphia-mania',
     'set-dragons-trio',
@@ -91,6 +94,9 @@ _PREGNANCY_UNSAFE_EXTRA_SLUGS = frozenset({
     'burger-camembert-cranberry',
     'salad-warm-duck-berries',
     'tiramisu-classic-mascarpone',
+    'set-chef-tasting-experience',
+    'set-italian-trio-pizza',
+    'set-family-pizza-wings-box',
 })
 
 _VEGAN_SLUGS = frozenset({
@@ -124,7 +130,7 @@ _ALLERGEN_KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (AllergenCode.PEANUTS, ('арахіс',)),
     (AllergenCode.FISH, ('риб',)),
     (AllergenCode.CRUSTACEANS, ('ракоподібн', 'креветк', 'краб')),
-    (AllergenCode.SOY, ('соя', 'соєв', 'тофу', 'едамаме')),
+    (AllergenCode.SOY, ('соя', 'соєв', 'тофу', 'едамаме', 'теріякі', 'унагі', 'понзу')),
     (AllergenCode.EGGS, ('яйц', 'яєч')),
     (AllergenCode.MUSTARD, ('гірчиц',)),
     (AllergenCode.CELERY, ('селер',)),
@@ -204,7 +210,7 @@ def _extract_allergen_codes(allergens_text: str, description: str) -> list[str]:
     for code, keywords in _ALLERGEN_KEYWORD_RULES:
         if any(kw in lowered_allergens for kw in keywords):
             codes.add(code)
-        elif code in (AllergenCode.SESAME, AllergenCode.PEANUTS) and any(
+        elif code in (AllergenCode.SESAME, AllergenCode.PEANUTS, AllergenCode.SOY) and any(
             kw in lowered_desc for kw in keywords
         ):
             codes.add(code)
@@ -234,12 +240,9 @@ def _build_dish_ingredients(category_slug: str, dish_data: dict) -> str:
     if explicit:
         return explicit
     desc = str(dish_data.get('description', '') or '').strip().rstrip('.')
-    base = _CATEGORY_INGREDIENT_PREFIX.get(category_slug, '')
-    if not desc:
-        return base
-    if not base:
+    if desc:
         return desc
-    return f'{desc}; основа: {base}'
+    return _CATEGORY_INGREDIENT_PREFIX.get(category_slug, '')
 
 
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -2517,9 +2520,84 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING('Початок процесу очищення та заповнення бази даних...'))
 
         dish_images = {}
+        faq_entries: list[tuple[str, str, str]] = []
+        faq_embeddings: list[list[float]] = []
+        dish_embeddings: dict[str, list[float]] = {}
         if not options.get('clean_only'):
             self.stdout.write('Завантаження та підготовка зображень страв (поза транзакцією)...')
             dish_images = self._prepare_dish_images(skip_images=bool(options.get('skip_images')))
+
+            min_order_amount = _format_uah(getattr(settings, 'MIN_ORDER_AMOUNT', Decimal(200)))
+            delivery_fee = _format_uah(getattr(settings, 'DELIVERY_FEE', Decimal('65.00')))
+            free_delivery_threshold = _format_uah(
+                getattr(settings, 'FREE_DELIVERY_THRESHOLD', Decimal('500.00'))
+            )
+            faq_entries = [
+                (
+                    'Які години роботи ресторану?',
+                    'Ми приймаємо та доставляємо замовлення щодня з 10:00 до 22:00 без вихідних.',
+                    'Графік роботи',
+                ),
+                (
+                    'Яка мінімальна сума замовлення?',
+                    f'Мінімальна сума замовлення для оформлення доставки становить {min_order_amount} грн.',
+                    'Доставка',
+                ),
+                (
+                    'Скільки коштує доставка?',
+                    (
+                        f'Вартість доставки становить {delivery_fee} грн. '
+                        f'При замовленні на суму від {free_delivery_threshold} грн доставка безкоштовна.'
+                    ),
+                    'Доставка',
+                ),
+                (
+                    'Які способи оплати доступні?',
+                    (
+                        'Ви можете оплатити замовлення онлайн карткою через Stripe '
+                        '(Apple Pay, Google Pay) або готівкою / терміналом кур\'єру при отриманні.'
+                    ),
+                    'Оплата',
+                ),
+                (
+                    'Як дізнатися статус мого замовлення?',
+                    (
+                        'Ви можете переглянути актуальний статус замовлення на сторінці трекінгу '
+                        'або запитати нашого розумного асистента підтримки у чаті, вказавши номер '
+                        'замовлення (наприклад, DB-0001).'
+                    ),
+                    'Замовлення',
+                ),
+                (
+                    'Чи можна змінити або скасувати замовлення?',
+                    (
+                        'Скасувати замовлення можна, поки воно знаходиться у статусі «Очікує оплати» '
+                        'або «Оплачено», звернувшись до нашого асистента або за телефоном гарячої '
+                        'лінії ресторану.'
+                    ),
+                    'Повернення та скасування',
+                ),
+            ]
+            for q, a, c in faq_entries:
+                faq_embed_text = f'{q} {a} {c}'
+                faq_embedding = get_embedding(faq_embed_text)
+                if faq_embedding is None:
+                    faq_embedding = generate_mock_embedding(faq_embed_text)
+                faq_embeddings.append(faq_embedding)
+
+            for cat_data in CATEGORIES_DATA:
+                cat_slug = cat_data['slug']
+                cat_name = cat_data['name']
+                for d_data in cat_data.get('dishes', []):
+                    ingredients = _build_dish_ingredients(cat_slug, d_data)
+                    embed_text = (
+                        f"{d_data['title']} {cat_name} "
+                        f"{ingredients} {d_data.get('allergens', '')}"
+                    )
+                    embedding = get_embedding(embed_text)
+                    if embedding is None:
+                        embedding = generate_mock_embedding(embed_text)
+                    dish_embeddings[d_data['slug']] = embedding
 
         with transaction.atomic():
             self.stdout.write('Видалення старих тікетів, чатів, аудиту та FAQ...')
@@ -2563,6 +2641,7 @@ class Command(BaseCommand):
             )
 
             if options['clean_only']:
+                schedule_on_commit(invalidate_static_ai_prefix)
                 self.stdout.write(self.style.SUCCESS('Базу даних успішно очищено!'))
                 return
 
@@ -2636,63 +2715,7 @@ class Command(BaseCommand):
                 is_default=False,
             )
 
-            min_order_amount = _format_uah(getattr(settings, 'MIN_ORDER_AMOUNT', Decimal(200)))
-            delivery_fee = _format_uah(getattr(settings, 'DELIVERY_FEE', Decimal('65.00')))
-            free_delivery_threshold = _format_uah(
-                getattr(settings, 'FREE_DELIVERY_THRESHOLD', Decimal('500.00'))
-            )
-
-            faq_entries = [
-                (
-                    'Які години роботи ресторану?',
-                    'Ми приймаємо та доставляємо замовлення щодня з 10:00 до 22:00 без вихідних.',
-                    'Графік роботи',
-                ),
-                (
-                    'Яка мінімальна сума замовлення?',
-                    f'Мінімальна сума замовлення для оформлення доставки становить {min_order_amount} грн.',
-                    'Доставка',
-                ),
-                (
-                    'Скільки коштує доставка?',
-                    (
-                        f'Вартість доставки становить {delivery_fee} грн. '
-                        f'При замовленні на суму від {free_delivery_threshold} грн доставка безкоштовна.'
-                    ),
-                    'Доставка',
-                ),
-                (
-                    'Які способи оплати доступні?',
-                    (
-                        'Ви можете оплатити замовлення онлайн карткою через Stripe '
-                        '(Apple Pay, Google Pay) або готівкою / терміналом кур\'єру при отриманні.'
-                    ),
-                    'Оплата',
-                ),
-                (
-                    'Як дізнатися статус мого замовлення?',
-                    (
-                        'Ви можете переглянути актуальний статус замовлення на сторінці трекінгу '
-                        'або запитати нашого розумного асистента підтримки у чаті, вказавши номер '
-                        'замовлення (наприклад, DB-0001).'
-                    ),
-                    'Замовлення',
-                ),
-                (
-                    'Чи можна змінити або скасувати замовлення?',
-                    (
-                        'Скасувати замовлення можна, поки воно знаходиться у статусі «Очікує оплати» '
-                        'або «Оплачено», звернувшись до нашого асистента або за телефоном гарячої '
-                        'лінії ресторану.'
-                    ),
-                    'Повернення та скасування',
-                ),
-            ]
-            for q, a, c in faq_entries:
-                faq_embed_text = f'{q} {a} {c}'
-                faq_embedding = get_embedding(faq_embed_text)
-                if faq_embedding is None:
-                    faq_embedding = generate_mock_embedding(faq_embed_text)
+            for (q, a, c), faq_embedding in zip(faq_entries, faq_embeddings, strict=True):
                 FAQKnowledge.objects.create(
                     question=q,
                     answer=a,
@@ -2761,14 +2784,7 @@ class Command(BaseCommand):
                     proteins_grams = int(d_data.get('proteins_grams', proteins))
                     fats_grams = int(d_data.get('fats_grams', fats))
                     carbs_grams = int(d_data.get('carbs_grams', carbs))
-
-                    embed_text = (
-                        f"{d_data['title']} {category.name} "
-                        f"{ingredients} {d_data.get('allergens', '')}"
-                    )
-                    embedding = get_embedding(embed_text)
-                    if embedding is None:
-                        embedding = generate_mock_embedding(embed_text)
+                    embedding = dish_embeddings.get(slug)
 
                     dish = Dish.objects.create(
                         category=category,

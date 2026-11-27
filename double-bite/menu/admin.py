@@ -138,7 +138,9 @@ class DishAdmin(admin.ModelAdmin):
                     to_update, ['embedding'], batch_size=_ACTION_BATCH_SIZE
                 )
                 updated_count += len(to_update)
-                schedule_on_commit(invalidate_static_ai_prefix)
+
+        if updated_count:
+            schedule_on_commit(invalidate_static_ai_prefix)
 
         if request is not None:
             if updated_count:
