@@ -1,16 +1,18 @@
 {% load menu_extras %}
 <aside
   id="desk-context-panel"
-  :class="contextDrawerOpen ? 'fixed inset-y-0 right-0 z-50 flex w-full max-w-sm shadow-2xl' : 'hidden lg:flex lg:w-80 xl:w-[360px]'"
-  class="flex-col shrink-0 bg-db-paper border-l border-db-linen h-full overflow-y-auto"
-  data-lenis-prevent
+  :role="(contextDrawerOpen && !isDesktopViewport) ? 'dialog' : null"
+  :aria-modal="(contextDrawerOpen && !isDesktopViewport) ? 'true' : null"
+  :class="contextDrawerOpen ? 'fixed inset-y-0 right-0 z-50 flex w-[min(24rem,88vw)] max-w-sm shadow-2xl lg:static lg:inset-auto lg:z-auto lg:shadow-none lg:w-80 xl:w-[360px]' : 'hidden lg:flex lg:w-80 xl:w-[360px]'"
+  class="flex-col shrink-0 bg-db-paper border-l border-db-linen h-full overflow-hidden overscroll-contain"
   aria-label="Контекст клієнта"
 >
   <div class="px-4 py-3 border-b border-db-linen bg-db-paper flex items-center justify-between gap-2 lg:hidden shrink-0">
     <span class="font-serif text-lg font-medium text-db-text">Контекст клієнта</span>
     <button
+      id="desk-context-close-btn"
       type="button"
-      @click="contextDrawerOpen = false"
+      @click="closeContextDrawer()"
       class="min-h-[44px] min-w-[44px] rounded-lg border border-db-linen bg-white text-db-text inline-flex items-center justify-center cursor-pointer"
       aria-label="Закрити контекст клієнта"
     >
@@ -21,7 +23,7 @@
     </button>
   </div>
 
-  <div class="p-4 space-y-4">
+  <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4 desk-safe-bottom" data-lenis-prevent>
     <section class="bg-white border border-db-linen rounded-xl p-3.5 space-y-2.5">
       <div class="flex items-start justify-between gap-2">
         <div class="min-w-0">

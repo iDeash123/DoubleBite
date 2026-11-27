@@ -17,7 +17,8 @@
     assignedOperatorId: '{% if thread and thread.session.assigned_operator_id %}{{ thread.session.assigned_operator_id }}{% endif %}',
     isOwnedByMe: {% if thread and thread.is_owned_by_me %}true{% else %}false{% endif %}
   })"
-  class="w-full h-[calc(100vh-65px)] md:h-[calc(100vh-73px)] flex overflow-hidden bg-db-paper border-t border-db-linen/50"
+  @keydown.escape.window="if (contextDrawerOpen) closeContextDrawer()"
+  class="w-full desk-shell-height flex overflow-hidden bg-db-paper border-t border-db-linen/50"
 >
   <aside
     :class="mobileView === 'queue' ? 'flex w-full lg:w-80 xl:w-[340px]' : 'hidden lg:flex lg:w-80 xl:w-[340px]'"
@@ -38,7 +39,7 @@
           @input.debounce.300ms="refreshQueue()"
           @search="refreshQueue()"
           placeholder="Email, імʼя, телефон, #тікет, DB-…"
-          class="w-full min-h-[44px] pl-9 pr-3 py-2 rounded-lg border border-db-linen bg-white text-db-text font-sans text-xs sm:text-sm placeholder:text-db-subtle focus:border-db-crust-dark focus:outline-none"
+          class="w-full min-h-[44px] pl-9 pr-3 py-2 rounded-lg border border-db-linen bg-white text-db-text font-sans text-base sm:text-sm placeholder:text-db-subtle focus:border-db-crust-dark focus:outline-none"
         >
         <svg class="w-4 h-4 text-db-subtle absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
           <circle cx="11" cy="11" r="8"></circle>
@@ -60,7 +61,7 @@
     {% if thread %}
       {% include "support/desk/_thread.html" %}
     {% else %}
-      <div class="flex-1 flex items-center justify-center p-8 text-center bg-white">
+      <div class="flex-1 flex items-center justify-center p-6 sm:p-8 text-center bg-white">
         <div class="max-w-md space-y-3">
           <div class="w-12 h-12 rounded-2xl bg-db-boucle border border-db-linen text-db-crust-dark inline-flex items-center justify-center mx-auto">
             <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -71,6 +72,18 @@
           <p class="font-sans text-sm text-db-muted leading-relaxed">
             Оберіть діалог у лівій панелі або переключіться на вкладки «В роботі» чи «Активні AI», щоб переглянути переписку чи перехопити чат.
           </p>
+          <div class="pt-1 lg:hidden">
+            <button
+              type="button"
+              @click="backToQueue()"
+              class="min-h-[44px] min-w-[44px] px-4 py-2 rounded-lg border border-db-linen bg-db-paper text-db-text text-sm font-sans font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+              <span>До списку діалогів</span>
+            </button>
+          </div>
         </div>
       </div>
     {% endif %}
@@ -93,6 +106,9 @@ function supportDeskController(initial) {
     errorBanner: '',
     mobileView: initial.activeSessionUuid ? 'chat' : 'queue',
     contextDrawerOpen: false,
+    isDesktopViewport: typeof window !== 'undefined' ? window.innerWidth >= 1024 : true,
+    desktopMediaQuery: null,
+    desktopMediaHandler: null,
     expandedPast: {},
     threadLoading: false,
     pendingQueueRefresh: false,
@@ -117,6 +133,25 @@ function supportDeskController(initial) {
     htmxErrorHandler: null,
 
     init() {
+      this.isDesktopViewport = this.isDesktop();
+      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        this.desktopMediaQuery = window.matchMedia('(min-width: 1024px)');
+        this.isDesktopViewport = Boolean(this.desktopMediaQuery.matches);
+        this.desktopMediaHandler = (evt) => {
+          this.isDesktopViewport = Boolean(evt.matches);
+          if (this.isDesktopViewport && this.contextDrawerOpen) {
+            this.closeContextDrawer({ restoreFocus: false });
+          } else {
+            this.syncDrawerInert();
+          }
+        };
+        if (typeof this.desktopMediaQuery.addEventListener === 'function') {
+          this.desktopMediaQuery.addEventListener('change', this.desktopMediaHandler);
+        } else if (typeof this.desktopMediaQuery.addListener === 'function') {
+          this.desktopMediaQuery.addListener(this.desktopMediaHandler);
+        }
+      }
+
       this.syncThreadMetadata();
       this.scrollMessagesToBottom();
 
@@ -136,6 +171,7 @@ function supportDeskController(initial) {
           this.threadLoading = false;
           this.expandedPast = {};
           this.syncThreadMetadata();
+          this.syncDrawerInert();
           if (this.pendingSseMessages.length > 0) {
             const matching = this.pendingSseMessages
               .filter((entry) => entry && entry.sessionUuid === this.activeSessionUuid)
@@ -248,6 +284,14 @@ function supportDeskController(initial) {
 
     destroy() {
       this.stopRealtime();
+      this.closeContextDrawer({ restoreFocus: false });
+      if (this.desktopMediaQuery && this.desktopMediaHandler) {
+        if (typeof this.desktopMediaQuery.removeEventListener === 'function') {
+          this.desktopMediaQuery.removeEventListener('change', this.desktopMediaHandler);
+        } else if (typeof this.desktopMediaQuery.removeListener === 'function') {
+          this.desktopMediaQuery.removeListener(this.desktopMediaHandler);
+        }
+      }
       if (this.visibilityHandler) {
         document.removeEventListener('visibilitychange', this.visibilityHandler);
       }
@@ -332,12 +376,68 @@ function supportDeskController(initial) {
       this.refreshQueue();
     },
 
+    isDesktop() {
+      return typeof window !== 'undefined' ? window.innerWidth >= 1024 : true;
+    },
+
+    syncDrawerInert() {
+      if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+      const threadMain = document.getElementById('desk-thread-main');
+      if (threadMain) {
+        threadMain.inert = Boolean(this.contextDrawerOpen && !this.isDesktop());
+      }
+    },
+
+    openContextDrawer() {
+      if (this.isDesktop()) return;
+      this.isDesktopViewport = false;
+      this.contextDrawerOpen = true;
+      this.syncDrawerInert();
+      const focusClose = () => {
+        if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+        const closeBtn = document.getElementById('desk-context-close-btn');
+        if (closeBtn && typeof closeBtn.focus === 'function') {
+          closeBtn.focus({ preventScroll: true });
+        }
+      };
+      if (typeof this.$nextTick === 'function') {
+        this.$nextTick(focusClose);
+      } else {
+        focusClose();
+      }
+    },
+
+    closeContextDrawer(options = {}) {
+      const wasOpen = this.contextDrawerOpen;
+      this.contextDrawerOpen = false;
+      this.syncDrawerInert();
+      if (wasOpen && options.restoreFocus !== false && !this.isDesktop()) {
+        const focusTrigger = () => {
+          if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+          const openBtn = document.getElementById('desk-context-open-btn');
+          if (openBtn && typeof openBtn.focus === 'function') {
+            openBtn.focus({ preventScroll: true });
+          }
+        };
+        if (typeof this.$nextTick === 'function') {
+          this.$nextTick(focusTrigger);
+        } else {
+          focusTrigger();
+        }
+      }
+    },
+
+    backToQueue() {
+      this.closeContextDrawer({ restoreFocus: false });
+      this.mobileView = 'queue';
+    },
+
     selectSession(uuid) {
       if (!uuid) return;
       this.activeSessionUuid = uuid;
       this.errorBanner = '';
       this.replyText = '';
-      this.contextDrawerOpen = false;
+      this.closeContextDrawer({ restoreFocus: false });
       this.expandedPast = {};
       this.mobileView = 'chat';
       this.pendingQueueRefresh = true;

@@ -55,14 +55,14 @@
     </div>
   </div>
 
-  <div class="flex-1 overflow-y-auto divide-y divide-db-linen/80" data-lenis-prevent>
+  <div class="flex-1 overflow-y-auto overscroll-contain divide-y divide-db-linen/80 desk-safe-bottom" data-lenis-prevent>
     {% if queue.items %}
       {% for item in queue.items %}
         <a
           href="{% url 'support:desk_session' item.session_uuid %}"
           @click.prevent="selectSession('{{ item.session_uuid }}')"
           data-session-card="{{ item.session_uuid }}"
-          class="block px-3.5 py-3 transition-colors border-l-2 {% if item.is_active_selected %}bg-white border-l-db-crust-dark{% else %}bg-db-paper hover:bg-white/80 border-l-transparent{% endif %}"
+          class="block min-h-[44px] px-3.5 py-3 transition-colors border-l-2 {% if item.is_active_selected %}bg-white border-l-db-crust-dark{% else %}bg-db-paper hover:bg-white/80 border-l-transparent{% endif %}"
         >
           <div class="flex items-start justify-between gap-2 mb-1">
             <div class="min-w-0 flex items-center gap-1.5">
