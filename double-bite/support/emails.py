@@ -22,6 +22,30 @@ def get_admin_ticket_url(
     return f'{effective_protocol}://{effective_domain}{path}'
 
 
+def get_desk_ticket_url(
+    ticket: Any,
+    domain: str | None = None,
+    protocol: str | None = None,
+) -> str:
+    session = getattr(ticket, 'session', None)
+    session_uuid = getattr(session, 'session_uuid', None) or getattr(
+        ticket, 'session_id', None
+    )
+    if session_uuid:
+        try:
+            path = reverse('support:desk_session', args=[session_uuid])
+        except NoReverseMatch:
+            path = f'/support/desk/{session_uuid}/'
+    else:
+        try:
+            path = reverse('support:desk_index')
+        except NoReverseMatch:
+            path = '/support/desk/'
+    effective_domain = resolve_site_domain(domain)
+    effective_protocol = resolve_site_protocol(protocol)
+    return f'{effective_protocol}://{effective_domain}{path}'
+
+
 def send_ticket_escalated_email(
     ticket: Any,
     recipient_email: str | None = None,
@@ -51,6 +75,11 @@ def send_ticket_escalated_email(
         domain=effective_domain,
         protocol=effective_protocol,
     )
+    desk_session_url = get_desk_ticket_url(
+        ticket,
+        domain=effective_domain,
+        protocol=effective_protocol,
+    )
     reason_display = (
         ticket.get_reason_display()
         if hasattr(ticket, 'get_reason_display')
@@ -75,6 +104,7 @@ def send_ticket_escalated_email(
         'customer_name': customer_name,
         'customer_email': customer_email,
         'admin_ticket_url': admin_ticket_url,
+        'desk_session_url': desk_session_url,
         'recent_messages': recent_messages,
         'protocol': effective_protocol,
         'domain': effective_domain,

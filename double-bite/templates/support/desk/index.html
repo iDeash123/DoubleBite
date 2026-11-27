@@ -1,0 +1,1159 @@
+{% extends "base.html" %}
+
+{% block title %}Пульт підтримки — Double Bite{% endblock %}
+{% block meta_description %}Веб-пульт оператора служби турботи про гостей Double Bite.{% endblock %}
+
+{% block footer %}{% endblock %}
+
+{% block content %}
+<div
+  id="support-desk-app"
+  x-data="supportDeskController({
+    activeTab: '{{ queue.tab|escapejs }}',
+    searchQuery: '{{ queue.query|escapejs }}',
+    activeSessionUuid: '{{ active_session_uuid|escapejs }}',
+    lastMessageId: {{ thread.last_message_id|default:0 }},
+    sessionStatus: '{% if thread %}{{ thread.session.status|escapejs }}{% endif %}',
+    assignedOperatorId: '{% if thread and thread.session.assigned_operator_id %}{{ thread.session.assigned_operator_id }}{% endif %}',
+    isOwnedByMe: {% if thread and thread.is_owned_by_me %}true{% else %}false{% endif %}
+  })"
+  @keydown.escape.window="if (contextDrawerOpen) closeContextDrawer()"
+  class="w-full desk-shell-height flex overflow-hidden bg-db-paper border-t border-db-linen/50"
+>
+  <aside
+    id="desk-queue-panel"
+    :class="mobileView === 'queue' ? 'flex w-full lg:w-80 xl:w-[340px]' : 'hidden lg:flex lg:w-80 xl:w-[340px]'"
+    class="flex-col shrink-0 bg-db-paper border-r border-db-linen h-full overflow-hidden"
+    aria-label="Список діалогів"
+  >
+    <div class="px-3.5 pt-3.5 pb-2.5 border-b border-db-linen bg-db-paper shrink-0 space-y-2.5">
+      <div class="flex items-center justify-between gap-2">
+        <h1 class="font-serif text-xl font-medium text-db-text">Пульт підтримки</h1>
+        <span class="font-mono tabular-nums text-[11px] text-db-subtle">{{ working_hours_label|default:"10:00–22:00" }}</span>
+      </div>
+      <div class="relative">
+        <label for="desk-search-input" class="sr-only">Пошук звернень</label>
+        <input
+          id="desk-search-input"
+          type="search"
+          x-model="searchQuery"
+          @input.debounce.300ms="refreshQueue()"
+          @search="refreshQueue()"
+          placeholder="Email, імʼя, телефон, #тікет, DB-…"
+          class="w-full min-h-[44px] pl-9 pr-3 py-2 rounded-lg border border-db-linen bg-white text-db-text font-sans text-base sm:text-sm placeholder:text-db-subtle focus:border-db-crust-dark focus:outline-none"
+        >
+        <svg class="w-4 h-4 text-db-subtle absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+      </div>
+    </div>
+
+    <div id="desk-queue" class="flex-1 min-h-0 overflow-hidden">
+      {% include "support/desk/_queue.html" %}
+    </div>
+  </aside>
+
+  <main
+    id="desk-workspace"
+    :class="mobileView === 'chat' ? 'flex flex-1 min-w-0 h-full' : 'hidden lg:flex lg:flex-1 lg:min-w-0 lg:h-full'"
+    class="overflow-hidden bg-white"
+  >
+    {% if thread %}
+      {% include "support/desk/_thread.html" %}
+    {% else %}
+      <div class="flex-1 flex items-center justify-center p-6 sm:p-8 text-center bg-white">
+        <div class="max-w-md space-y-3">
+          <div class="w-12 h-12 rounded-2xl bg-db-boucle border border-db-linen text-db-crust-dark inline-flex items-center justify-center mx-auto">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+          </div>
+          <h2 class="font-serif text-2xl font-medium text-db-text">Немає звернень в очікуванні</h2>
+          <p class="font-sans text-sm text-db-muted leading-relaxed">
+            Оберіть діалог у лівій панелі або переключіться на вкладки «В роботі» чи «Активні AI», щоб переглянути переписку чи перехопити чат.
+          </p>
+          <div class="pt-1 lg:hidden">
+            <button
+              type="button"
+              @click="backToQueue()"
+              class="min-h-[44px] min-w-[44px] px-4 py-2 rounded-lg border border-db-linen bg-db-paper text-db-text text-sm font-sans font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+              <span>До списку діалогів</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  </main>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+function supportDeskController(initial) {
+  return {
+    activeTab: initial.activeTab || 'waiting',
+    searchQuery: initial.searchQuery || '',
+    activeSessionUuid: initial.activeSessionUuid || '',
+    lastMessageId: Number(initial.lastMessageId || 0),
+    sessionStatus: initial.sessionStatus || '',
+    assignedOperatorId: initial.assignedOperatorId || '',
+    isOwnedByMe: Boolean(initial.isOwnedByMe),
+    replyText: '',
+    sending: false,
+    actionLoading: false,
+    errorBanner: '',
+    mobileView: initial.activeSessionUuid ? 'chat' : 'queue',
+    contextDrawerOpen: false,
+    isDesktopViewport: typeof window !== 'undefined' ? window.innerWidth >= 1024 : true,
+    desktopMediaQuery: null,
+    desktopMediaHandler: null,
+    expandedPast: {},
+    threadLoading: false,
+    pendingQueueRefresh: false,
+    pendingSseMessages: [],
+    pendingThreadState: null,
+    markReadTimer: null,
+    pollTimer: null,
+    pollingInFlight: false,
+    pendingCatchupPoll: false,
+    eventSource: null,
+    sseSessionUuid: '',
+    sseConnected: false,
+    sseNeedsQueueCatchup: false,
+    queueCatchupInFlight: false,
+    queueCatchupRetryPending: false,
+    sseReconnectTimer: null,
+    sseClosedErrors: 0,
+    queueRefreshTimer: null,
+    visibilityHandler: null,
+    beforeRequestHandler: null,
+    afterSwapHandler: null,
+    htmxErrorHandler: null,
+
+    init() {
+      this.isDesktopViewport = this.isDesktop();
+      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        this.desktopMediaQuery = window.matchMedia('(min-width: 1024px)');
+        this.isDesktopViewport = Boolean(this.desktopMediaQuery.matches);
+        this.desktopMediaHandler = (evt) => {
+          this.isDesktopViewport = Boolean(evt.matches);
+          if (this.isDesktopViewport && this.contextDrawerOpen) {
+            this.closeContextDrawer({ restoreFocus: false });
+          } else {
+            this.syncDrawerInert();
+          }
+        };
+        if (typeof this.desktopMediaQuery.addEventListener === 'function') {
+          this.desktopMediaQuery.addEventListener('change', this.desktopMediaHandler);
+        } else if (typeof this.desktopMediaQuery.addListener === 'function') {
+          this.desktopMediaQuery.addListener(this.desktopMediaHandler);
+        }
+      }
+
+      this.syncThreadMetadata();
+      this.scrollMessagesToBottom();
+
+      this.beforeRequestHandler = (evt) => {
+        const elt = evt.detail && evt.detail.elt;
+        if (elt && elt.dataset && elt.dataset.pastSessionBtn) {
+          const box = document.getElementById(`past-history-box-${elt.dataset.pastSessionBtn}`);
+          if (box && box.dataset.loaded === '1') {
+            evt.preventDefault();
+          }
+        }
+      };
+      this.afterSwapHandler = (evt) => {
+        const target = evt.detail && evt.detail.target;
+        if (!target) return;
+        if (target.id === 'desk-workspace') {
+          this.threadLoading = false;
+          this.expandedPast = {};
+          this.syncThreadMetadata();
+          this.syncDrawerInert();
+          if (this.contextDrawerOpen && !this.isDesktop()) {
+            this.focusContextClose();
+          }
+          if (this.pendingSseMessages.length > 0) {
+            const matching = this.pendingSseMessages
+              .filter((entry) => entry && entry.sessionUuid === this.activeSessionUuid)
+              .map((entry) => entry.msg);
+            this.pendingSseMessages = [];
+            if (matching.length > 0) {
+              this.appendMessages(matching, { advanceCursor: true });
+              if (matching.some((m) => m && m.sender === 'user')) {
+                this.scheduleMarkRead();
+              }
+            }
+          }
+          const deferredState = this.pendingThreadState;
+          this.pendingThreadState = null;
+          if (
+            deferredState &&
+            deferredState.sessionUuid === this.activeSessionUuid &&
+            (
+              (deferredState.status && deferredState.status !== this.sessionStatus) ||
+              (
+                deferredState.status !== 'RESOLVED' &&
+                deferredState.assignedOperatorId !== this.assignedOperatorId
+              )
+            )
+          ) {
+            this.pendingQueueRefresh = true;
+            this.refreshThread(this.activeSessionUuid);
+            return;
+          }
+          this.scrollMessagesToBottom();
+          let refreshedQueue = false;
+          if (this.pendingQueueRefresh) {
+            this.pendingQueueRefresh = false;
+            this.refreshQueue();
+            refreshedQueue = true;
+          }
+          if (!document.hidden && this.getEventSourceCtor()) {
+            const desiredUuid = this.activeSessionUuid || '';
+            const needsNewStream =
+              (this.eventSource && this.sseSessionUuid !== desiredUuid) ||
+              (!this.eventSource && this.sseClosedErrors <= 3);
+            if (needsNewStream) {
+              if (refreshedQueue) {
+                this.sseNeedsQueueCatchup = false;
+              }
+              this.connectEventSource(true);
+            }
+          }
+        } else if (target.id === 'desk-queue') {
+          this.queueCatchupInFlight = false;
+          this.queueCatchupRetryPending = false;
+        } else if (target.id && target.id.startsWith('past-history-box-')) {
+          const pastUuid = target.id.slice('past-history-box-'.length);
+          target.dataset.loaded = '1';
+          this.expandedPast[pastUuid] = true;
+        }
+      };
+      this.htmxErrorHandler = (evt) => {
+        const target = evt.detail && evt.detail.target;
+        if (!target) return;
+        if (target.id === 'desk-workspace') {
+          const hadPendingQueue = this.pendingQueueRefresh;
+          this.threadLoading = false;
+          this.pendingQueueRefresh = false;
+          this.pendingSseMessages = [];
+          this.pendingThreadState = null;
+          const root = document.getElementById('desk-thread-root');
+          this.activeSessionUuid = root ? (root.dataset.sessionUuid || '') : '';
+          this.syncThreadMetadata();
+          this.syncDrawerInert();
+          if (window.history && window.history.replaceState) {
+            const restoredPath = this.activeSessionUuid
+              ? `/support/desk/${encodeURIComponent(this.activeSessionUuid)}/`
+              : '/support/desk/';
+            window.history.replaceState(null, '', restoredPath);
+          }
+          if (hadPendingQueue && !document.hidden) {
+            this.scheduleQueueRefresh(250);
+          }
+          if (!document.hidden && !this.eventSource && !this.pollTimer) {
+            if (this.sseClosedErrors > 3) {
+              this.startPolling(false);
+            } else {
+              this.startRealtime(false);
+            }
+          }
+        } else if (target.id === 'desk-queue' && this.queueCatchupInFlight) {
+          this.queueCatchupInFlight = false;
+          if (!document.hidden && this.sseConnected && !this.queueCatchupRetryPending) {
+            this.queueCatchupRetryPending = true;
+            this.scheduleQueueRefresh(1000);
+          }
+        }
+      };
+      document.body.addEventListener('htmx:beforeRequest', this.beforeRequestHandler);
+      document.body.addEventListener('htmx:afterSwap', this.afterSwapHandler);
+      document.body.addEventListener('htmx:responseError', this.htmxErrorHandler);
+      document.body.addEventListener('htmx:sendError', this.htmxErrorHandler);
+
+      this.visibilityHandler = () => {
+        if (document.hidden) {
+          this.stopRealtime();
+        } else {
+          this.sseClosedErrors = 0;
+          this.startRealtime(true);
+        }
+      };
+      document.addEventListener('visibilitychange', this.visibilityHandler);
+      this.startRealtime(false);
+    },
+
+    destroy() {
+      this.stopRealtime();
+      this.closeContextDrawer({ restoreFocus: false });
+      if (this.desktopMediaQuery && this.desktopMediaHandler) {
+        if (typeof this.desktopMediaQuery.removeEventListener === 'function') {
+          this.desktopMediaQuery.removeEventListener('change', this.desktopMediaHandler);
+        } else if (typeof this.desktopMediaQuery.removeListener === 'function') {
+          this.desktopMediaQuery.removeListener(this.desktopMediaHandler);
+        }
+      }
+      if (this.visibilityHandler) {
+        document.removeEventListener('visibilitychange', this.visibilityHandler);
+      }
+      if (this.beforeRequestHandler) {
+        document.body.removeEventListener('htmx:beforeRequest', this.beforeRequestHandler);
+      }
+      if (this.afterSwapHandler) {
+        document.body.removeEventListener('htmx:afterSwap', this.afterSwapHandler);
+      }
+      if (this.htmxErrorHandler) {
+        document.body.removeEventListener('htmx:responseError', this.htmxErrorHandler);
+        document.body.removeEventListener('htmx:sendError', this.htmxErrorHandler);
+      }
+    },
+
+    getCsrfToken() {
+      let token = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+      if (!token) {
+        const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+        if (match) token = decodeURIComponent(match[1]);
+      }
+      return token;
+    },
+
+    syncThreadMetadata() {
+      const root = document.getElementById('desk-thread-root');
+      if (!root) {
+        this.lastMessageId = 0;
+        this.sessionStatus = '';
+        this.assignedOperatorId = '';
+        this.isOwnedByMe = false;
+        return;
+      }
+      this.activeSessionUuid = root.dataset.sessionUuid || this.activeSessionUuid;
+      this.sessionStatus = root.dataset.sessionStatus || '';
+      this.assignedOperatorId = root.dataset.assignedOperatorId || '';
+      if ('isOwnedByMe' in root.dataset) {
+        this.isOwnedByMe = root.dataset.isOwnedByMe === '1';
+      }
+      this.lastMessageId = Number(root.dataset.lastMessageId || 0);
+    },
+
+    scrollMessagesToBottom() {
+      this.$nextTick(() => {
+        const el = document.getElementById('desk-messages-list');
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+
+    buildQueueUrl() {
+      const params = new URLSearchParams({
+        tab: this.activeTab,
+        q: this.searchQuery || '',
+        active: this.activeSessionUuid || '',
+      });
+      return '/support/desk/partials/queue/?' + params.toString();
+    },
+
+    refreshQueue() {
+      if (!window.htmx) return;
+      if (this.queueRefreshTimer) {
+        clearTimeout(this.queueRefreshTimer);
+        this.queueRefreshTimer = null;
+      }
+      window.htmx.ajax('GET', this.buildQueueUrl(), {
+        target: '#desk-queue',
+        swap: 'innerHTML',
+      });
+    },
+
+    refreshThread(uuid = this.activeSessionUuid) {
+      if (!uuid || !window.htmx) return;
+      this.threadLoading = true;
+      window.htmx.ajax('GET', `/support/desk/partials/thread/${encodeURIComponent(uuid)}/`, {
+        target: '#desk-workspace',
+        swap: 'innerHTML',
+      });
+    },
+
+    switchTab(tab) {
+      this.activeTab = tab;
+      this.refreshQueue();
+    },
+
+    isDesktop() {
+      if (this.desktopMediaQuery && typeof this.desktopMediaQuery.matches === 'boolean') {
+        return this.desktopMediaQuery.matches;
+      }
+      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        return Boolean(window.matchMedia('(min-width: 1024px)').matches);
+      }
+      return typeof window !== 'undefined' ? window.innerWidth >= 1024 : true;
+    },
+
+    syncDrawerInert() {
+      if (typeof document === 'undefined') return;
+      const shouldInert = Boolean(this.contextDrawerOpen && !this.isDesktop());
+      if (typeof document.getElementById === 'function') {
+        const threadMain = document.getElementById('desk-thread-main');
+        if (threadMain) {
+          threadMain.inert = shouldInert;
+        }
+        const queuePanel = document.getElementById('desk-queue-panel');
+        if (queuePanel) {
+          queuePanel.inert = shouldInert;
+        }
+      }
+      if (typeof document.querySelector === 'function') {
+        const siteHeader = document.querySelector('body > header');
+        if (siteHeader) {
+          siteHeader.inert = shouldInert;
+        }
+      }
+    },
+
+    focusContextClose() {
+      const focusClose = () => {
+        if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+        const closeBtn = document.getElementById('desk-context-close-btn');
+        if (closeBtn && typeof closeBtn.focus === 'function') {
+          closeBtn.focus({ preventScroll: true });
+        }
+      };
+      if (typeof this.$nextTick === 'function') {
+        this.$nextTick(focusClose);
+      } else {
+        focusClose();
+      }
+    },
+
+    openContextDrawer() {
+      if (this.isDesktop()) return;
+      this.isDesktopViewport = false;
+      this.contextDrawerOpen = true;
+      this.syncDrawerInert();
+      this.focusContextClose();
+    },
+
+    closeContextDrawer(options = {}) {
+      const wasOpen = this.contextDrawerOpen;
+      this.contextDrawerOpen = false;
+      this.syncDrawerInert();
+      if (wasOpen && options.restoreFocus !== false && !this.isDesktop()) {
+        const focusTrigger = () => {
+          if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+          const openBtn = document.getElementById('desk-context-open-btn');
+          if (openBtn && typeof openBtn.focus === 'function') {
+            openBtn.focus({ preventScroll: true });
+          }
+        };
+        if (typeof this.$nextTick === 'function') {
+          this.$nextTick(focusTrigger);
+        } else {
+          focusTrigger();
+        }
+      }
+    },
+
+    backToQueue() {
+      this.closeContextDrawer({ restoreFocus: false });
+      this.mobileView = 'queue';
+    },
+
+    selectSession(uuid) {
+      if (!uuid) return;
+      this.activeSessionUuid = uuid;
+      this.errorBanner = '';
+      this.replyText = '';
+      this.closeContextDrawer({ restoreFocus: false });
+      this.expandedPast = {};
+      this.mobileView = 'chat';
+      this.pendingQueueRefresh = true;
+      this.pendingSseMessages = [];
+      this.pendingThreadState = null;
+      this.clearMarkReadTimer();
+      this.sseClosedErrors = 0;
+      this.sseNeedsQueueCatchup = false;
+      this.closeEventSource(true);
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, '', `/support/desk/${encodeURIComponent(uuid)}/`);
+      }
+      this.refreshThread(uuid);
+    },
+
+    togglePastSession(uuid) {
+      if (!uuid) return;
+      const box = document.getElementById(`past-history-box-${uuid}`);
+      if (box && box.dataset.loaded === '1') {
+        this.expandedPast[uuid] = !this.expandedPast[uuid];
+      }
+    },
+
+    async runAction(action) {
+      if (!this.activeSessionUuid || this.actionLoading) return;
+      const targetUuid = this.activeSessionUuid;
+      this.actionLoading = true;
+      this.errorBanner = '';
+      try {
+        const res = await fetch(
+          `/support/desk/api/sessions/${encodeURIComponent(targetUuid)}/${action}/`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': this.getCsrfToken(),
+            },
+            body: JSON.stringify({}),
+          }
+        );
+        let data = null;
+        try {
+          data = await res.json();
+        } catch (e) {}
+
+        if (this.activeSessionUuid !== targetUuid) {
+          if (res.ok) {
+            this.refreshQueue();
+          }
+          return;
+        }
+        if (!res.ok) {
+          this.errorBanner = (data && data.error) || 'Не вдалося виконати дію.';
+        }
+        if (res.ok && data) {
+          if (data.status === 'ACTIVE') {
+            this.activeTab = 'ai';
+          } else if (data.status === 'RESOLVED') {
+            this.activeTab = 'resolved';
+          } else if (data.status === 'ESCALATED' && data.assigned_operator_id) {
+            this.activeTab = 'in_progress';
+          }
+        }
+        this.pendingQueueRefresh = true;
+        this.refreshThread(targetUuid);
+      } catch (e) {
+        if (this.activeSessionUuid === targetUuid) {
+          this.errorBanner = 'Помилка мережі. Спробуйте ще раз.';
+        }
+      } finally {
+        this.actionLoading = false;
+      }
+    },
+
+    handleReplyKeydown(evt) {
+      if (evt.key === 'Enter' && !evt.shiftKey) {
+        evt.preventDefault();
+        this.sendReply();
+      }
+    },
+
+    triggerCatchupPoll() {
+      if (document.hidden) return;
+      if (this.pollingInFlight) {
+        this.pendingCatchupPoll = true;
+        return;
+      }
+      this.pollActiveSession();
+    },
+
+    async sendReply() {
+      const content = this.replyText.trim();
+      if (!content || !this.activeSessionUuid || this.sending) return;
+      const targetUuid = this.activeSessionUuid;
+      this.sending = true;
+      this.errorBanner = '';
+      try {
+        const res = await fetch(
+          `/support/desk/api/sessions/${encodeURIComponent(targetUuid)}/reply/`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': this.getCsrfToken(),
+            },
+            body: JSON.stringify({ message: content }),
+          }
+        );
+        let data = null;
+        try {
+          data = await res.json();
+        } catch (e) {}
+
+        if (this.activeSessionUuid !== targetUuid) {
+          if (res.ok) {
+            this.refreshQueue();
+          }
+          return;
+        }
+
+        if (res.ok && data && data.message) {
+          this.replyText = '';
+          this.appendMessages([data.message], { advanceCursor: false });
+          if (!this.sseConnected) {
+            if (this.pollingInFlight) {
+              this.refreshQueue();
+            }
+            this.triggerCatchupPoll();
+          }
+        } else {
+          this.errorBanner = (data && data.error) || 'Не вдалося надіслати повідомлення.';
+          if (res.status === 409) {
+            this.pendingQueueRefresh = true;
+            this.refreshThread(targetUuid);
+          }
+        }
+      } catch (e) {
+        if (this.activeSessionUuid === targetUuid) {
+          this.errorBanner = 'Помилка мережі під час надсилання повідомлення.';
+        }
+      } finally {
+        this.sending = false;
+      }
+    },
+
+    createSourceIcon(source) {
+      const svgNS = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(svgNS, 'svg');
+      svg.setAttribute('class', 'w-2.5 h-2.5');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.setAttribute('fill', 'none');
+      svg.setAttribute('stroke', 'currentColor');
+      svg.setAttribute('stroke-width', '2');
+      svg.setAttribute('aria-hidden', 'true');
+
+      if (source === 'TELEGRAM') {
+        const line = document.createElementNS(svgNS, 'line');
+        line.setAttribute('x1', '22');
+        line.setAttribute('y1', '2');
+        line.setAttribute('x2', '11');
+        line.setAttribute('y2', '13');
+        const polygon = document.createElementNS(svgNS, 'polygon');
+        polygon.setAttribute('points', '22 2 15 22 11 13 2 9 22 2');
+        svg.appendChild(line);
+        svg.appendChild(polygon);
+      } else {
+        const rect = document.createElementNS(svgNS, 'rect');
+        rect.setAttribute('x', '2');
+        rect.setAttribute('y', '3');
+        rect.setAttribute('width', '20');
+        rect.setAttribute('height', '14');
+        rect.setAttribute('rx', '2');
+        const line1 = document.createElementNS(svgNS, 'line');
+        line1.setAttribute('x1', '8');
+        line1.setAttribute('y1', '21');
+        line1.setAttribute('x2', '16');
+        line1.setAttribute('y2', '21');
+        const line2 = document.createElementNS(svgNS, 'line');
+        line2.setAttribute('x1', '12');
+        line2.setAttribute('y1', '17');
+        line2.setAttribute('x2', '12');
+        line2.setAttribute('y2', '21');
+        svg.appendChild(rect);
+        svg.appendChild(line1);
+        svg.appendChild(line2);
+      }
+      return svg;
+    },
+
+    appendMessages(messages, options = {}) {
+      const advanceCursor = options.advanceCursor !== false;
+      const container = document.getElementById('desk-messages-list');
+      if (!container || !Array.isArray(messages) || messages.length === 0) return;
+      let added = false;
+
+      const sorted = [...messages]
+        .filter((msg) => msg && msg.id !== undefined && msg.id !== null)
+        .sort((a, b) => Number(a.id) - Number(b.id));
+
+      for (const msg of sorted) {
+        const msgId = Number(msg.id);
+        if (!Number.isFinite(msgId) || msgId <= 0) continue;
+        if (container.querySelector(`[data-message-id="${msgId}"]`)) {
+          if (advanceCursor) {
+            this.lastMessageId = Math.max(this.lastMessageId, msgId);
+          }
+          continue;
+        }
+        const emptyPlaceholder = container.querySelector('#desk-empty-thread-placeholder');
+        if (emptyPlaceholder) emptyPlaceholder.remove();
+
+        const row = document.createElement('div');
+        row.setAttribute('data-message-id', String(msgId));
+
+        if (msg.sender === 'system') {
+          row.className = 'flex justify-center py-1';
+          const pill = document.createElement('div');
+          pill.className = 'max-w-lg px-3.5 py-1.5 rounded-xl bg-db-boucle border border-db-linen text-db-muted font-sans text-xs text-center leading-relaxed whitespace-pre-line';
+          pill.textContent = msg.content || '';
+          row.appendChild(pill);
+        } else {
+          const isRight = msg.sender === 'operator' || msg.sender === 'ai';
+          row.className = isRight ? 'flex justify-end' : 'flex justify-start';
+
+          const bubble = document.createElement('div');
+          if (msg.sender === 'operator') {
+            bubble.className = 'max-w-[82%] sm:max-w-[72%] rounded-2xl rounded-tr-sm px-4 py-2.5 bg-db-noir text-white';
+          } else if (msg.sender === 'ai') {
+            bubble.className = 'max-w-[82%] sm:max-w-[72%] rounded-2xl rounded-tr-sm px-4 py-2.5 bg-white border border-db-linen text-db-text shadow-sm';
+          } else {
+            bubble.className = 'max-w-[82%] sm:max-w-[72%] rounded-2xl rounded-tl-sm px-4 py-2.5 bg-db-paper border border-db-linen text-db-text';
+          }
+
+          const meta = document.createElement('div');
+          meta.className = msg.sender === 'operator'
+            ? 'flex items-center justify-between gap-3 mb-1 text-[11px] text-white/75'
+            : 'flex items-center justify-between gap-3 mb-1 text-[11px] text-db-subtle';
+
+          if (msg.sender === 'operator') {
+            const labelWrap = document.createElement('span');
+            labelWrap.className = 'inline-flex items-center gap-1.5 font-sans font-semibold text-white';
+            const labelText = document.createElement('span');
+            labelText.textContent = msg.operator_name || msg.sender_label || 'Адміністратор ресторану';
+            labelWrap.appendChild(labelText);
+            const sourceBadge = msg.source_badge || (msg.source === 'TELEGRAM' ? 'TG' : (msg.source ? 'Web' : ''));
+            if (sourceBadge) {
+              const sourcePill = document.createElement('span');
+              sourcePill.className = 'inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/15 text-[10px] font-mono';
+              sourcePill.appendChild(this.createSourceIcon(msg.source));
+              sourcePill.appendChild(document.createTextNode(String(sourceBadge)));
+              labelWrap.appendChild(sourcePill);
+            }
+            meta.appendChild(labelWrap);
+          } else if (msg.sender === 'ai') {
+            const labelWrap = document.createElement('span');
+            labelWrap.className = 'inline-flex items-center gap-1.5 font-sans font-semibold text-db-text';
+            const aiBadge = document.createElement('span');
+            aiBadge.className = 'px-1.5 py-0.5 rounded bg-db-boucle text-db-crust-dark font-mono text-[10px]';
+            aiBadge.textContent = 'AI';
+            const labelText = document.createElement('span');
+            labelText.textContent = msg.sender_label || '';
+            labelWrap.appendChild(aiBadge);
+            labelWrap.appendChild(labelText);
+            meta.appendChild(labelWrap);
+          } else {
+            const label = document.createElement('span');
+            label.className = 'font-sans font-semibold text-db-text';
+            label.textContent = msg.sender_label || '';
+            meta.appendChild(label);
+          }
+
+          const time = document.createElement('span');
+          time.className = 'font-mono tabular-nums';
+          time.textContent = msg.created_at || '';
+          meta.appendChild(time);
+
+          const body = document.createElement('div');
+          body.className = 'font-sans text-sm leading-relaxed break-words whitespace-pre-line';
+          body.textContent = msg.content || '';
+
+          bubble.appendChild(meta);
+          bubble.appendChild(body);
+          row.appendChild(bubble);
+        }
+
+        let insertBeforeEl = null;
+        const existingRows = container.querySelectorAll('[data-message-id]');
+        for (const existing of existingRows) {
+          const existingId = Number(existing.getAttribute('data-message-id'));
+          if (Number.isFinite(existingId) && existingId > msgId) {
+            insertBeforeEl = existing;
+            break;
+          }
+        }
+        if (insertBeforeEl) {
+          container.insertBefore(row, insertBeforeEl);
+        } else {
+          container.appendChild(row);
+        }
+        if (advanceCursor) {
+          this.lastMessageId = Math.max(this.lastMessageId, msgId);
+        }
+        added = true;
+      }
+
+      if (added) {
+        this.scrollMessagesToBottom();
+      }
+    },
+
+    getEventSourceCtor() {
+      if (typeof EventSource === 'function') return EventSource;
+      if (typeof window !== 'undefined' && window && typeof window.EventSource === 'function') {
+        return window.EventSource;
+      }
+      return null;
+    },
+
+    parseSsePayload(evt) {
+      if (!evt || typeof evt.data !== 'string') return null;
+      try {
+        return JSON.parse(evt.data);
+      } catch (e) {
+        return null;
+      }
+    },
+
+    scheduleQueueRefresh(delayMs = 250) {
+      if (document.hidden) return;
+      if (this.threadLoading) {
+        this.pendingQueueRefresh = true;
+        return;
+      }
+      if (this.queueRefreshTimer) {
+        clearTimeout(this.queueRefreshTimer);
+        this.queueRefreshTimer = null;
+      }
+      if (delayMs <= 0) {
+        this.refreshQueue();
+        return;
+      }
+      this.queueRefreshTimer = setTimeout(() => {
+        this.queueRefreshTimer = null;
+        if (!document.hidden && !this.threadLoading) {
+          this.refreshQueue();
+        }
+      }, delayMs);
+    },
+
+    closeEventSource(clearReconnect = true) {
+      if (clearReconnect && this.sseReconnectTimer) {
+        clearTimeout(this.sseReconnectTimer);
+        this.sseReconnectTimer = null;
+      }
+      if (this.eventSource) {
+        try {
+          this.eventSource.close();
+        } catch (e) {}
+        this.eventSource = null;
+      }
+      this.sseSessionUuid = '';
+      this.sseConnected = false;
+    },
+
+    clearMarkReadTimer() {
+      if (this.markReadTimer) {
+        clearTimeout(this.markReadTimer);
+        this.markReadTimer = null;
+      }
+    },
+
+    scheduleMarkRead() {
+      const isThreadVisible = this.isDesktop() || this.mobileView === 'chat';
+      if (
+        document.hidden ||
+        !this.activeSessionUuid ||
+        !this.isOwnedByMe ||
+        this.threadLoading ||
+        !isThreadVisible ||
+        typeof fetch !== 'function'
+      ) {
+        return;
+      }
+      this.clearMarkReadTimer();
+      const targetUuid = this.activeSessionUuid;
+      this.markReadTimer = setTimeout(() => {
+        this.markReadTimer = null;
+        const stillVisible = this.isDesktop() || this.mobileView === 'chat';
+        if (
+          document.hidden ||
+          !this.isOwnedByMe ||
+          this.threadLoading ||
+          !stillVisible ||
+          this.activeSessionUuid !== targetUuid
+        ) {
+          return;
+        }
+        const url = `/support/desk/api/sessions/${encodeURIComponent(targetUuid)}/messages/?after_id=${encodeURIComponent(String(this.lastMessageId || 0))}`;
+        fetch(url, { cache: 'no-store' }).catch(() => {});
+      }, 250);
+    },
+
+    stopRealtime() {
+      this.sseNeedsQueueCatchup = false;
+      this.queueCatchupInFlight = false;
+      this.queueCatchupRetryPending = false;
+      this.closeEventSource(true);
+      this.clearMarkReadTimer();
+      if (this.queueRefreshTimer) {
+        clearTimeout(this.queueRefreshTimer);
+        this.queueRefreshTimer = null;
+      }
+      this.stopPolling();
+    },
+
+    buildDeskEventsUrl() {
+      const params = new URLSearchParams();
+      if (this.activeSessionUuid) {
+        params.set('session_uuid', this.activeSessionUuid);
+        params.set('after_id', String(this.lastMessageId || 0));
+      }
+      const qs = params.toString();
+      return qs ? (`/support/desk/events/?${qs}`) : '/support/desk/events/';
+    },
+
+    connectEventSource(forceReconnect = false) {
+      if (document.hidden) {
+        this.stopRealtime();
+        return;
+      }
+      const EventSourceCtor = this.getEventSourceCtor();
+      if (!EventSourceCtor) {
+        this.startPolling(false);
+        return;
+      }
+      const desiredUuid = this.activeSessionUuid || '';
+      if (!forceReconnect && this.eventSource && this.sseSessionUuid === desiredUuid) {
+        return;
+      }
+      this.closeEventSource(true);
+      const url = this.buildDeskEventsUrl();
+      let es = null;
+      try {
+        es = new EventSourceCtor(url);
+      } catch (e) {
+        this.startPolling(false);
+        return;
+      }
+      this.eventSource = es;
+      this.sseSessionUuid = desiredUuid;
+
+      es.onopen = () => {
+        if (this.eventSource !== es) return;
+        const needsQueueCatchup = this.sseNeedsQueueCatchup;
+        this.sseConnected = true;
+        this.sseClosedErrors = 0;
+        this.sseNeedsQueueCatchup = false;
+        this.stopPolling();
+        if (needsQueueCatchup) {
+          this.queueCatchupRetryPending = false;
+          if (!document.hidden && !this.threadLoading && window.htmx) {
+            this.queueCatchupInFlight = true;
+          }
+          this.scheduleQueueRefresh(0);
+        }
+      };
+
+      es.addEventListener('message', (evt) => {
+        if (this.eventSource !== es) return;
+        const payload = this.parseSsePayload(evt);
+        if (!payload) return;
+        if (
+          this.activeSessionUuid &&
+          payload.session_uuid === this.activeSessionUuid
+        ) {
+          const msg = payload.data && typeof payload.data === 'object' ? payload.data : payload;
+          if (this.threadLoading) {
+            if (this.pendingSseMessages.length < 100) {
+              this.pendingSseMessages.push({
+                sessionUuid: payload.session_uuid,
+                msg,
+              });
+            }
+            return;
+          }
+          this.appendMessages([msg], { advanceCursor: true });
+          if (msg && msg.sender === 'user') {
+            this.scheduleMarkRead();
+          }
+        }
+      });
+
+      const handleThreadStateChange = (evt) => {
+        if (this.eventSource !== es) return;
+        const payload = this.parseSsePayload(evt);
+        if (!payload) return;
+        const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+        const isCatchup = data.reason === 'catchup';
+        if (
+          this.activeSessionUuid &&
+          payload.session_uuid === this.activeSessionUuid
+        ) {
+          const newOpId = data.assigned_operator_id ? String(data.assigned_operator_id) : '';
+          if (this.threadLoading) {
+            this.pendingThreadState = {
+              sessionUuid: payload.session_uuid,
+              status: data.status || '',
+              assignedOperatorId: newOpId,
+            };
+            if (!isCatchup) {
+              this.pendingQueueRefresh = true;
+            }
+            return;
+          }
+          if (
+            (data.status && data.status !== this.sessionStatus) ||
+            newOpId !== this.assignedOperatorId
+          ) {
+            this.pendingQueueRefresh = true;
+            this.refreshThread(this.activeSessionUuid);
+            return;
+          }
+          if (isCatchup) {
+            return;
+          }
+        }
+        this.scheduleQueueRefresh(250);
+      };
+
+      es.addEventListener('operator_joined', handleThreadStateChange);
+      es.addEventListener('status_changed', handleThreadStateChange);
+      es.addEventListener('session_resolved', (evt) => {
+        if (this.eventSource !== es) return;
+        const payload = this.parseSsePayload(evt);
+        if (!payload) return;
+        const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+        const isCatchup = data.reason === 'catchup';
+        if (
+          this.activeSessionUuid &&
+          payload.session_uuid === this.activeSessionUuid
+        ) {
+          if (this.threadLoading) {
+            this.pendingThreadState = {
+              sessionUuid: payload.session_uuid,
+              status: 'RESOLVED',
+              assignedOperatorId: '',
+            };
+            if (!isCatchup) {
+              this.pendingQueueRefresh = true;
+            }
+            return;
+          }
+          if (this.sessionStatus !== 'RESOLVED') {
+            this.pendingQueueRefresh = true;
+            this.refreshThread(this.activeSessionUuid);
+            return;
+          }
+          if (isCatchup) {
+            return;
+          }
+        }
+        this.scheduleQueueRefresh(250);
+      });
+
+      es.addEventListener('queue_update', () => {
+        if (this.eventSource !== es) return;
+        this.scheduleQueueRefresh(250);
+      });
+
+      es.onerror = () => {
+        if (this.eventSource !== es) return;
+        this.sseConnected = false;
+        if (document.hidden) {
+          this.stopRealtime();
+          return;
+        }
+        this.sseNeedsQueueCatchup = true;
+        this.queueCatchupInFlight = false;
+        this.queueCatchupRetryPending = false;
+        if (!this.pollTimer && !this.pollingInFlight) {
+          this.startPolling(false);
+        }
+        const closedState = typeof EventSourceCtor.CLOSED === 'number' ? EventSourceCtor.CLOSED : 2;
+        if (es.readyState === closedState) {
+          this.closeEventSource(true);
+          this.sseClosedErrors += 1;
+          if (this.sseClosedErrors <= 3) {
+            const retryDelay = Math.min(60000, 10000 * this.sseClosedErrors);
+            this.sseReconnectTimer = setTimeout(() => {
+              this.sseReconnectTimer = null;
+              if (!document.hidden && !this.eventSource) {
+                this.connectEventSource(true);
+              }
+            }, retryDelay);
+          }
+        }
+      };
+    },
+
+    startRealtime(immediate = false) {
+      if (document.hidden) {
+        this.stopRealtime();
+        return;
+      }
+      if (this.getEventSourceCtor()) {
+        if (immediate) {
+          this.sseNeedsQueueCatchup = false;
+        }
+        this.connectEventSource(immediate);
+        if (immediate) {
+          this.scheduleQueueRefresh(0);
+        }
+        return;
+      }
+      this.startPolling(immediate);
+    },
+
+    stopPolling() {
+      if (this.pollTimer) {
+        clearTimeout(this.pollTimer);
+        this.pollTimer = null;
+      }
+    },
+
+    scheduleNextPoll() {
+      this.stopPolling();
+      if (document.hidden || this.sseConnected) return;
+      this.pollTimer = setTimeout(() => {
+        this.pollTimer = null;
+        this.pollActiveSession();
+      }, 4000);
+    },
+
+    startPolling(immediate = false) {
+      if (document.hidden || this.sseConnected) {
+        this.stopPolling();
+        return;
+      }
+      if (immediate) {
+        this.pollActiveSession();
+      } else {
+        this.scheduleNextPoll();
+      }
+    },
+
+    async pollActiveSession() {
+      if (document.hidden || this.sseConnected || this.pollingInFlight) {
+        this.scheduleNextPoll();
+        return;
+      }
+      this.pollingInFlight = true;
+      let queuedAfterSwap = false;
+      try {
+        const isThreadVisible = this.isDesktop() || this.mobileView === 'chat';
+        if (this.activeSessionUuid && !this.threadLoading && isThreadVisible) {
+          const polledUuid = this.activeSessionUuid;
+          const url = `/support/desk/api/sessions/${encodeURIComponent(polledUuid)}/messages/?after_id=${encodeURIComponent(String(this.lastMessageId || 0))}`;
+          const res = await fetch(url, { cache: 'no-store' });
+          if (res.ok && this.activeSessionUuid === polledUuid && !this.threadLoading) {
+            const data = await res.json();
+            const newOpId = data.assigned_operator_id ? String(data.assigned_operator_id) : '';
+            if (
+              (data.status && data.status !== this.sessionStatus) ||
+              newOpId !== this.assignedOperatorId
+            ) {
+              this.pendingQueueRefresh = true;
+              queuedAfterSwap = true;
+              this.refreshThread(polledUuid);
+            } else if (Array.isArray(data.messages) && data.messages.length > 0) {
+              this.appendMessages(data.messages, { advanceCursor: true });
+            }
+          }
+        }
+        if (!queuedAfterSwap && !this.threadLoading) {
+          this.refreshQueue();
+        }
+      } catch (e) {
+      } finally {
+        this.pollingInFlight = false;
+        if (this.pendingCatchupPoll && !document.hidden && !this.sseConnected) {
+          this.pendingCatchupPoll = false;
+          this.pollActiveSession();
+        } else {
+          this.scheduleNextPoll();
+        }
+      }
+    },
+  };
+}
+</script>
+{% endblock %}

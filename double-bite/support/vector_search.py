@@ -11,18 +11,8 @@ from django.db import DatabaseError, connection
 from django.db.models import Q, QuerySet
 from menu.models import Dish
 
-try:
-    from mistralai import Mistral
-except (ImportError, AttributeError):
-    from mistralai.client import Mistral
-
-try:
-    from mistralai.client.errors import NoResponseError, SDKError
-    from mistralai.client.errors.mistralerror import MistralError
-except ImportError:
-    MistralError = RuntimeError
-    SDKError = RuntimeError
-    NoResponseError = RuntimeError
+GEMINI_EMBEDDING_MODEL = 'gemini-embedding-2'
+GEMINI_API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
 
 logger = logging.getLogger('support')
 
@@ -32,9 +22,6 @@ DEFAULT_MAX_COSINE_DISTANCE = 0.65
 _MAX_EMBED_BATCH_SIZE = 64
 
 _EMBEDDING_EXCEPTIONS = (
-    MistralError,
-    SDKError,
-    NoResponseError,
     httpx.HTTPError,
     TimeoutError,
     OSError,
@@ -70,14 +57,14 @@ def _resolve_embedding_timeout_ms(timeout_ms: int | None) -> int:
     if timeout_ms is not None:
         parsed = int(timeout_ms)
         return parsed if parsed > 0 else DEFAULT_EMBEDDING_TIMEOUT_MS
-    raw = os.getenv('MISTRAL_EMBEDDING_TIMEOUT_MS', '').strip()
+    raw = os.getenv('GEMINI_EMBEDDING_TIMEOUT_MS', '').strip()
     if raw:
         try:
             parsed = int(raw)
             if parsed > 0:
                 return parsed
         except ValueError:
-            logger.warning('Invalid MISTRAL_EMBEDDING_TIMEOUT_MS value: %r', raw)
+            logger.warning('Invalid GEMINI_EMBEDDING_TIMEOUT_MS value: %r', raw)
     return DEFAULT_EMBEDDING_TIMEOUT_MS
 
 
@@ -99,12 +86,47 @@ def _resolve_max_cosine_distance(max_distance: float | None) -> float:
     return DEFAULT_MAX_COSINE_DISTANCE
 
 
-def _get_mistral_api_key() -> str:
+def _get_gemini_api_key() -> str:
     return (
-        os.getenv('MISTRAL_API_KEY')
-        or getattr(settings, 'MISTRAL_API_KEY', '')
+        os.getenv('GEMINI_API_KEY')
+        or getattr(settings, 'GEMINI_API_KEY', '')
         or ''
     ).strip()
+
+
+def _normalize(vec: list[float]) -> list[float]:
+    norm = math.sqrt(sum(x * x for x in vec))
+    return [x / norm for x in vec] if norm > 0 else vec
+
+
+def _gemini_embed_request(
+    texts: list[str], dim: int, api_key: str, timeout_ms: int
+) -> list[list[float] | None]:
+    model_path = f'models/{GEMINI_EMBEDDING_MODEL}'
+    body = {
+        'requests': [
+            {
+                'model': model_path,
+                'content': {'parts': [{'text': t}]},
+                'outputDimensionality': dim,
+            }
+            for t in texts
+        ]
+    }
+    response = httpx.post(
+        f'{GEMINI_API_BASE_URL}/{model_path}:batchEmbedContents',
+        json=body,
+        headers={'x-goog-api-key': api_key},
+        timeout=timeout_ms / 1000,
+    )
+    response.raise_for_status()
+    items = response.json().get('embeddings') or []
+    out: list[list[float] | None] = [None] * len(texts)
+    for pos, item in enumerate(items[: len(texts)]):
+        values = item.get('values')
+        if values:
+            out[pos] = _normalize([float(x) for x in values])
+    return out
 
 
 def build_dish_embedding_text(dish: Dish) -> str:
@@ -151,35 +173,17 @@ def get_embedding(
     if not text or not text.strip():
         return None
 
-    api_key = _get_mistral_api_key()
+    api_key = _get_gemini_api_key()
     if not api_key:
-        logger.warning('MISTRAL_API_KEY is not configured; cannot generate embedding.')
+        logger.warning('GEMINI_API_KEY is not configured; cannot generate embedding.')
         return None
 
     resolved_timeout = _resolve_embedding_timeout_ms(timeout_ms)
-    client = Mistral(api_key=api_key, timeout_ms=resolved_timeout)
     try:
-        response = client.embeddings.create(
-            model='mistral-embed',
-            inputs=[text],
-            timeout_ms=resolved_timeout,
-        )
-        data = getattr(response, 'data', None) or []
-        if not data:
-            logger.warning('Mistral embeddings API returned empty data.')
-            return None
-        raw_vec = getattr(data[0], 'embedding', None)
-        if raw_vec is None:
-            logger.warning('Mistral embeddings API item missing embedding vector.')
-            return None
-        return [float(x) for x in raw_vec]
+        return _gemini_embed_request([text], dim, api_key, resolved_timeout)[0]
     except _EMBEDDING_EXCEPTIONS as exc:
-        logger.warning('Mistral embedding request failed: %s', exc)
+        logger.warning('Gemini embedding request failed: %s', exc)
         return None
-    finally:
-        exit_fn = getattr(client, '__exit__', None)
-        if callable(exit_fn):
-            exit_fn(None, None, None)
 
 
 def get_embeddings_batch(
@@ -194,56 +198,33 @@ def get_embeddings_batch(
     if _should_use_mock_embedding():
         return [generate_mock_embedding(t, dim=dim) for t in texts_list]
 
-    api_key = _get_mistral_api_key()
+    api_key = _get_gemini_api_key()
     if not api_key:
         logger.warning(
-            'MISTRAL_API_KEY is not configured; cannot generate batch embeddings.'
+            'GEMINI_API_KEY is not configured; cannot generate batch embeddings.'
         )
         return [None] * len(texts_list)
 
     resolved_timeout = _resolve_embedding_timeout_ms(timeout_ms)
     results: list[list[float] | None] = [None] * len(texts_list)
 
-    client = Mistral(api_key=api_key, timeout_ms=resolved_timeout)
-    try:
-        for start in range(0, len(texts_list), _MAX_EMBED_BATCH_SIZE):
-            chunk_indices: list[int] = []
-            chunk_inputs: list[str] = []
-            for offset, text in enumerate(
-                texts_list[start : start + _MAX_EMBED_BATCH_SIZE]
-            ):
-                if text and text.strip():
-                    chunk_indices.append(start + offset)
-                    chunk_inputs.append(text)
-            if not chunk_inputs:
-                continue
-
-            try:
-                response = client.embeddings.create(
-                    model='mistral-embed',
-                    inputs=chunk_inputs,
-                    timeout_ms=resolved_timeout,
-                )
-            except _EMBEDDING_EXCEPTIONS as exc:
-                logger.warning('Mistral batch embedding request failed: %s', exc)
-                continue
-
-            data = getattr(response, 'data', None) or []
-            for pos, item in enumerate(data):
-                raw_idx = getattr(item, 'index', None)
-                if isinstance(raw_idx, int) and 0 <= raw_idx < len(chunk_indices):
-                    target_idx = chunk_indices[raw_idx]
-                elif pos < len(chunk_indices):
-                    target_idx = chunk_indices[pos]
-                else:
-                    continue
-                raw_vec = getattr(item, 'embedding', None)
-                if raw_vec is not None:
-                    results[target_idx] = [float(x) for x in raw_vec]
-    finally:
-        exit_fn = getattr(client, '__exit__', None)
-        if callable(exit_fn):
-            exit_fn(None, None, None)
+    for start in range(0, len(texts_list), _MAX_EMBED_BATCH_SIZE):
+        indices = [
+            i
+            for i in range(start, min(start + _MAX_EMBED_BATCH_SIZE, len(texts_list)))
+            if texts_list[i] and texts_list[i].strip()
+        ]
+        if not indices:
+            continue
+        try:
+            vecs = _gemini_embed_request(
+                [texts_list[i] for i in indices], dim, api_key, resolved_timeout
+            )
+        except _EMBEDDING_EXCEPTIONS as exc:
+            logger.warning('Gemini batch embedding request failed: %s', exc)
+            continue
+        for idx, vec in zip(indices, vecs, strict=True):
+            results[idx] = vec
 
     return results
 

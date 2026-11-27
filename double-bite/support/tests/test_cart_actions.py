@@ -204,7 +204,7 @@ class AutonomousCartActionsTest(TestCase):
         cart = Cart.objects.filter(user=self.user).first()
         self.assertEqual(cart.items.count(), 0)
 
-    @patch('support.agent.client.MistralSupportAgent.stream_chat_response', side_effect=mock_stream_with_cart_tool)
+    @patch('support.agent.client.GeminiSupportAgent.stream_chat_response', side_effect=mock_stream_with_cart_tool)
     async def test_sse_stream_cart_mutation_event(self, mock_stream):
         await self.async_client.aforce_login(self.user)
         response = await self.async_client.post(

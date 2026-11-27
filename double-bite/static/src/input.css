@@ -218,6 +218,22 @@
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
+
+  .desk-shell-height {
+    height: calc(100vh - 65px);
+    height: calc(100dvh - 65px);
+  }
+
+  @media (min-width: 768px) {
+    .desk-shell-height {
+      height: calc(100vh - 73px);
+      height: calc(100dvh - 73px);
+    }
+  }
+
+  .desk-safe-bottom {
+    padding-bottom: max(0.875rem, env(safe-area-inset-bottom, 0px));
+  }
 }
 
 [x-cloak] {

@@ -12,7 +12,7 @@ class UserAdmin(BaseUserAdmin):
     ordering = ('email',)
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
-        ('Персональні дані', {'fields': ('first_name', 'last_name', 'phone')}),
+        ('Персональні дані', {'fields': ('first_name', 'last_name', 'phone', 'telegram_id')}),
         ('Права доступу', {
             'fields': (
                 'role',

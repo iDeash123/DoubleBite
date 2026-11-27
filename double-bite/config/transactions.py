@@ -12,7 +12,7 @@ def schedule_on_commit(callback: Callable[..., Any], *args: Any, **kwargs: Any) 
     """Schedule a side-effect callback to run only after the current transaction commits.
 
     Project standard: inside any ``with transaction.atomic():`` block, direct calls
-    to ``send_templated_email``, ``stripe.*``, or ``Mistral(...)`` are prohibited;
+    to ``send_templated_email``, ``stripe.*``, or ``GeminiClient(...)`` are prohibited;
     use ``schedule_on_commit(...)`` so external I/O executes only after commit and
     failures in post-commit side effects are logged with traceback without rolling
     back committed payments or orders.

@@ -24,6 +24,14 @@ class TicketReason(models.TextChoices):
     ORDER_ISSUE = 'ORDER_ISSUE', 'Проблема із замовленням'
     HUMAN_REQUESTED = 'HUMAN_REQUESTED', 'Запит людини'
     BOT_CONFUSED = 'BOT_CONFUSED', 'Бот не зрозумів'
+    OPERATOR_TAKEOVER = 'OPERATOR_TAKEOVER', 'Перехоплення менеджером'
+
+
+class MessageSource(models.TextChoices):
+    WEB = 'WEB', 'Веб-інтерфейс'
+    AI = 'AI', 'AI-агент'
+    TELEGRAM = 'TELEGRAM', 'Telegram'
+    SYSTEM = 'SYSTEM', 'Система'
 
 
 class TicketStatus(models.TextChoices):
@@ -70,6 +78,26 @@ class ChatSession(models.Model):
     escalation_reason = models.TextField(
         'Причина ескалації',
         blank=True,
+    )
+    assigned_operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_chat_sessions',
+        db_index=True,
+        verbose_name='Призначений оператор',
+    )
+    assigned_at = models.DateTimeField('Призначено о', null=True, blank=True)
+    last_message_at = models.DateTimeField(
+        'Останнє повідомлення',
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    operator_last_read_id = models.PositiveBigIntegerField(
+        'Останнє прочитане повідомлення оператором',
+        default=0,
     )
     created_at = models.DateTimeField('Створено', auto_now_add=True)
     updated_at = models.DateTimeField('Оновлено', auto_now=True)
@@ -123,6 +151,26 @@ class ChatMessage(models.Model):
         'Роль',
         max_length=20,
         choices=MessageRole.choices,
+    )
+    sender_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='sent_support_messages',
+        verbose_name='Відправник (персонал)',
+    )
+    source = models.CharField(
+        'Джерело',
+        max_length=16,
+        choices=MessageSource.choices,
+        default=MessageSource.WEB,
+    )
+    telegram_message_id = models.BigIntegerField(
+        'Telegram Message ID',
+        null=True,
+        blank=True,
+        unique=True,
     )
     content = models.TextField(
         'Вміст повідомлення',
@@ -183,6 +231,25 @@ class SupportTicket(models.Model):
         choices=TicketStatus.choices,
         default=TicketStatus.OPEN,
         db_index=True,
+    )
+    assigned_operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_support_tickets',
+        verbose_name='Призначений оператор',
+    )
+    telegram_thread_id = models.BigIntegerField(
+        'Telegram Topic ID',
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    telegram_control_message_id = models.BigIntegerField(
+        'Telegram Control Message ID',
+        null=True,
+        blank=True,
     )
     created_at = models.DateTimeField('Створено', auto_now_add=True)
     resolved_at = models.DateTimeField('Вирішено о', null=True, blank=True)

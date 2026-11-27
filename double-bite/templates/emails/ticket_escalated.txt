@@ -16,7 +16,10 @@ AI-асистент Double Bite зареєстрував звернення, щ�
 {% for msg in recent_messages %}
 [{{ msg.get_role_display|default:msg.role|upper }}]: {{ msg.content }}
 {% endfor %}{% endif %}
-Посилання на тікет в панелі адміністратора:
+Відкрити чат у пульті підтримки:
+{{ desk_session_url|default:admin_ticket_url }}
+
+Переглянути тікет в адмінці:
 {{ admin_ticket_url }}
 
 —

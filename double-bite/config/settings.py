@@ -14,6 +14,8 @@ from config.constants import (
     DEFAULT_MIN_ORDER_AMOUNT,
     DEFAULT_RESTAURANT_ADDRESS,
     DEFAULT_RESTAURANT_HOTLINE,
+    DEFAULT_SUPPORT_WORK_END_HOUR,
+    DEFAULT_SUPPORT_WORK_START_HOUR,
     DISALLOWED_ALLOWED_HOSTS,
     env_bool,
     env_decimal,
@@ -35,6 +37,16 @@ FREE_DELIVERY_THRESHOLD = env_decimal('FREE_DELIVERY_THRESHOLD', DEFAULT_FREE_DE
 DELIVERY_FEE = env_decimal('DELIVERY_FEE', DEFAULT_DELIVERY_FEE)
 RESTAURANT_ADDRESS = env_str('RESTAURANT_ADDRESS', DEFAULT_RESTAURANT_ADDRESS)
 RESTAURANT_HOTLINE = env_str('RESTAURANT_HOTLINE', DEFAULT_RESTAURANT_HOTLINE)
+SUPPORT_WORK_START_HOUR = env_int('SUPPORT_WORK_START_HOUR', DEFAULT_SUPPORT_WORK_START_HOUR)
+SUPPORT_WORK_END_HOUR = env_int('SUPPORT_WORK_END_HOUR', DEFAULT_SUPPORT_WORK_END_HOUR)
+if not (0 <= SUPPORT_WORK_START_HOUR <= 23):
+    raise ImproperlyConfigured('SUPPORT_WORK_START_HOUR must be between 0 and 23')
+if not (1 <= SUPPORT_WORK_END_HOUR <= 24):
+    raise ImproperlyConfigured('SUPPORT_WORK_END_HOUR must be between 1 and 24')
+if SUPPORT_WORK_START_HOUR >= SUPPORT_WORK_END_HOUR:
+    raise ImproperlyConfigured(
+        'SUPPORT_WORK_START_HOUR must be less than SUPPORT_WORK_END_HOUR'
+    )
 
 DEBUG = env_bool('DEBUG', False)
 is_testing = (
@@ -43,6 +55,11 @@ is_testing = (
     or env_bool('DJANGO_TESTING', False)
 )
 IS_TESTING = is_testing
+
+TELEGRAM_BOT_ENABLED = False if is_testing else env_bool('TELEGRAM_BOT_ENABLED', False)
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '').strip()
+TELEGRAM_SUPPORT_CHAT_ID = os.getenv('TELEGRAM_SUPPORT_CHAT_ID', '').strip()
+TELEGRAM_WEBHOOK_SECRET = os.getenv('TELEGRAM_WEBHOOK_SECRET', '').strip()
 
 DJANGO_ADMIN_URL = normalize_admin_url(os.getenv('DJANGO_ADMIN_URL', 'admin/'))
 
@@ -192,6 +209,7 @@ DEBUG_TOOLBAR_CONFIG = {
         lambda request: DEBUG
         and not is_testing
         and not request.headers.get('HX-Request')
+        and 'text/event-stream' not in request.headers.get('Accept', '')
         and not request.GET.get('no_toolbar')
     ),
 }
@@ -211,6 +229,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'orders.context_processors.cart_context',
+                'support.context_processors.support_context',
             ],
         },
     },

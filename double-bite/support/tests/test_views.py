@@ -125,7 +125,7 @@ class SupportViewsTest(TestCase):
         self.assertEqual(response.status_code, 400)
 
     @patch(
-        'support.agent.client.MistralSupportAgent.stream_chat_response',
+        'support.agent.client.GeminiSupportAgent.stream_chat_response',
         side_effect=mock_async_stream_tokens,
     )
     async def test_stream_view_success_streaming_and_db_persistence(self, mock_stream):
@@ -159,8 +159,8 @@ class SupportViewsTest(TestCase):
 
         await sync_to_async(verify_persisted_messages, thread_sensitive=True)()
 
-    @patch('support.agent.client.MistralSupportAgent.stream_chat_response')
-    async def test_escalated_session_returns_409_and_blocks_mistral(self, mock_stream):
+    @patch('support.agent.client.GeminiSupportAgent.stream_chat_response')
+    async def test_escalated_session_returns_409_and_blocks_gemini(self, mock_stream):
         def create_escalated_session():
             return ChatSession.objects.create(
                 user=self.user,
@@ -190,7 +190,7 @@ class SupportViewsTest(TestCase):
         self.assertEqual(msg_count, 0)
 
     @patch(
-        'support.agent.client.MistralSupportAgent.stream_chat_response',
+        'support.agent.client.GeminiSupportAgent.stream_chat_response',
         side_effect=mock_async_stream_escalate,
     )
     async def test_stream_view_escalation_event(self, mock_stream):
@@ -211,7 +211,7 @@ class SupportViewsTest(TestCase):
         self.assertIn('101', joined)
 
     @patch(
-        'support.agent.client.MistralSupportAgent.stream_chat_response',
+        'support.agent.client.GeminiSupportAgent.stream_chat_response',
         side_effect=mock_async_stream_cart,
     )
     async def test_stream_view_cart_mutation_event(self, mock_stream):
@@ -232,7 +232,7 @@ class SupportViewsTest(TestCase):
         self.assertIn('650.0', joined)
 
     @patch(
-        'support.agent.client.MistralSupportAgent.stream_chat_response',
+        'support.agent.client.GeminiSupportAgent.stream_chat_response',
         side_effect=mock_async_stream_tokens,
     )
     async def test_stream_view_rate_limiting(self, mock_stream):
@@ -255,7 +255,7 @@ class SupportViewsTest(TestCase):
 
     @override_settings(TRUST_PROXY_HEADERS=False)
     @patch(
-        'support.agent.client.MistralSupportAgent.stream_chat_response',
+        'support.agent.client.GeminiSupportAgent.stream_chat_response',
         side_effect=mock_async_stream_tokens,
     )
     async def test_stream_view_blocks_xff_spoofing_when_trust_proxy_headers_false(
@@ -440,7 +440,7 @@ class SupportViewsTest(TestCase):
         req.scope = {'type': 'http'}
 
         with patch(
-            'support.agent.client.MistralSupportAgent.stream_chat_response',
+            'support.agent.client.GeminiSupportAgent.stream_chat_response',
             return_value=tracking_stream,
         ):
             response = await chat_stream_view(req)
@@ -473,7 +473,7 @@ class SupportViewsTest(TestCase):
         self.assertEqual(ChatSession.objects.count(), initial_sessions)
 
     @patch(
-        'support.agent.client.MistralSupportAgent.stream_chat_response',
+        'support.agent.client.GeminiSupportAgent.stream_chat_response',
         side_effect=mock_async_stream_tokens,
     )
     async def test_stream_view_rate_limit_by_ip_across_sessions(self, mock_stream):
@@ -566,7 +566,7 @@ class SupportWsgiAndConcurrencyTest(TransactionTestCase):
         self.assertEqual(msg.content, 'Перевірка зʼєднання')
 
     @patch(
-        'support.agent.client.MistralSupportAgent.stream_chat_response',
+        'support.agent.client.GeminiSupportAgent.stream_chat_response',
         side_effect=mock_async_stream_tokens,
     )
     def test_wsgi_sync_client_streams_sse_cleanly_and_persists_messages(self, mock_stream):

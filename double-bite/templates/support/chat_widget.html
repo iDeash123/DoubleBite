@@ -50,12 +50,36 @@ window.__formatMarkdown = function(text) {
 <div id="ai-chat-widget" x-data="{
     open: false,
     hiddenByModal: false,
+    sessionUuid: null,
+    status: 'ACTIVE',
     isEscalated: false,
+    operatorConnected: false,
+    isWorkingHours: true,
+    workingHoursLabel: '10:00–22:00',
+    offHoursNotice: '',
+    lastMessageId: 0,
+    confirmResetOpen: false,
     input: '',
     loading: false,
+    escalating: false,
+    resetting: false,
+    pollTimer: null,
+    pollAbortController: null,
+    pollingInFlight: false,
+    eventSource: null,
+    sseConnected: false,
+    sseReconnectTimer: null,
+    sseClosedErrors: 0,
+    visibilityHandler: null,
+    lastHistorySyncAt: 0,
+    msgKeySeq: 0,
+    streamingAssistantKey: null,
     cartItemsCount: {{ cart_items_count|default:0 }},
     abortController: null,
     messages: [],
+    get isResolved() {
+      return this.status === 'RESOLVED';
+    },
     getCsrfToken() {
       let token = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
       if (!token) {
@@ -64,95 +88,494 @@ window.__formatMarkdown = function(text) {
       }
       return token;
     },
+    makeWelcomeMsg(text) {
+      return {
+        _key: 'w-' + (++this.msgKeySeq),
+        id: null,
+        role: 'assistant',
+        sender: 'ai',
+        content: text,
+        created_at: '',
+        error: '',
+        showOperatorFallback: false,
+        cartUpdated: false
+      };
+    },
+    normalizeMessage(m) {
+      return {
+        _key: m.id ? ('m-' + m.id) : ('tmp-' + (++this.msgKeySeq)),
+        id: m.id || null,
+        role: m.role,
+        sender: m.sender || (m.role === 'user' ? 'user' : (m.role === 'operator' ? 'operator' : (m.role === 'system' ? 'system' : 'ai'))),
+        content: m.content || '',
+        created_at: m.created_at || '',
+        error: '',
+        showOperatorFallback: false,
+        cartUpdated: false
+      };
+    },
+    scrollToBottom() {
+      this.$nextTick(() => {
+        const c = this.$refs.msgContainer;
+        if (c) c.scrollTop = c.scrollHeight;
+      });
+    },
     abortActiveStream() {
       if (this.abortController) {
         this.abortController.abort();
         this.abortController = null;
       }
+      this.streamingAssistantKey = null;
       this.loading = false;
     },
+    abortActivePoll() {
+      if (this.pollAbortController) {
+        this.pollAbortController.abort();
+        this.pollAbortController = null;
+      }
+      this.pollingInFlight = false;
+    },
+    getEventSourceCtor() {
+      if (typeof EventSource === 'function') return EventSource;
+      if (typeof window !== 'undefined' && window && typeof window.EventSource === 'function') {
+        return window.EventSource;
+      }
+      return null;
+    },
+    shouldStreamSse() {
+      return Boolean(this.open && !this.isResolved && !document.hidden && (this.isEscalated || this.sessionUuid));
+    },
+    shouldPoll() {
+      return Boolean(this.open && this.isEscalated && !this.isResolved && !document.hidden);
+    },
+    shouldStaySynced() {
+      return this.shouldPoll();
+    },
+    parseSsePayload(evt) {
+      if (!evt || typeof evt.data !== 'string') return null;
+      try {
+        return JSON.parse(evt.data);
+      } catch (e) {
+        return null;
+      }
+    },
+    mergeIncomingMessage(incoming) {
+      if (!incoming || typeof incoming !== 'object') return false;
+      const incomingId = typeof incoming.id === 'number' ? incoming.id : Number(incoming.id || 0);
+      if (incomingId > 0) {
+        if (this.messages.some(m => m.id === incomingId)) {
+          this.lastMessageId = Math.max(this.lastMessageId, incomingId);
+          return false;
+        }
+        if (incoming.role === 'user') {
+          const pendingIdx = this.messages.findIndex(
+            m => m.id === null && m._key && String(m._key).startsWith('tmp-') && m.role === 'user' && m.content === (incoming.content || '')
+          );
+          if (pendingIdx !== -1) {
+            const target = this.messages[pendingIdx];
+            target.id = incomingId;
+            target.content = incoming.content || target.content;
+            target.created_at = incoming.created_at || target.created_at;
+            this.lastMessageId = Math.max(this.lastMessageId, incomingId);
+            return true;
+          }
+        }
+        if (incoming.role === 'assistant') {
+          if (this.streamingAssistantKey) {
+            const streamIdx = this.messages.findIndex(m => m._key === this.streamingAssistantKey);
+            if (streamIdx !== -1) {
+              const target = this.messages[streamIdx];
+              target.id = incomingId;
+              target.created_at = incoming.created_at || target.created_at;
+              this.lastMessageId = Math.max(this.lastMessageId, incomingId);
+              return true;
+            }
+          }
+          const incomingTrimmed = String(incoming.content || '').trim();
+          const pendingAiIdx = this.messages.findIndex(
+            m => m.id === null && m._key && String(m._key).startsWith('tmp-') && m.role === 'assistant' && String(m.content || '').trim() === incomingTrimmed
+          );
+          if (pendingAiIdx !== -1) {
+            const target = this.messages[pendingAiIdx];
+            target.id = incomingId;
+            target.created_at = incoming.created_at || target.created_at;
+            this.lastMessageId = Math.max(this.lastMessageId, incomingId);
+            return true;
+          }
+        }
+      }
+      const normalized = this.normalizeMessage(incoming);
+      const insertAt = normalized.id
+        ? this.messages.findIndex(m => m.id && m.id > normalized.id)
+        : -1;
+      if (insertAt !== -1) {
+        this.messages.splice(insertAt, 0, normalized);
+      } else {
+        this.messages.push(normalized);
+      }
+      if (normalized.id) {
+        this.lastMessageId = Math.max(this.lastMessageId, normalized.id);
+      }
+      return true;
+    },
+    closeEventSource(clearReconnect = true) {
+      if (clearReconnect && this.sseReconnectTimer) {
+        clearTimeout(this.sseReconnectTimer);
+        this.sseReconnectTimer = null;
+      }
+      if (this.eventSource) {
+        try {
+          this.eventSource.close();
+        } catch (e) {}
+        this.eventSource = null;
+      }
+      this.sseConnected = false;
+    },
+    stopRealtime() {
+      this.closeEventSource(true);
+      this.stopPolling();
+    },
+    connectEventSource() {
+      if (!this.shouldStreamSse()) {
+        this.stopRealtime();
+        return;
+      }
+      const EventSourceCtor = this.getEventSourceCtor();
+      if (!EventSourceCtor) {
+        if (this.shouldPoll()) {
+          this.startPolling(false);
+        }
+        return;
+      }
+      if (this.eventSource) {
+        return;
+      }
+      if (this.sseReconnectTimer) {
+        clearTimeout(this.sseReconnectTimer);
+        this.sseReconnectTimer = null;
+      }
+      const url = '/support/chat/events/?after_id=' + encodeURIComponent(String(this.lastMessageId || 0));
+      let es = null;
+      try {
+        es = new EventSourceCtor(url);
+      } catch (e) {
+        if (this.shouldPoll()) {
+          this.startPolling(false);
+        }
+        return;
+      }
+      this.eventSource = es;
+      es.onopen = () => {
+        if (this.eventSource !== es) return;
+        this.sseConnected = true;
+        this.sseClosedErrors = 0;
+        this.stopPolling();
+      };
+      es.addEventListener('message', (evt) => {
+        if (this.eventSource !== es) return;
+        const payload = this.parseSsePayload(evt);
+        if (!payload) return;
+        if (payload.session_uuid) {
+          if (this.sessionUuid && payload.session_uuid !== this.sessionUuid) {
+            this.stopRealtime();
+            this.loadHistory();
+            return;
+          }
+          if (!this.sessionUuid) {
+            this.sessionUuid = payload.session_uuid;
+          }
+        }
+        const msg = payload.data && typeof payload.data === 'object' ? payload.data : payload;
+        this.lastHistorySyncAt = Date.now();
+        if (this.mergeIncomingMessage(msg)) {
+          this.scrollToBottom();
+        }
+      });
+      es.addEventListener('operator_joined', (evt) => {
+        if (this.eventSource !== es) return;
+        const payload = this.parseSsePayload(evt);
+        if (!payload) return;
+        if (payload.session_uuid) {
+          if (this.sessionUuid && payload.session_uuid !== this.sessionUuid) {
+            this.stopRealtime();
+            this.loadHistory();
+            return;
+          }
+          if (!this.sessionUuid) {
+            this.sessionUuid = payload.session_uuid;
+          }
+        }
+        const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+        this.lastHistorySyncAt = Date.now();
+        this.applySessionState({
+          status: data.status || 'ESCALATED',
+          is_escalated: true,
+          operator_connected: true,
+          is_working_hours: data.is_working_hours,
+          working_hours_label: data.working_hours_label,
+          off_hours_notice: data.off_hours_notice
+        }, false);
+      });
+      es.addEventListener('status_changed', (evt) => {
+        if (this.eventSource !== es) return;
+        const payload = this.parseSsePayload(evt);
+        if (!payload) return;
+        if (payload.session_uuid) {
+          if (this.sessionUuid && payload.session_uuid !== this.sessionUuid) {
+            this.stopRealtime();
+            this.loadHistory();
+            return;
+          }
+          if (!this.sessionUuid) {
+            this.sessionUuid = payload.session_uuid;
+          }
+        }
+        const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+        this.lastHistorySyncAt = Date.now();
+        this.applySessionState(data, false);
+      });
+      es.addEventListener('session_resolved', (evt) => {
+        if (this.eventSource !== es) return;
+        const payload = this.parseSsePayload(evt);
+        const data = payload && payload.data && typeof payload.data === 'object' ? payload.data : {};
+        this.lastHistorySyncAt = Date.now();
+        if (data.reason === 'reset') {
+          this.stopRealtime();
+          this.loadHistory();
+          return;
+        }
+        this.applySessionState({
+          status: 'RESOLVED',
+          is_escalated: false,
+          operator_connected: false
+        }, false);
+      });
+      es.onerror = () => {
+        if (this.eventSource !== es) return;
+        this.sseConnected = false;
+        if (!this.shouldStreamSse()) {
+          this.stopRealtime();
+          return;
+        }
+        if (this.shouldPoll() && !this.pollTimer && !this.pollingInFlight) {
+          this.startPolling(false);
+        }
+        const closedState = typeof EventSourceCtor.CLOSED === 'number' ? EventSourceCtor.CLOSED : 2;
+        if (es.readyState === closedState) {
+          this.closeEventSource(true);
+          this.sseClosedErrors += 1;
+          if (this.sseClosedErrors <= 3) {
+            const retryDelay = Math.min(60000, 10000 * this.sseClosedErrors);
+            this.sseReconnectTimer = setTimeout(() => {
+              this.sseReconnectTimer = null;
+              if (this.shouldStreamSse() && !this.eventSource) {
+                this.connectEventSource();
+              }
+            }, retryDelay);
+          }
+        }
+      };
+    },
+    startRealtime(immediate = false) {
+      if (!this.shouldStreamSse() && !this.shouldPoll()) {
+        this.stopRealtime();
+        return;
+      }
+      if (this.getEventSourceCtor() && this.shouldStreamSse()) {
+        if (!this.eventSource) {
+          this.connectEventSource();
+        }
+        return;
+      }
+      if (this.shouldPoll()) {
+        this.startPolling(immediate);
+      }
+    },
+    stopPolling() {
+      if (this.pollTimer) {
+        clearTimeout(this.pollTimer);
+        this.pollTimer = null;
+      }
+      this.abortActivePoll();
+    },
+    scheduleNextPoll() {
+      if (this.pollTimer) {
+        clearTimeout(this.pollTimer);
+        this.pollTimer = null;
+      }
+      if (!this.shouldPoll() || this.sseConnected) {
+        return;
+      }
+      this.pollTimer = setTimeout(() => {
+        this.pollTimer = null;
+        this.pollHistory();
+      }, 3000);
+    },
+    startPolling(immediate = false) {
+      if (!this.shouldPoll() || this.sseConnected) {
+        this.stopPolling();
+        return;
+      }
+      if (immediate) {
+        this.pollHistory();
+      } else {
+        this.scheduleNextPoll();
+      }
+    },
+    openChat() {
+      this.hiddenByModal = false;
+      this.open = true;
+      if (this.isEscalated && !this.isResolved) {
+        this.sseClosedErrors = 0;
+        this.startRealtime(true);
+      } else if (
+        !this.loading &&
+        !this.escalating &&
+        !this.resetting &&
+        (this.sessionUuid ||
+          this.messages.some(m => m.role === 'user') ||
+          Date.now() - this.lastHistorySyncAt > 3000)
+      ) {
+        this.loadHistory();
+      }
+      this.scrollToBottom();
+    },
     closeChat() {
+      this.confirmResetOpen = false;
+      this.stopRealtime();
       this.abortActiveStream();
       this.open = false;
     },
-    async init() {
-      const welcomeMsg = {
-        role: 'assistant',
-        sender: 'ai',
-        content: 'Вітаю! Я інтелектуальний помічник Double Bite на базі Mistral AI. Допоможу обрати авторські ресторанні страви, врахувати індивідуальні вподобання чи алергени, або дізнатися деталі щодо доставки.',
-        error: '',
-        cartUpdated: false
-      };
+    toggleChat() {
+      if (this.open) {
+        this.closeChat();
+      } else {
+        this.openChat();
+      }
+    },
+    applySessionState(data, resetCursor = false) {
+      if (!data || typeof data !== 'object') return;
+      if ('session_uuid' in data) {
+        this.sessionUuid = data.session_uuid || null;
+      }
+      if (data.status) {
+        this.status = data.status;
+      }
+      if (typeof data.is_escalated === 'boolean') {
+        this.isEscalated = data.is_escalated;
+      }
+      if (typeof data.operator_connected === 'boolean') {
+        this.operatorConnected = data.operator_connected;
+      }
+      if (typeof data.is_working_hours === 'boolean') {
+        this.isWorkingHours = data.is_working_hours;
+      }
+      if (data.working_hours_label) {
+        this.workingHoursLabel = data.working_hours_label;
+      }
+      if (data.off_hours_notice) {
+        this.offHoursNotice = data.off_hours_notice;
+      }
+      if (typeof data.last_message_id === 'number' && data.last_message_id >= 0) {
+        this.lastMessageId = resetCursor
+          ? data.last_message_id
+          : Math.max(this.lastMessageId, data.last_message_id);
+      }
+      if (this.isResolved) {
+        this.confirmResetOpen = false;
+        this.stopRealtime();
+      } else if (!this.isEscalated) {
+        this.confirmResetOpen = false;
+        this.stopPolling();
+        if (!this.shouldStreamSse()) {
+          this.closeEventSource(true);
+        }
+      }
+    },
+    async loadHistory() {
+      const defaultWelcome = 'Вітаю! Я інтелектуальний помічник Double Bite на базі Gemini AI. Допоможу обрати авторські ресторанні страви, врахувати індивідуальні вподобання чи алергени, або дізнатися деталі щодо доставки.';
       try {
-        const res = await fetch('/support/chat/history/');
+        const res = await fetch('/support/chat/history/', { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
-          if (data.messages && data.messages.length > 0) {
-            this.messages = data.messages.map(m => ({
-              role: m.role,
-              sender: m.sender || (m.role === 'user' ? 'user' : (m.role === 'operator' ? 'operator' : (m.role === 'system' ? 'system' : 'ai'))),
-              content: m.content,
-              error: '',
-              cartUpdated: false
-            }));
+          this.lastHistorySyncAt = Date.now();
+          this.applySessionState(data, true);
+          if (Array.isArray(data.messages) && data.messages.length > 0) {
+            this.messages = data.messages.map(m => this.normalizeMessage(m));
           } else {
-            this.messages = [welcomeMsg];
+            this.messages = [this.makeWelcomeMsg(defaultWelcome)];
           }
-          if (data.is_escalated) {
-            this.isEscalated = true;
+          if (this.shouldStreamSse() || this.shouldPoll()) {
+            this.startRealtime(false);
+          } else {
+            this.stopRealtime();
           }
-        } else {
-          this.messages = [welcomeMsg];
+          this.scrollToBottom();
+          return true;
+        } else if (this.messages.length === 0) {
+          this.messages = [this.makeWelcomeMsg(defaultWelcome)];
         }
       } catch (e) {
-        this.messages = [welcomeMsg];
+        if (this.messages.length === 0) {
+          this.messages = [this.makeWelcomeMsg(defaultWelcome)];
+        }
+      }
+      return false;
+    },
+    async init() {
+      this.visibilityHandler = () => {
+        if (document.hidden) {
+          this.stopRealtime();
+        } else if (this.shouldStreamSse() || this.shouldPoll()) {
+          this.sseClosedErrors = 0;
+          this.startRealtime(true);
+        }
+      };
+      document.addEventListener('visibilitychange', this.visibilityHandler);
+      await this.loadHistory();
+    },
+    destroy() {
+      this.stopRealtime();
+      this.abortActiveStream();
+      if (this.visibilityHandler) {
+        document.removeEventListener('visibilitychange', this.visibilityHandler);
+        this.visibilityHandler = null;
       }
     },
     sendQuick(text) {
-      if (this.isEscalated || this.loading) return;
+      if (this.isEscalated || this.isResolved || this.loading || this.escalating || this.resetting) return;
       this.input = text;
       this.sendMessage();
     },
-    async resetChat() {
-      this.abortActiveStream();
-      try {
-        const csrfToken = this.getCsrfToken();
-        const res = await fetch('/support/chat/reset/', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': csrfToken
-          }
-        });
-        if (res.ok) {
-          this.isEscalated = false;
-          this.messages = [
-            {
-              role: 'assistant',
-              sender: 'ai',
-              content: 'Контекст діалогу очищено. Чим я можу вам допомогти сьогодні?',
-              error: '',
-              cartUpdated: false
-            }
-          ];
-        }
-      } catch (e) {}
-    },
     async sendMessage() {
       const query = this.input.trim();
-      if (!query || this.isEscalated) return;
+      if (!query || this.loading || this.escalating || this.resetting || this.isResolved) return;
+      if (this.isEscalated) {
+        await this.sendOperatorMessage(query);
+        return;
+      }
       this.abortActiveStream();
       const controller = new AbortController();
       this.abortController = controller;
-      this.messages.push({ role: 'user', sender: 'user', content: query, error: '', cartUpdated: false });
+      const userMsg = {
+        _key: 'tmp-' + (++this.msgKeySeq),
+        id: null,
+        role: 'user',
+        sender: 'user',
+        content: query,
+        created_at: '',
+        error: '',
+        showOperatorFallback: false,
+        cartUpdated: false
+      };
+      this.messages.push(userMsg);
       this.input = '';
       this.loading = true;
-      this.$nextTick(() => {
-        const c = this.$refs.msgContainer;
-        if (c) c.scrollTop = c.scrollHeight;
-      });
+      this.scrollToBottom();
 
       let cartMutated = false;
+      let escalatedInStream = false;
+      let streamError = '';
       try {
         const csrfToken = this.getCsrfToken();
         const res = await fetch('/support/chat/stream/', {
@@ -166,13 +589,25 @@ window.__formatMarkdown = function(text) {
         });
 
         if (res.ok && res.body) {
+          const hdrUuid = res.headers && typeof res.headers.get === 'function'
+            ? res.headers.get('X-Chat-Session-UUID')
+            : '';
+          if (hdrUuid && !this.sessionUuid) {
+            this.sessionUuid = hdrUuid;
+          }
           const reader = res.body.getReader();
           const decoder = new TextDecoder();
+          const assistantKey = 'tmp-' + (++this.msgKeySeq);
+          this.streamingAssistantKey = assistantKey;
           this.messages.push({
+            _key: assistantKey,
+            id: null,
             role: 'assistant',
             sender: 'ai',
             content: '',
+            created_at: '',
             error: '',
+            showOperatorFallback: false,
             cartUpdated: false
           });
           const assistantMsg = this.messages[this.messages.length - 1];
@@ -186,6 +621,9 @@ window.__formatMarkdown = function(text) {
               }
               if (data.escalated) {
                 this.isEscalated = true;
+                this.status = 'ESCALATED';
+                this.operatorConnected = false;
+                escalatedInStream = true;
               }
               if (data.cart_mutation) {
                 cartMutated = true;
@@ -199,7 +637,9 @@ window.__formatMarkdown = function(text) {
                 }
               }
               if (data.error) {
+                streamError = data.error;
                 assistantMsg.error = data.error;
+                assistantMsg.showOperatorFallback = true;
               }
             } catch (err) {}
           };
@@ -215,15 +655,48 @@ window.__formatMarkdown = function(text) {
             for (const line of lines) {
               processEventLine(line.trim());
             }
-            this.$nextTick(() => {
-              const c = this.$refs.msgContainer;
-              if (c) c.scrollTop = c.scrollHeight;
-            });
+            this.scrollToBottom();
           }
 
           const remaining = (buffer + decoder.decode()).trim();
           if (remaining) {
             processEventLine(remaining);
+          }
+          if (escalatedInStream) {
+            const synced = await this.loadHistory();
+            if (synced) {
+              if (cartMutated) {
+                let targetIdx = -1;
+                for (let i = this.messages.length - 1; i >= 0; i--) {
+                  if (this.messages[i].role === 'assistant') {
+                    targetIdx = i;
+                    break;
+                  }
+                }
+                if (targetIdx === -1 && this.messages.length > 0) {
+                  targetIdx = this.messages.length - 1;
+                }
+                if (targetIdx !== -1) {
+                  this.messages[targetIdx].cartUpdated = true;
+                }
+              }
+              if (streamError) {
+                this.messages.push({
+                  _key: 'err-' + (++this.msgKeySeq),
+                  id: null,
+                  role: 'system',
+                  sender: 'system',
+                  content: '',
+                  created_at: '',
+                  error: streamError,
+                  showOperatorFallback: false,
+                  cartUpdated: false
+                });
+              }
+            }
+            if ((this.shouldStreamSse() || this.shouldPoll()) && !this.eventSource && !this.pollTimer) {
+              this.startRealtime(false);
+            }
           }
         } else {
           let errMsg = 'Вибачте, виникла помилка під час формування відповіді. Спробуйте пізніше.';
@@ -235,19 +708,18 @@ window.__formatMarkdown = function(text) {
 
           if (res.status === 409 && errData && errData.is_escalated) {
             this.isEscalated = true;
-            this.messages.push({
-              role: 'system',
-              sender: 'system',
-              content: errMsg,
-              error: '',
-              cartUpdated: false
-            });
+            this.status = errData.status || 'ESCALATED';
+            await this.sendOperatorMessage(query, userMsg);
           } else {
             this.messages.push({
+              _key: 'err-' + (++this.msgKeySeq),
+              id: null,
               role: 'assistant',
               sender: 'ai',
               content: '',
+              created_at: '',
               error: errMsg,
+              showOperatorFallback: true,
               cartUpdated: false
             });
           }
@@ -257,10 +729,14 @@ window.__formatMarkdown = function(text) {
           return;
         }
         this.messages.push({
+          _key: 'err-' + (++this.msgKeySeq),
+          id: null,
           role: 'assistant',
           sender: 'ai',
           content: '',
+          created_at: '',
           error: 'Вибачте, асистент тимчасово недоступний. Будь ласка, зверніться за номером: {{ restaurant_hotline|default:'+380 44 123 45 67'|escapejs }}.',
+          showOperatorFallback: true,
           cartUpdated: false
         });
       } finally {
@@ -269,23 +745,356 @@ window.__formatMarkdown = function(text) {
         }
         if (this.abortController === controller) {
           this.abortController = null;
+          this.streamingAssistantKey = null;
           this.loading = false;
         }
-        this.$nextTick(() => {
-          const c = this.$refs.msgContainer;
-          if (c) c.scrollTop = c.scrollHeight;
+        if (!escalatedInStream && this.shouldStreamSse() && !this.eventSource && !this.pollTimer) {
+          this.startRealtime(false);
+        }
+        this.scrollToBottom();
+      }
+    },
+    async sendOperatorMessage(query, existingUserMsg = null) {
+      this.abortActivePoll();
+      const msgKey = existingUserMsg && existingUserMsg._key
+        ? existingUserMsg._key
+        : ('tmp-' + (++this.msgKeySeq));
+      if (!existingUserMsg) {
+        this.messages.push({
+          _key: msgKey,
+          id: null,
+          role: 'user',
+          sender: 'user',
+          content: query,
+          created_at: '',
+          error: '',
+          showOperatorFallback: false,
+          cartUpdated: false
         });
+        this.input = '';
+      }
+      this.loading = true;
+      this.scrollToBottom();
+
+      const removeOptimistic = () => {
+        const ownIdx = this.messages.findIndex(m => m._key === msgKey);
+        if (ownIdx !== -1) this.messages.splice(ownIdx, 1);
+      };
+
+      try {
+        const csrfToken = this.getCsrfToken();
+        const res = await fetch('/support/chat/message/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+          },
+          body: JSON.stringify({ message: query })
+        });
+        let data = null;
+        try {
+          data = await res.json();
+        } catch (e) {}
+
+        if (res.ok && data && data.message) {
+          if (typeof data.is_working_hours === 'boolean') {
+            this.isWorkingHours = data.is_working_hours;
+          }
+          if (data.working_hours_label) {
+            this.workingHoursLabel = data.working_hours_label;
+          }
+          if (data.off_hours_notice) {
+            this.offHoursNotice = data.off_hours_notice;
+          }
+          const dupIdx = this.messages.findIndex(m => m._key !== msgKey && m.id === data.message.id);
+          if (dupIdx !== -1) {
+            removeOptimistic();
+          } else {
+            const ownIdx = this.messages.findIndex(m => m._key === msgKey);
+            if (ownIdx !== -1) {
+              const target = this.messages[ownIdx];
+              target.id = data.message.id;
+              target.content = data.message.content;
+              target.created_at = data.message.created_at || '';
+            }
+          }
+          if (existingUserMsg) {
+            await this.loadHistory();
+          }
+          if ((this.shouldStreamSse() || this.shouldPoll()) && !this.eventSource && !this.pollTimer) {
+            this.startRealtime(false);
+          }
+        } else {
+          removeOptimistic();
+          if (res.status === 409 && data && data.status) {
+            this.status = data.status;
+            this.isEscalated = Boolean(data.is_escalated);
+            if (!this.isEscalated) {
+              this.operatorConnected = false;
+              this.stopPolling();
+            }
+            if (data.status === 'ACTIVE') {
+              this.input = query;
+            }
+            await this.loadHistory();
+          } else {
+            this.input = query;
+            const errMsg = (data && data.error) || 'Не вдалося надіслати повідомлення. Спробуйте ще раз.';
+            this.messages.push({
+              _key: 'err-' + (++this.msgKeySeq),
+              id: null,
+              role: 'system',
+              sender: 'system',
+              content: '',
+              created_at: '',
+              error: errMsg,
+              showOperatorFallback: false,
+              cartUpdated: false
+            });
+            if ((this.shouldStreamSse() || this.shouldPoll()) && !this.eventSource && !this.pollTimer) {
+              this.startRealtime(false);
+            }
+          }
+        }
+      } catch (e) {
+        const confirmedIdx = this.messages.findIndex(m => m._key === msgKey && m.id);
+        if (confirmedIdx === -1) {
+          removeOptimistic();
+          this.input = query;
+          this.messages.push({
+            _key: 'err-' + (++this.msgKeySeq),
+            id: null,
+            role: 'system',
+            sender: 'system',
+            content: '',
+            created_at: '',
+            error: 'Помилка мережі. Перевірте зʼєднання та спробуйте ще раз.',
+            showOperatorFallback: false,
+            cartUpdated: false
+          });
+        }
+        if ((this.shouldStreamSse() || this.shouldPoll()) && !this.eventSource && !this.pollTimer) {
+          this.startRealtime(false);
+        }
+      } finally {
+        this.loading = false;
+        this.scrollToBottom();
+      }
+    },
+    async escalateToOperator(reason = 'HUMAN_REQUESTED', details = '') {
+      if (this.loading || this.escalating || this.resetting || this.isEscalated || this.isResolved) return;
+      this.abortActiveStream();
+      this.stopRealtime();
+      this.sseClosedErrors = 0;
+      this.escalating = true;
+      try {
+        const csrfToken = this.getCsrfToken();
+        const res = await fetch('/support/chat/escalate/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+          },
+          body: JSON.stringify({ reason, details })
+        });
+        let data = null;
+        try {
+          data = await res.json();
+        } catch (e) {}
+        if (res.ok && data) {
+          this.lastHistorySyncAt = Date.now();
+          this.applySessionState(data, true);
+          if (Array.isArray(data.messages) && data.messages.length > 0) {
+            this.messages = data.messages.map(m => this.normalizeMessage(m));
+          }
+          if (this.shouldStreamSse() || this.shouldPoll()) {
+            this.startRealtime(false);
+          }
+          this.scrollToBottom();
+        } else if (res.status === 409 && data && data.status) {
+          this.status = data.status;
+          this.isEscalated = Boolean(data.is_escalated);
+          await this.loadHistory();
+        } else {
+          const errMsg = (data && data.error) || 'Не вдалося викликати оператора. Спробуйте ще раз.';
+          this.messages.push({
+            _key: 'err-' + (++this.msgKeySeq),
+            id: null,
+            role: 'system',
+            sender: 'system',
+            content: '',
+            created_at: '',
+            error: errMsg,
+            showOperatorFallback: false,
+            cartUpdated: false
+          });
+          if (this.shouldStreamSse()) {
+            this.startRealtime(false);
+          }
+          this.scrollToBottom();
+        }
+      } catch (e) {
+        this.messages.push({
+          _key: 'err-' + (++this.msgKeySeq),
+          id: null,
+          role: 'system',
+          sender: 'system',
+          content: '',
+          created_at: '',
+          error: 'Помилка мережі під час виклику оператора. Спробуйте ще раз.',
+          showOperatorFallback: false,
+          cartUpdated: false
+        });
+        if (this.shouldStreamSse()) {
+          this.startRealtime(false);
+        }
+        this.scrollToBottom();
+      } finally {
+        this.escalating = false;
+      }
+    },
+    requestResetChat() {
+      if (this.resetting) return;
+      if (this.isEscalated && !this.isResolved) {
+        this.confirmResetOpen = true;
+        return;
+      }
+      this.resetChat();
+    },
+    async resetChat() {
+      if (this.resetting) return;
+      this.resetting = true;
+      this.confirmResetOpen = false;
+      this.stopRealtime();
+      this.abortActiveStream();
+      try {
+        const csrfToken = this.getCsrfToken();
+        const res = await fetch('/support/chat/reset/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+          }
+        });
+        let data = null;
+        try {
+          data = await res.json();
+        } catch (e) {}
+        if (res.ok && data) {
+          this.sessionUuid = data.session_uuid || null;
+          this.status = 'ACTIVE';
+          this.isEscalated = false;
+          this.operatorConnected = false;
+          this.lastMessageId = 0;
+          this.sseClosedErrors = 0;
+          this.lastHistorySyncAt = Date.now();
+          this.messages = [
+            this.makeWelcomeMsg('Контекст діалогу очищено. Чим я можу вам допомогти сьогодні?')
+          ];
+          if (this.shouldStreamSse()) {
+            this.startRealtime(false);
+          }
+          this.scrollToBottom();
+        } else {
+          const errMsg = (data && data.error) || 'Не вдалося почати новий діалог. Спробуйте ще раз.';
+          this.messages.push({
+            _key: 'err-' + (++this.msgKeySeq),
+            id: null,
+            role: 'system',
+            sender: 'system',
+            content: '',
+            created_at: '',
+            error: errMsg,
+            showOperatorFallback: false,
+            cartUpdated: false
+          });
+          if (this.shouldStreamSse() || this.shouldPoll()) {
+            this.startRealtime(false);
+          }
+          this.scrollToBottom();
+        }
+      } catch (e) {
+        this.messages.push({
+          _key: 'err-' + (++this.msgKeySeq),
+          id: null,
+          role: 'system',
+          sender: 'system',
+          content: '',
+          created_at: '',
+          error: 'Помилка мережі. Не вдалося почати новий діалог.',
+          showOperatorFallback: false,
+          cartUpdated: false
+        });
+        if (this.shouldStreamSse() || this.shouldPoll()) {
+          this.startRealtime(false);
+        }
+        this.scrollToBottom();
+      } finally {
+        this.resetting = false;
+      }
+    },
+    async pollHistory() {
+      if (!this.shouldPoll() || this.sseConnected) {
+        this.stopPolling();
+        return;
+      }
+      if (this.pollingInFlight || this.loading || this.escalating || this.resetting) {
+        this.scheduleNextPoll();
+        return;
+      }
+      const controller = new AbortController();
+      this.pollAbortController = controller;
+      this.pollingInFlight = true;
+      let aborted = false;
+      try {
+        const url = '/support/chat/history/?after_id=' + encodeURIComponent(String(this.lastMessageId || 0));
+        const res = await fetch(url, { cache: 'no-store', signal: controller.signal });
+        if (res.ok) {
+          const data = await res.json();
+          this.lastHistorySyncAt = Date.now();
+          if (this.sessionUuid && data.session_uuid && data.session_uuid !== this.sessionUuid) {
+            this.pollingInFlight = false;
+            this.pollAbortController = null;
+            await this.loadHistory();
+            return;
+          }
+          this.applySessionState(data, false);
+          if (Array.isArray(data.messages) && data.messages.length > 0) {
+            let added = false;
+            for (const incoming of data.messages) {
+              if (this.mergeIncomingMessage(incoming)) {
+                added = true;
+              }
+            }
+            if (added) {
+              this.scrollToBottom();
+            }
+          }
+        }
+      } catch (e) {
+        if (e && e.name === 'AbortError') {
+          aborted = true;
+          return;
+        }
+      } finally {
+        if (this.pollAbortController === controller) {
+          this.pollAbortController = null;
+          this.pollingInFlight = false;
+        }
+        if (!aborted && !controller.signal.aborted && !this.sseConnected) {
+          this.scheduleNextPoll();
+        }
       }
     }
   }"
-  @open-cart-drawer.window="hiddenByModal = true; open = false"
-  @drawer-opened.window="hiddenByModal = true; open = false"
+  @open-cart-drawer.window="hiddenByModal = true; closeChat()"
+  @drawer-opened.window="hiddenByModal = true; closeChat()"
   @drawer-closed.window="hiddenByModal = false"
-  @open-dish-modal.window="hiddenByModal = true; open = false"
-  @modal-opened.window="hiddenByModal = true; open = false"
+  @open-dish-modal.window="hiddenByModal = true; closeChat()"
+  @modal-opened.window="hiddenByModal = true; closeChat()"
   @modal-closed.window="hiddenByModal = false"
-  @keydown.escape.window="if (open) closeChat()"
-  @open-ai-chat.window="hiddenByModal = false; open = true; if ($event.detail) { const q = typeof $event.detail === 'string' ? $event.detail : ($event.detail.query || $event.detail.message || ''); if (q) { input = q; } }"
+  @keydown.escape.window="if (confirmResetOpen) { confirmResetOpen = false; } else if (open) { closeChat(); }"
+  @open-ai-chat.window="openChat(); if ($event.detail) { const q = typeof $event.detail === 'string' ? $event.detail : ($event.detail.query || $event.detail.message || ''); if (q) { input = q; } }"
   class="select-none">
 
   <button
@@ -298,18 +1107,18 @@ window.__formatMarkdown = function(text) {
     x-transition:leave="transition ease-in duration-100"
     x-transition:leave-start="opacity-100 scale-100"
     x-transition:leave-end="opacity-0 scale-90"
-    @click="hiddenByModal = false; open = !open; if (!open) abortActiveStream();"
+    @click="toggleChat()"
     :aria-expanded="open.toString()"
-    aria-label="AI Консьєрж підтримки"
-    title="AI Консьєрж підтримки"
+    aria-label="Чат підтримки Double Bite"
+    title="Чат підтримки Double Bite"
     class="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-40 w-12 h-12 sm:w-auto sm:h-auto sm:px-4 sm:py-3 rounded-full bg-db-noir text-white hover:bg-db-ink border border-white/10 shadow-xl inline-flex items-center justify-center gap-2.5 transition-[background-color,transform,opacity] duration-150 cursor-pointer"
   >
     <span
-      :class="[isEscalated ? 'bg-amber-400' : 'bg-emerald-400', loading ? 'animate-pulse motion-reduce:animate-none' : '']"
+      :class="[isResolved ? 'bg-db-linen' : (isEscalated && !operatorConnected ? 'bg-amber-400' : 'bg-emerald-400'), (loading || escalating) ? 'animate-pulse motion-reduce:animate-none' : '']"
       class="absolute top-2 right-2 sm:static w-2 h-2 rounded-full inline-block shrink-0"
       aria-hidden="true"
     ></span>
-    <span class="hidden sm:inline text-sm font-sans font-medium" x-text="isEscalated ? 'Адміністратор' : 'AI Консьєрж'"></span>
+    <span class="hidden sm:inline text-sm font-sans font-medium" x-text="isResolved ? 'Завершено' : (isEscalated ? (operatorConnected ? 'Адміністратор' : 'Очікуємо менеджера') : 'AI Консьєрж')"></span>
     <svg class="w-5 h-5 sm:w-4 sm:h-4 text-white/90 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
     </svg>
@@ -325,83 +1134,145 @@ window.__formatMarkdown = function(text) {
     x-transition:leave-start="opacity-100 translate-y-0"
     x-transition:leave-end="opacity-0 translate-y-4"
     role="dialog"
-    aria-label="AI-консьєрж Double Bite"
+    aria-label="Чат підтримки Double Bite"
     class="fixed inset-x-3 bottom-3 sm:inset-x-auto sm:bottom-20 sm:right-6 z-50 sm:w-96 bg-white border border-db-linen shadow-2xl rounded-2xl overflow-hidden flex flex-col h-[72svh] sm:h-[520px] max-h-[calc(100svh-5.5rem)]"
   >
-    <div class="px-4 py-3.5 border-b border-db-linen flex items-center justify-between gap-2 bg-db-paper/70">
-      <div class="min-w-0">
-        <div class="flex items-center gap-2">
+    <div class="px-3 sm:px-4 py-3 border-b border-db-linen bg-db-paper/70">
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-1.5 min-w-0">
           <svg class="w-4 h-4 text-db-crust-dark shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
             <path d="M18.28 13.53 A9 9 0 1 1 13.38 1.66 A4.2 4.2 0 0 0 17.72 7.57 A3.4 3.4 0 0 0 18.28 13.53 Z"/>
           </svg>
-          <span class="font-bold text-sm font-sans tracking-tight text-db-noir">double bite<span class="text-[10px] font-mono align-top ml-0.5 text-db-crust-dark">™</span></span>
-          <span
-            :class="isEscalated ? 'bg-amber-50 text-amber-900 border-amber-200' : 'bg-db-boucle text-db-muted border-db-linen'"
-            class="text-[11px] font-sans font-medium px-2 py-0.5 border rounded-full"
-            x-text="isEscalated ? 'Адміністратор' : 'Mistral AI'"
-          ></span>
+          <span class="font-bold text-sm font-sans tracking-tight text-db-noir whitespace-nowrap">double bite<span class="text-[10px] font-mono align-top ml-0.5 text-db-crust-dark">™</span></span>
         </div>
-        <div class="flex items-center gap-1.5 text-xs font-sans text-db-subtle mt-1">
-          <svg x-show="isEscalated" class="w-3.5 h-3.5 text-amber-700 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-            <line x1="12" y1="9" x2="12" y2="13"></line>
-            <line x1="12" y1="17" x2="12.01" y2="17"></line>
-          </svg>
-          <span class="truncate" x-text="isEscalated ? 'Підключено персонал · {{ restaurant_hotline|default:'+380 44 123 45 67'|escapejs }}' : 'Персональний гастро-консьєрж'"></span>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            @click="requestResetChat()"
+            :disabled="resetting"
+            title="Почати новий діалог"
+            class="min-h-[44px] px-2.5 py-1.5 rounded-lg text-xs font-sans font-medium bg-white hover:bg-db-boucle text-db-text border border-db-linen transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Новий діалог
+          </button>
+          <button
+            type="button"
+            @click="closeChat()"
+            aria-label="Закрити чат"
+            class="min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-lg text-db-subtle hover:text-db-text hover:bg-db-boucle transition-colors cursor-pointer"
+          >
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
         </div>
       </div>
-      <div class="flex items-center gap-1.5 shrink-0">
+      <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1" aria-live="polite">
+        <span
+          :class="isResolved
+            ? 'bg-db-boucle text-db-subtle border-db-linen'
+            : (isEscalated
+              ? (operatorConnected ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-900 border-amber-200')
+              : 'bg-db-boucle text-db-muted border-db-linen')"
+          class="inline-flex items-center gap-1.5 text-[11px] font-sans font-medium px-2 py-0.5 border rounded-full whitespace-nowrap shrink-0"
+        >
+          <span
+            :class="isResolved ? 'bg-db-linen' : (isEscalated && !operatorConnected ? 'bg-amber-600' : 'bg-emerald-600')"
+            class="w-1.5 h-1.5 rounded-full shrink-0"
+            aria-hidden="true"
+          ></span>
+          <span x-text="isResolved ? 'Завершено' : (isEscalated ? (operatorConnected ? 'Адміністратор' : 'Очікуємо менеджера') : 'Gemini AI')"></span>
+        </span>
+        <span class="text-xs font-sans text-db-subtle leading-tight" x-text="isResolved ? 'Звернення завершено' : (isEscalated ? (operatorConnected ? 'Менеджер на звʼязку' : 'Запит передано · можете дописати деталі') : 'Персональний гастро-консьєрж')"></span>
+      </div>
+    </div>
+
+    <div
+      x-show="isEscalated && !isWorkingHours && !operatorConnected && !isResolved"
+      x-cloak
+      role="status"
+      aria-live="polite"
+      class="px-4 py-2.5 bg-amber-50 border-b border-amber-200 text-amber-950 text-xs font-sans leading-relaxed flex items-start gap-2"
+    >
+      <svg class="w-4 h-4 text-amber-700 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="10"></circle>
+        <polyline points="12 6 12 12 16 14"></polyline>
+      </svg>
+      <span x-text="offHoursNotice || ('Зараз неробочий час (' + workingHoursLabel + '). Ваше звернення збережено — залиште деталі, і адміністратор відповість з ' + workingHoursLabel.split('–')[0] + '.')"></span>
+    </div>
+
+    <div
+      x-show="confirmResetOpen"
+      x-cloak
+      role="alertdialog"
+      aria-labelledby="chat-reset-confirm-title"
+      class="px-4 py-3 bg-amber-50 border-b border-amber-200 text-amber-950 text-xs font-sans space-y-2"
+    >
+      <p id="chat-reset-confirm-title" class="font-medium leading-relaxed">
+        Завершити активне звернення до адміністратора та почати новий діалог?
+      </p>
+      <div class="flex items-center gap-2">
         <button
           type="button"
           @click="resetChat()"
-          title="Почати новий діалог"
-          class="min-h-[36px] px-2.5 py-1.5 rounded-lg text-xs font-sans font-medium bg-white hover:bg-db-boucle text-db-text border border-db-linen transition-colors cursor-pointer"
+          :disabled="resetting"
+          class="min-h-[44px] px-3 py-1.5 rounded-lg bg-db-noir text-white hover:bg-db-ink text-xs font-sans font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Новий діалог
+          Так, новий діалог
         </button>
         <button
           type="button"
-          @click="closeChat()"
-          aria-label="Закрити чат"
-          class="min-w-[36px] min-h-[36px] inline-flex items-center justify-center rounded-lg text-db-subtle hover:text-db-text hover:bg-db-boucle transition-colors cursor-pointer"
+          @click="confirmResetOpen = false"
+          class="min-h-[44px] px-3 py-1.5 rounded-lg bg-white border border-db-linen text-db-text hover:bg-db-boucle text-xs font-sans font-medium transition-colors cursor-pointer"
         >
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
+          Скасувати
         </button>
       </div>
     </div>
 
-    <div class="px-4 py-2.5 bg-db-paper border-b border-db-linen flex flex-wrap gap-2">
+    <div x-show="!isEscalated && !isResolved" class="px-3 sm:px-4 py-2.5 bg-db-paper border-b border-db-linen flex flex-wrap items-center gap-2">
       <button
         type="button"
         @click="sendQuick('Що порадиш на вечерю?')"
-        :disabled="isEscalated || loading"
-        class="min-h-[36px] px-3 py-1.5 rounded-full text-xs font-sans font-medium bg-white border border-db-linen text-db-text hover:border-db-crust hover:text-db-crust-dark transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        :disabled="isEscalated || isResolved || loading || escalating || resetting"
+        class="min-h-[44px] px-3 py-1.5 rounded-full text-xs font-sans font-medium bg-white border border-db-linen text-db-text hover:border-db-crust hover:text-db-crust-dark transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
       >
         Вечеря
       </button>
       <button
         type="button"
         @click="sendQuick('Які є веганські страви?')"
-        :disabled="isEscalated || loading"
-        class="min-h-[36px] px-3 py-1.5 rounded-full text-xs font-sans font-medium bg-white border border-db-linen text-db-text hover:border-db-crust hover:text-db-crust-dark transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        :disabled="isEscalated || isResolved || loading || escalating || resetting"
+        class="min-h-[44px] px-3 py-1.5 rounded-full text-xs font-sans font-medium bg-white border border-db-linen text-db-text hover:border-db-crust hover:text-db-crust-dark transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
       >
         Веган
       </button>
       <button
         type="button"
         @click="sendQuick('Який час та вартість доставки?')"
-        :disabled="isEscalated || loading"
-        class="min-h-[36px] px-3 py-1.5 rounded-full text-xs font-sans font-medium bg-white border border-db-linen text-db-text hover:border-db-crust hover:text-db-crust-dark transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        :disabled="isEscalated || isResolved || loading || escalating || resetting"
+        class="min-h-[44px] px-3 py-1.5 rounded-full text-xs font-sans font-medium bg-white border border-db-linen text-db-text hover:border-db-crust hover:text-db-crust-dark transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
       >
         Доставка
+      </button>
+      <button
+        type="button"
+        @click="escalateToOperator('HUMAN_REQUESTED', '')"
+        :disabled="loading || escalating || resetting"
+        title="Покликати адміністратора ресторану"
+        class="min-h-[44px] px-3 py-1.5 rounded-full text-xs font-sans font-medium bg-db-boucle border border-db-crust text-db-crust-dark hover:bg-white transition-colors inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
+          <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>
+        </svg>
+        <span x-text="escalating ? 'Зʼєднання…' : 'Оператор'"></span>
       </button>
     </div>
 
     <div x-ref="msgContainer" data-lenis-prevent class="flex-1 min-h-0 p-4 overflow-y-auto space-y-3 bg-white">
-      <template x-for="(msg, index) in messages" :key="index">
+      <template x-for="(msg, index) in messages" :key="msg._key || index">
         <div :class="msg.sender === 'user' ? 'flex justify-end' : 'flex justify-start'">
           <div
             :class="msg.sender === 'user'
@@ -413,17 +1284,31 @@ window.__formatMarkdown = function(text) {
                   : 'bg-db-boucle text-db-text px-3.5 py-2.5 text-[13px] font-sans leading-relaxed max-w-[85%] rounded-2xl rounded-bl-sm'))"
           >
             <div
-              :class="msg.sender === 'user' ? 'text-white/65 text-right' : 'text-db-subtle text-left'"
-              class="text-[11px] font-sans font-medium mb-1"
-              x-text="msg.sender === 'user' ? 'Ви' : (msg.sender === 'operator' ? 'Адміністратор ресторану' : (msg.sender === 'system' ? 'Система' : 'Double Bite Консьєрж'))"
-            ></div>
+              :class="msg.sender === 'user' ? 'text-white/65 justify-end' : 'text-db-subtle justify-between'"
+              class="flex items-center gap-2 text-[11px] font-sans font-medium mb-1"
+            >
+              <span x-text="msg.sender === 'user' ? 'Ви' : (msg.sender === 'operator' ? 'Адміністратор ресторану' : (msg.sender === 'system' ? 'Система' : 'Double Bite Консьєрж'))"></span>
+              <span x-show="msg.created_at" class="font-mono text-[10px] tabular-nums" x-text="msg.created_at"></span>
+            </div>
             <div x-show="msg.content" class="whitespace-pre-wrap break-words" x-effect="$el.innerHTML = window.__formatMarkdown(msg.content)"></div>
-            <div x-show="msg.error" :class="msg.content ? 'mt-2' : ''" class="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-800 text-xs font-sans whitespace-pre-wrap" x-text="msg.error"></div>
+            <div x-show="msg.error" :class="msg.content ? 'mt-2' : ''" class="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-800 text-xs font-sans whitespace-pre-wrap">
+              <div x-text="msg.error"></div>
+              <div x-show="!isEscalated && !isResolved && msg.showOperatorFallback" class="mt-2 pt-2 border-t border-red-200">
+                <button
+                  type="button"
+                  @click="escalateToOperator('HUMAN_REQUESTED', 'Клієнт викликав оператора після помилки AI-асистента.')"
+                  :disabled="escalating || loading || resetting"
+                  class="min-h-[44px] px-3 py-1.5 rounded-lg bg-db-noir text-white hover:bg-db-ink text-xs font-sans font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Покликати оператора
+                </button>
+              </div>
+            </div>
             <div x-show="msg.cartUpdated" class="mt-2.5 pt-2.5 border-t border-db-linen">
               <button
                 type="button"
                 @click="window.dispatchEvent(new CustomEvent('open-cart-drawer'))"
-                class="min-h-[36px] px-3 py-1.5 rounded-lg bg-db-noir text-white hover:bg-db-ink text-xs font-sans font-medium transition-colors cursor-pointer"
+                class="min-h-[44px] px-3 py-1.5 rounded-lg bg-db-noir text-white hover:bg-db-ink text-xs font-sans font-medium transition-colors cursor-pointer"
               >
                 Відкрити кошик
               </button>
@@ -431,7 +1316,7 @@ window.__formatMarkdown = function(text) {
           </div>
         </div>
       </template>
-      <div x-show="loading" class="flex justify-start" aria-live="polite">
+      <div x-show="loading && !isEscalated" class="flex justify-start" aria-live="polite">
         <div class="inline-flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl rounded-bl-sm bg-db-boucle text-db-muted text-xs font-sans">
           <span class="inline-flex items-center gap-1" aria-hidden="true">
             <span class="w-1.5 h-1.5 rounded-full bg-db-crust-dark animate-bounce motion-reduce:animate-none [animation-delay:-0.3s]"></span>
@@ -443,22 +1328,37 @@ window.__formatMarkdown = function(text) {
       </div>
     </div>
 
-    <form @submit.prevent="sendMessage()" class="p-3 border-t border-db-linen bg-db-paper flex items-center gap-2">
+    <form x-show="!isResolved" @submit.prevent="sendMessage()" class="p-3 border-t border-db-linen bg-db-paper flex items-center gap-2">
       <input
         type="text"
         x-model="input"
-        :disabled="isEscalated || loading"
-        placeholder="Запитайте про меню…"
-        aria-label="Повідомлення для AI-консьєржа"
+        maxlength="2000"
+        :disabled="loading || escalating || resetting || isResolved"
+        :placeholder="isEscalated ? 'Напишіть адміністратору…' : 'Запитайте про меню…'"
+        :aria-label="isEscalated ? 'Повідомлення для адміністратора' : 'Повідомлення для AI-консьєржа'"
         class="flex-1 min-w-0 min-h-[44px] px-3.5 py-2 text-base sm:text-sm font-sans bg-white border border-db-linen text-db-text placeholder:text-db-subtle focus:outline-none focus:border-db-crust-dark focus:ring-2 focus:ring-db-crust/20 rounded-xl transition-colors disabled:bg-db-boucle disabled:cursor-not-allowed"
       >
       <button
         type="submit"
-        :disabled="isEscalated || loading"
+        :disabled="loading || escalating || resetting || isResolved"
         class="min-h-[44px] px-4 py-2 bg-db-noir text-white hover:bg-db-ink text-sm font-sans font-medium transition-colors rounded-xl whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
       >
         Надіслати
       </button>
     </form>
+
+    <div x-show="isResolved" x-cloak class="p-3 border-t border-db-linen bg-db-paper flex flex-col gap-2">
+      <p class="text-xs font-sans text-db-muted text-center">
+        Діалог завершено. Якщо виникнуть нові запитання — почніть новий діалог.
+      </p>
+      <button
+        type="button"
+        @click="resetChat()"
+        :disabled="resetting"
+        class="w-full min-h-[44px] px-4 py-2 bg-db-noir text-white hover:bg-db-ink text-sm font-sans font-medium transition-colors rounded-xl cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        Почати новий діалог
+      </button>
+    </div>
   </div>
 </div>

@@ -19,6 +19,7 @@ from orders.services import CartService
 from support.models import ChatSession, TicketReason
 from support.services import (
     ChatSessionService,
+    SupportDeskError,
     check_order_status_for_request,
     get_faq_answers,
 )
@@ -658,13 +659,16 @@ def _handle_escalate_to_operator(
         session = ChatSessionService.get_or_create_active_session(request)
 
     if session is not None:
-        ticket = ChatSessionService.escalate_session(
-            session=session,
-            reason=reason,
-            details=details,
-            order=order,
-            customer_phone=customer_phone,
-        )
+        try:
+            ticket = ChatSessionService.escalate_session(
+                session=session,
+                reason=reason,
+                details=details,
+                order=order,
+                customer_phone=customer_phone,
+            )
+        except SupportDeskError as exc:
+            return {'error': str(exc)}
         ticket_id = ticket.id
         ticket_status = ticket.status
     else:

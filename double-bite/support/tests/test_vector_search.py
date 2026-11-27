@@ -161,37 +161,30 @@ def test_real_mode_defaults_off_mock_and_returns_none_on_failure():
     env_clean = {
         k: v
         for k, v in os.environ.items()
-        if k not in ('TEST_USE_MOCK_EMBEDDING', 'MISTRAL_EMBEDDING_TIMEOUT_MS')
+        if k not in ('TEST_USE_MOCK_EMBEDDING', 'GEMINI_EMBEDDING_TIMEOUT_MS')
     }
-    env_clean['MISTRAL_API_KEY'] = 'real-api-key'
+    env_clean['GEMINI_API_KEY'] = 'real-api-key'
 
-    mock_client = MagicMock()
-    mock_item = MagicMock()
-    mock_item.embedding = [0.25] * EMBEDDING_DIM
     mock_resp = MagicMock()
-    mock_resp.data = [mock_item]
-    mock_client.embeddings.create.return_value = mock_resp
+    mock_resp.json.return_value = {'embeddings': [{'values': [0.25] * EMBEDDING_DIM}]}
 
     with (
         override_settings(is_testing=False),
         patch.dict(os.environ, env_clean, clear=True),
-        patch('support.vector_search.Mistral', return_value=mock_client) as mock_cls,
+        patch('support.vector_search.httpx.post', return_value=mock_resp) as mock_post,
     ):
         vec = get_embedding('піца маргарита')
 
-    assert vec == [0.25] * EMBEDDING_DIM
-    mock_cls.assert_called_once_with(api_key='real-api-key', timeout_ms=15000)
-    mock_client.embeddings.create.assert_called_once_with(
-        model='mistral-embed',
-        inputs=['піца маргарита'],
-        timeout_ms=15000,
-    )
+    assert vec is not None and len(vec) == EMBEDDING_DIM
+    assert abs(sum(x * x for x in vec) - 1.0) < 1e-6
+    assert mock_post.call_count == 1
+    assert mock_post.call_args.kwargs['headers'] == {'x-goog-api-key': 'real-api-key'}
+    assert mock_post.call_args.kwargs['timeout'] == 15
 
-    mock_client.embeddings.create.side_effect = TimeoutError('Mistral timed out')
     with (
         override_settings(is_testing=False),
         patch.dict(os.environ, env_clean, clear=True),
-        patch('support.vector_search.Mistral', return_value=mock_client),
+        patch('support.vector_search.httpx.post', side_effect=TimeoutError('timed out')),
     ):
         failed_vec = get_embedding('піца маргарита', timeout_ms=5000)
 
@@ -202,10 +195,10 @@ def test_real_mode_without_api_key_returns_none():
     env_no_key = {
         k: v
         for k, v in os.environ.items()
-        if k not in ('TEST_USE_MOCK_EMBEDDING', 'MISTRAL_API_KEY')
+        if k not in ('TEST_USE_MOCK_EMBEDDING', 'GEMINI_API_KEY')
     }
     with (
-        override_settings(is_testing=False, MISTRAL_API_KEY=''),
+        override_settings(is_testing=False, GEMINI_API_KEY=''),
         patch.dict(os.environ, env_no_key, clear=True),
     ):
         assert get_embedding('піца') is None

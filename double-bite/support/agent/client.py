@@ -17,26 +17,32 @@ from django.http import HttpRequest
 
 from support.models import ChatSession
 
+from .gemini import GeminiClient
 from .prompts import SYSTEM_PROMPT
 from .tools import SUPPORT_AGENT_TOOLS, execute_agent_tool
-
-try:
-    from mistralai import Mistral
-except (ImportError, AttributeError):
-    from mistralai.client import Mistral
 
 logger = logging.getLogger('support')
 
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2
-DEFAULT_MISTRAL_TIMEOUT_MS = 30000
+DEFAULT_GEMINI_TIMEOUT_MS = 30000
 DEFAULT_MAX_ROUNDS = 3
 CART_MUTATION_TOOLS = frozenset({'add_to_cart', 'remove_from_cart', 'update_cart_quantity'})
 INVALID_TOOL_ARGS_ERROR = 'Invalid tool arguments, expected JSON object'
 _SYSTEM_RANDOM = secrets.SystemRandom()
 
 
-class MistralSupportAgent:
+def _to_plain(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _to_plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_plain(v) for v in value]
+    if hasattr(value, '__dict__'):
+        return {k: _to_plain(v) for k, v in vars(value).items()}
+    return value
+
+
+class GeminiSupportAgent:
     def __init__(
         self,
         api_key: str | None = None,
@@ -50,36 +56,37 @@ class MistralSupportAgent:
             self.api_key = api_key
         else:
             self.api_key = (
-                os.getenv('MISTRAL_API_KEY')
-                or getattr(settings, 'MISTRAL_API_KEY', '')
+                os.getenv('GEMINI_API_KEY')
+                or getattr(settings, 'GEMINI_API_KEY', '')
                 or ''
             )
 
-        self.model = model or os.getenv('MISTRAL_MODEL', 'mistral-small-latest')
+        self.model = model or os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
         self.temperature = float(
             temperature
             if temperature is not None
-            else os.getenv('MISTRAL_TEMPERATURE', '0.2')
+            else os.getenv('GEMINI_TEMPERATURE', '0.2')
         )
         self.max_tokens = int(
             max_tokens
             if max_tokens is not None
-            else os.getenv('MISTRAL_MAX_TOKENS', '1024')
+            else os.getenv('GEMINI_MAX_TOKENS', '1024')
         )
 
         if timeout_ms is not None:
             resolved_timeout = int(timeout_ms)
         else:
-            raw_timeout = os.getenv('MISTRAL_TIMEOUT_MS', '').strip()
+            raw_timeout = os.getenv('GEMINI_TIMEOUT_MS', '').strip()
             try:
                 resolved_timeout = (
-                    int(raw_timeout) if raw_timeout else DEFAULT_MISTRAL_TIMEOUT_MS
+                    int(raw_timeout) if raw_timeout else DEFAULT_GEMINI_TIMEOUT_MS
                 )
             except ValueError:
-                resolved_timeout = DEFAULT_MISTRAL_TIMEOUT_MS
+                resolved_timeout = DEFAULT_GEMINI_TIMEOUT_MS
         self.timeout_ms = (
-            resolved_timeout if resolved_timeout > 0 else DEFAULT_MISTRAL_TIMEOUT_MS
+            resolved_timeout if resolved_timeout > 0 else DEFAULT_GEMINI_TIMEOUT_MS
         )
+        self.reasoning_effort = os.getenv('GEMINI_REASONING_EFFORT', 'low').strip()
         self.max_rounds = max(1, int(max_rounds))
 
     @staticmethod
@@ -128,7 +135,7 @@ class MistralSupportAgent:
     ) -> AsyncGenerator[dict[str, Any], None]:
         hotline = self._get_hotline()
         if not self.api_key:
-            logger.warning('MISTRAL_API_KEY is not configured.')
+            logger.warning('GEMINI_API_KEY is not configured.')
             yield {
                 'token': (
                     'Вибачте, асистент тимчасово недоступний '
@@ -150,15 +157,31 @@ class MistralSupportAgent:
             role = msg.get('role', 'user')
             if role == 'operator':
                 role = 'assistant'
-            content = msg.get('content', '')
-            messages.append({'role': role, 'content': content})
+            if role not in ('user', 'assistant'):
+                continue
+            content = str(msg.get('content', '') or '').strip()
+            if not content:
+                # Gemini rejects empty message content (HTTP 400).
+                continue
+            if len(messages) == 1 and role == 'assistant':
+                # Gemini requires the first non-system turn to be 'user'
+                # (can happen if the 20-message window slices off a prior user turn).
+                continue
+            if messages[-1]['role'] == role:
+                if content:
+                    prev = messages[-1]['content']
+                    messages[-1]['content'] = (
+                        f'{prev}\n\n{content}' if prev else content
+                    )
+            else:
+                messages.append({'role': role, 'content': content})
 
         try:
-            async for chunk in self._stream_mistral(messages, request, session):
+            async for chunk in self._stream_gemini(messages, request, session):
                 yield chunk
             return
         except Exception:
-            logger.exception('Mistral API error')
+            logger.exception('Gemini API error')
 
         yield {
             'error': (
@@ -169,7 +192,7 @@ class MistralSupportAgent:
         }
 
     # ------------------------------------------------------------------
-    # Mistral streaming & tool helpers
+    # Gemini streaming & tool helpers
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -232,8 +255,13 @@ class MistralSupportAgent:
                     'arg_dict': None,
                     'raw_other': None,
                     'has_raw_other': False,
+                    'extra_content': None,
                 },
             )
+
+            extra = tc.get('extra_content') if is_dict else getattr(tc, 'extra_content', None)
+            if extra and not bucket['extra_content']:
+                bucket['extra_content'] = _to_plain(extra)
 
             tc_id = tc.get('id') if is_dict else getattr(tc, 'id', None)
             if isinstance(tc_id, str) and tc_id and tc_id != 'null':
@@ -307,6 +335,10 @@ class MistralSupportAgent:
                     'name': bucket['name'],
                     'arguments': msg_args,
                 },
+                # Gemini 3 requires the thought signature to be echoed back.
+                'extra_content': bucket.get('extra_content') or {
+                    'google': {'thought_signature': 'skip_thought_signature_validator'}
+                },
             })
         return {
             'role': 'assistant',
@@ -320,7 +352,7 @@ class MistralSupportAgent:
         if callable(close_fn) and inspect.iscoroutinefunction(close_fn):
             await close_fn()
 
-    async def _stream_mistral(
+    async def _stream_gemini(
         self,
         messages: list[dict[str, Any]],
         request: HttpRequest | None,
@@ -338,7 +370,7 @@ class MistralSupportAgent:
         pending_tool_calls = False
         hotline = self._get_hotline()
 
-        async with Mistral(api_key=self.api_key, timeout_ms=self.timeout_ms) as client:
+        async with GeminiClient(api_key=self.api_key, timeout_ms=self.timeout_ms) as client:
             for _round_idx in range(self.max_rounds):
                 rounds_used += 1
                 stream = await self._call_with_retry(
@@ -349,6 +381,7 @@ class MistralSupportAgent:
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                     timeout_ms=self.timeout_ms,
+                    reasoning_effort=self.reasoning_effort,
                 )
                 round_text_parts: list[str] = []
                 tool_calls_by_index: dict[int, dict[str, Any]] = {}
@@ -467,6 +500,7 @@ class MistralSupportAgent:
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                     timeout_ms=self.timeout_ms,
+                    reasoning_effort=self.reasoning_effort,
                 )
                 final_usage = {
                     'prompt_tokens': 0,
@@ -499,7 +533,7 @@ class MistralSupportAgent:
 
         latency_ms = round((time.monotonic() - start_time) * 1000, 1)
         logger.info(
-            'Mistral chat completed: model=%s rounds=%d latency_ms=%.1f '
+            'Gemini chat completed: model=%s rounds=%d latency_ms=%.1f '
             'tools_called=%s usage=%s',
             self.model,
             rounds_used,
@@ -516,13 +550,13 @@ class MistralSupportAgent:
         )
 
     # ------------------------------------------------------------------
-    # Retry helper (Mistral only)
+    # Retry helper (Gemini only)
     # ------------------------------------------------------------------
 
     @staticmethod
     def _is_rate_limit_error(exc: Exception) -> bool:
         """Return True if *exc* looks like an HTTP 429 rate-limit error."""
-        # mistralai.client.errors.SDKError stores status on the response
+        # GeminiAPIError and HTTP client errors expose status_code directly.
         if hasattr(exc, 'status_code') and exc.status_code == 429:
             return True
         # Some SDK versions expose the raw response object
@@ -542,7 +576,7 @@ class MistralSupportAgent:
                     jitter = _SYSTEM_RANDOM.uniform(0.0, base_delay * 0.5)
                     delay = base_delay + jitter
                     logger.warning(
-                        'Rate-limited by Mistral API (attempt %d/%d). '
+                        'Rate-limited by Gemini API (attempt %d/%d). '
                         'Retrying in %.2fs…',
                         attempt + 1,
                         MAX_RETRIES,
@@ -550,4 +584,16 @@ class MistralSupportAgent:
                     )
                     await asyncio.sleep(delay)
                 else:
+                    if getattr(exc, 'status_code', None) == 400:
+                        logger.error(
+                            'Gemini 400 request debug: %s',
+                            [
+                                (m.get('role'), len(str(m.get('content') or '')), bool(m.get('tool_calls')))
+                                for m in (kwargs.get('messages') or [])
+                            ],
+                        )
                     raise
+
+
+# Backward-compatible alias
+MistralSupportAgent = GeminiSupportAgent

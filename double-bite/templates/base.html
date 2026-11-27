@@ -79,9 +79,9 @@
   {% endif %}
 
   <header x-data="{ mobileOpen: false }" @keydown.escape.window="mobileOpen = false" class="sticky top-0 z-40 bg-db-paper/95 backdrop-blur-md border-b border-db-linen select-none">
-    <div class="max-w-[1440px] mx-auto px-3 sm:px-8">
+    <div class="max-w-[1440px] mx-auto px-3 sm:px-5 xl:px-8">
 
-      <nav aria-label="Основна навігація" class="hidden md:flex items-center justify-between h-[72px] gap-6">
+      <nav aria-label="Основна навігація" class="hidden md:flex items-center justify-between h-[72px] gap-2 lg:gap-4 xl:gap-6">
         <a href="/" class="flex items-center gap-2.5 group shrink-0 rounded-lg py-1 pr-1">
           <svg class="w-5 h-5 text-db-crust-dark group-hover:text-db-crust transition-colors shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
             <path d="M18.28 13.53 A9 9 0 1 1 13.38 1.66 A4.2 4.2 0 0 0 17.72 7.57 A3.4 3.4 0 0 0 18.28 13.53 Z"/>
@@ -92,40 +92,40 @@
           </span>
         </a>
 
-        <div class="flex items-center gap-1 lg:gap-2">
+        <div class="flex items-center gap-0.5 lg:gap-1 xl:gap-2">
           <a
             href="/menu/"
-            class="relative h-[72px] inline-flex items-center px-3.5 text-sm font-sans font-medium transition-colors {% if request and '/menu/' in request.path %}text-db-crust-dark{% else %}text-db-text hover:text-db-crust-dark{% endif %}"
+            class="relative h-[72px] inline-flex items-center px-2 lg:px-2.5 xl:px-3.5 text-sm font-sans font-medium whitespace-nowrap transition-colors {% if request and '/menu/' in request.path %}text-db-crust-dark{% else %}text-db-text hover:text-db-crust-dark{% endif %}"
           >
             <span>Меню страв</span>
-            <span class="nav-accent-bar absolute left-3.5 right-3.5 bottom-0 h-[2px] rounded-full bg-db-crust transition-opacity duration-200 {% if request and '/menu/' in request.path %}opacity-100{% else %}opacity-0{% endif %}" aria-hidden="true"></span>
+            <span class="nav-accent-bar absolute left-2 right-2 lg:left-2.5 lg:right-2.5 xl:left-3.5 xl:right-3.5 bottom-0 h-[2px] rounded-full bg-db-crust transition-opacity duration-200 {% if request and '/menu/' in request.path %}opacity-100{% else %}opacity-0{% endif %}" aria-hidden="true"></span>
           </a>
 
           <a
             href="/#collections"
             data-nav-hash="#collections"
-            class="relative h-[72px] inline-flex items-center px-3.5 text-sm font-sans font-medium text-db-text hover:text-db-crust-dark transition-colors"
+            class="relative h-[72px] inline-flex items-center px-2 lg:px-2.5 xl:px-3.5 text-sm font-sans font-medium whitespace-nowrap text-db-text hover:text-db-crust-dark transition-colors"
           >
             <span>Колекції</span>
-            <span class="nav-accent-bar absolute left-3.5 right-3.5 bottom-0 h-[2px] rounded-full bg-db-crust opacity-0 transition-opacity duration-200" aria-hidden="true"></span>
+            <span class="nav-accent-bar absolute left-2 right-2 lg:left-2.5 lg:right-2.5 xl:left-3.5 xl:right-3.5 bottom-0 h-[2px] rounded-full bg-db-crust opacity-0 transition-opacity duration-200" aria-hidden="true"></span>
           </a>
 
           <a
             href="/#delivery"
             data-nav-hash="#delivery"
-            class="relative h-[72px] inline-flex items-center px-3.5 text-sm font-sans font-medium text-db-text hover:text-db-crust-dark transition-colors"
+            class="relative h-[72px] inline-flex items-center px-2 lg:px-2.5 xl:px-3.5 text-sm font-sans font-medium whitespace-nowrap text-db-text hover:text-db-crust-dark transition-colors"
           >
             <span>Доставка</span>
-            <span class="nav-accent-bar absolute left-3.5 right-3.5 bottom-0 h-[2px] rounded-full bg-db-crust opacity-0 transition-opacity duration-200" aria-hidden="true"></span>
+            <span class="nav-accent-bar absolute left-2 right-2 lg:left-2.5 lg:right-2.5 xl:left-3.5 xl:right-3.5 bottom-0 h-[2px] rounded-full bg-db-crust opacity-0 transition-opacity duration-200" aria-hidden="true"></span>
           </a>
 
           <a
             href="/#about"
             data-nav-hash="#about"
-            class="relative h-[72px] inline-flex items-center px-3.5 text-sm font-sans font-medium text-db-text hover:text-db-crust-dark transition-colors"
+            class="relative h-[72px] inline-flex items-center px-2 lg:px-2.5 xl:px-3.5 text-sm font-sans font-medium whitespace-nowrap text-db-text hover:text-db-crust-dark transition-colors"
           >
             <span>Про нас</span>
-            <span class="nav-accent-bar absolute left-3.5 right-3.5 bottom-0 h-[2px] rounded-full bg-db-crust opacity-0 transition-opacity duration-200" aria-hidden="true"></span>
+            <span class="nav-accent-bar absolute left-2 right-2 lg:left-2.5 lg:right-2.5 xl:left-3.5 xl:right-3.5 bottom-0 h-[2px] rounded-full bg-db-crust opacity-0 transition-opacity duration-200" aria-hidden="true"></span>
           </a>
         </div>
 
@@ -143,6 +143,25 @@
               <circle cx="12" cy="12" r="3"></circle>
             </svg>
           </button>
+          {% endif %}
+
+          {% if is_support_operator %}
+            <a
+              href="{% url 'support:desk_index' %}"
+              class="h-10 px-3 rounded-lg border {% if request and '/support/desk/' in request.path %}border-db-crust bg-db-boucle text-db-crust-dark{% else %}border-db-linen bg-white text-db-text hover:border-db-noir/30{% endif %} inline-flex items-center gap-2 text-sm font-sans font-medium transition-colors shrink-0"
+              title="Пульт підтримки"
+              aria-label="Пульт підтримки"
+            >
+              <svg class="w-4 h-4 text-db-crust-dark shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+              </svg>
+              <span class="hidden lg:inline">Підтримка</span>
+              {% if support_waiting_count > 0 %}
+                <span class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[10px] font-mono font-semibold tabular-nums bg-db-crust-dark text-white rounded-full leading-none select-none">
+                  {{ support_waiting_count }}
+                </span>
+              {% endif %}
+            </a>
           {% endif %}
 
           {% if user.is_authenticated %}
@@ -314,6 +333,26 @@
           </nav>
 
           <div class="border-t border-db-linen bg-db-paper p-3 space-y-2">
+            {% if is_support_operator %}
+              <a
+                href="{% url 'support:desk_index' %}"
+                @click="mobileOpen = false"
+                class="flex items-center justify-between min-h-[44px] px-3 py-2 rounded-lg border {% if request and '/support/desk/' in request.path %}border-db-crust bg-db-boucle text-db-crust-dark{% else %}border-db-linen bg-white text-db-text hover:border-db-noir/30{% endif %} transition-colors"
+              >
+                <span class="inline-flex items-center gap-2 text-sm font-medium">
+                  <svg class="w-4 h-4 text-db-crust-dark shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                  <span>Підтримка</span>
+                </span>
+                {% if support_waiting_count > 0 %}
+                  <span class="inline-flex items-center justify-center min-w-[20px] h-[20px] px-1.5 text-[10px] font-mono font-semibold tabular-nums bg-db-crust-dark text-white rounded-full leading-none select-none">
+                    {{ support_waiting_count }}
+                  </span>
+                {% endif %}
+              </a>
+            {% endif %}
+
             {% if user.is_authenticated %}
               <a href="{% url 'accounts:profile' %}" @click="mobileOpen = false" class="flex flex-col justify-center min-h-[44px] px-3 py-2 rounded-lg bg-white border border-db-linen text-db-text hover:border-db-noir/30 transition-colors">
                 <span class="text-sm font-medium">Особистий кабінет</span>
@@ -346,6 +385,7 @@
     {% block content %}{% endblock %}
   </main>
 
+  {% block footer %}
   <footer class="bg-db-ink text-white pt-14 sm:pt-16 pb-0 overflow-hidden relative border-t border-white/10 mt-auto">
     <div class="max-w-[1440px] mx-auto px-4 sm:px-8">
 
@@ -436,8 +476,11 @@
 
     </div>
   </footer>
+  {% endblock %}
 
-  {% include "support/chat_widget.html" %}
+  {% if not request or request.path|slice:":14" != "/support/desk/" %}
+    {% include "support/chat_widget.html" %}
+  {% endif %}
   {% include "partials/cart_drawer.html" %}
   {% include "partials/toast_messages.html" %}
 
